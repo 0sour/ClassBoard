@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClassBoard · 风格预览</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a1d24;
+    --muted: #6b7280;
+    --line: #e5e8ee;
+    --brand: #3b6ef6;
+    --brand-2: #274bc2;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    padding: 48px 24px 80px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 40px; }
+  header h1 { font-size: 28px; font-weight: 700; letter-spacing: .5px; }
+  header p { margin-top: 10px; color: var(--muted); font-size: 15px; line-height: 1.7; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 22px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    overflow: hidden;
+    text-decoration: none;
+    color: inherit;
+    display: flex;
+    flex-direction: column;
+    transition: transform .2s ease, box-shadow .2s ease;
+  }
+  .card:hover { transform: translateY(-4px); box-shadow: 0 12px 32px rgba(16,24,40,.12); }
+  .thumb {
+    position: relative;
+    height: 210px;
+    border-bottom: 1px solid var(--line);
+    overflow: hidden;
+  }
+  /* 风格缩略预览：仅用 CSS 复刻各风格的配色气质 */
+  .thumb.minimal { background: #fdfdfd; }
+  .thumb.minimal::before {
+    content: ""; position: absolute; inset: 34px 24px auto;
+    height: 14px; border-radius: 6px; background: #eef0f4;
+    box-shadow: 0 34px 0 -2px #eef0f4, 0 68px 0 -2px #eef0f4;
+  }
+  .thumb.minimal::after {
+    content: ""; position: absolute; top: 34px; right: 24px;
+    width: 64px; height: 24px; border-radius: 12px; background: #3b82f6;
+  }
+  .thumb.dark {
+    background: linear-gradient(160deg, #0b1120, #101a33 60%, #16254a);
+  }
+  .thumb.dark::before {
+    content: ""; position: absolute; inset: 30px 22px auto;
+    height: 12px; border-radius: 4px;
+    background: linear-gradient(90deg, rgba(34,211,238,.55), rgba(167,139,250,.55));
+    box-shadow: 0 30px 0 -2px rgba(148,163,184,.28), 0 60px 0 -2px rgba(148,163,184,.22);
+  }
+  .thumb.paper {
+    background: repeating-linear-gradient(0deg, transparent 0 21px, rgba(120,90,40,.06) 21px 22px), #f6efdc;
+  }
+  .thumb.paper::before {
+    content: ""; position: absolute; top: 26px; left: 34px; width: 20px; height: 20px;
+    border-radius: 50%; background: #e28a52;
+    box-shadow: 56px 0 0 -4px #8b5cf6, 112px 0 0 -2px #3b6ef6;
+  }
+  .thumb.paper::after {
+    content: ""; position: absolute; left: 34px; right: 34px; top: 78px;
+    height: 46px; background: #fffdf4; border-radius: 4px;
+    box-shadow: 0 3px 0 rgba(0,0,0,.06);
+    transform: rotate(-.6deg);
+  }
+  .thumb.playful {
+    background: linear-gradient(135deg, #ffd166, #f4a261 55%, #ef8354);
+  }
+  .thumb.playful::before {
+    content: ""; position: absolute; left: 22px; right: 22px; top: 30px; height: 18px;
+    border-radius: 12px; background: #06d6a0;
+    box-shadow: 0 34px 0 -4px #118ab2, 0 68px 0 -4px #ef476f, 0 102px 0 -4px #7b2cbf;
+    border: 3px solid #1a1d24;
+  }
+  .thumb.corp { background: #f5f6f8; }
+  .thumb.corp::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 5px; background: #1f3a5f;
+  }
+  .thumb.corp::after {
+    content: ""; position: absolute; top: 36px; left: 24px; right: 24px;
+    height: 8px; background: #d9dee6;
+    box-shadow: 0 28px 0 -1px #d9dee6, 0 56px 0 -1px #d9dee6, 0 84px 0 -1px #d9dee6;
+  }
+  .thumb.glass {
+    background: linear-gradient(140deg, #4c1d95, #6d28d9 45%, #0891b2);
+  }
+  .thumb.glass::before {
+    content: ""; position: absolute; inset: 26px 22px auto;
+    height: 130px; border-radius: 14px;
+    background: rgba(255,255,255,.18);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,.35);
+    box-shadow: 0 10px 30px rgba(0,0,0,.25);
+  }
+  .info { padding: 18px 20px 20px; }
+  .info h2 { font-size: 17px; font-weight: 600; }
+  .info .tag {
+    display: inline-block; margin-top: 8px; padding: 3px 10px;
+    border-radius: 999px; background: #eef3ff; color: var(--brand-2);
+    font-size: 12px; font-weight: 500;
+  }
+  .info p { margin-top: 10px; font-size: 13.5px; color: var(--muted); line-height: 1.7; }
+  footer { margin-top: 44px; text-align: center; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ClassBoard 风格预览</h1>
+    <p>6 种周课表主页面视觉风格，使用同一份课程数据。<br>点击任意卡片打开对应 HTML 示例，选择后即可作为应用的视觉方向。</p>
+  </header>
+
+  <div class="grid">
+    <a class="card" href="01-minimal-light.html">
+      <div class="thumb minimal"></div>
+      <div class="info">
+        <h2>清新浅色极简</h2>
+        <span class="tag">Minimal Light</span>
+        <p>近白背景、单一主蓝点缀、大留白与纤细边框，克制干净的现代 SaaS 观感，长时间使用不疲劳。</p>
+      </div>
+    </a>
+
+    <a class="card" href="02-tech-dark.html">
+      <div class="thumb dark"></div>
+      <div class="info">
+        <h2>深色科技感</h2>
+        <span class="tag">Tech Dark</span>
+        <p>深蓝黑底配青紫霓虹光晕，玻璃质感卡片与等宽数字，适合偏好科技氛围与夜间使用的家庭。</p>
+      </div>
+    </a>
+
+    <a class="card" href="03-paper-note.html">
+      <div class="thumb paper"></div>
+      <div class="info">
+        <h2>纸感手账</h2>
+        <span class="tag">Paper Note</span>
+        <p>米黄纸面、横格线与手写便签质感，课程块像贴在课表上的便利贴，温暖复古的手账气质。</p>
+      </div>
+    </a>
+
+    <a class="card" href="04-playful-vibrant.html">
+      <div class="thumb playful"></div>
+      <div class="info">
+        <h2>活力多彩</h2>
+        <span class="tag">Playful Vibrant</span>
+        <p>高饱和糖果色、超大圆角与厚实彩色投影，元气满满的 neo-brutalism 风格，适合学生与年轻家庭。</p>
+      </div>
+    </a>
+
+    <a class="card" href="05-corporate-pro.html">
+      <div class="thumb corp"></div>
+      <div class="info">
+        <h2>商务专业</h2>
+        <span class="tag">Corporate Pro</span>
+        <p>深灰蓝中性色、精确表格分隔线与紧凑信息密度，庄重严谨的企业级后台气质，信息优先。</p>
+      </div>
+    </a>
+
+    <a class="card" href="06-glassmorphism.html">
+      <div class="thumb glass"></div>
+      <div class="info">
+        <h2>玻璃拟态</h2>
+        <span class="tag">Glassmorphism</span>
+        <p>深紫到青的渐变背景上悬浮半透明毛玻璃面板，细亮边与柔和投影，现代轻盈有空间层次。</p>
+      </div>
+    </a>
+  </div>
+
+  <footer>ClassBoard · 6 种风格示例，统一数据契约，仅视觉不同 · 双击任意页面即可离线预览</footer>
+</div>
+</body>
+</html>

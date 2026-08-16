@@ -1,0 +1,131 @@
+/* ============================================================
+   ClassBoard · 设计 Token（对齐《03-设计语言文档》v2.0 第 10 节）
+   来源：清新浅色极简（风格预览 01）
+   ============================================================ */
+:root {
+  /* 中性色 */
+  --color-neutral-50: #f6f7f9;
+  --color-neutral-100: #eef1f5;
+  --color-neutral-200: #e7eaf0;
+  --color-neutral-300: #d8dde6;
+  --color-neutral-500: #6b7280;
+  --color-neutral-600: #4b5563;
+  --color-neutral-800: #1f2933;
+  --color-neutral-900: #111827;
+  --color-white: #ffffff;
+
+  /* 主色 */
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #bfdbfe;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+
+  /* 语义色 */
+  --color-success-500: #16a34a;
+  --color-warning-500: #f59e0b;
+  --color-error-500: #ef4444;
+  --color-info-500: #06b6d4;
+  --color-warning-bg: #fffbeb;
+  --color-warning-line: #fde68a;
+  --color-warning-text: #b45309;
+
+  /* 课程色板（底 / 描边 / 文字） */
+  --course-1-bg: #eef4ff;   --course-1-line: #c3d8fb;   --course-1-text: #1e40af;
+  --course-2-bg: #ecf8f0;   --course-2-line: #bce6cd;   --course-2-text: #166534;
+  --course-3-bg: #f3efff;   --course-3-line: #d4c6fb;   --course-3-text: #5b21b6;
+  --course-4-bg: #fdf2e7;   --course-4-line: #f6d5b0;   --course-4-text: #9a3412;
+  --course-5-bg: #ecf9fb;   --course-5-line: #b7e3ec;   --course-5-text: #155e75;
+  --course-6-bg: #fdeef1;   --course-6-line: #f6c4ce;   --course-6-text: #9f1239;
+  --course-7-bg: #eef1fd;   --course-7-line: #c7cff9;   --course-7-text: #3730a3;
+  --course-8-bg: #fdf8e3;   --course-8-line: #f2e2a0;   --course-8-text: #713f12;
+
+  /* 语义层 */
+  --color-brand: var(--color-primary-500);
+  --color-brand-hover: var(--color-primary-600);
+  --color-brand-active: var(--color-primary-700);
+  --color-brand-subtle: var(--color-primary-50);
+  --color-brand-line: var(--color-primary-100);
+  --color-text-primary: var(--color-neutral-900);
+  --color-text-body: var(--color-neutral-800);
+  --color-text-secondary: var(--color-neutral-600);
+  --color-text-tertiary: var(--color-neutral-500);
+  --color-text-inverse: var(--color-white);
+  --color-bg-page: var(--color-neutral-50);
+  --color-bg-surface: var(--color-white);
+  --color-bg-subtle: var(--color-neutral-100);
+  --color-bg-hover: #f1f4f8;
+  --color-bg-corner: #fbfcfe;
+  --color-border-default: var(--color-neutral-200);
+  --color-border-strong: var(--color-neutral-300);
+  --color-border-focus: var(--color-primary-500);
+  --color-feedback-success: var(--color-success-500);
+  --color-feedback-warning: var(--color-warning-500);
+  --color-feedback-error: var(--color-error-500);
+  --color-feedback-info: var(--color-info-500);
+
+  /* 间距 */
+  --spacing-2xs: 3px;
+  --spacing-xs: 6px;
+  --spacing-sm: 9px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+  --spacing-2xl: 32px;
+
+  /* 字体 */
+  --font-family-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13.5px;
+  --font-size-body: 14px;
+  --font-size-lg: 15px;
+  --font-size-xl: 16px;
+  --font-size-2xl: 18px;
+  --font-size-stat: 26px;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-bold: 600;
+  --font-weight-heavy: 700;
+  --line-height-tight: 1.35;
+  --line-height-normal: 1.55;
+
+  /* 圆角 */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-full: 9999px;
+
+  /* 阴影 */
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 6px 18px rgba(16, 24, 40, 0.05);
+  --shadow-hover: 0 4px 12px rgba(16, 24, 40, 0.09);
+  --shadow-pop: 0 12px 32px rgba(16, 24, 40, 0.12), 0 2px 6px rgba(16, 24, 40, 0.06);
+  --shadow-btn: 0 1px 2px rgba(37, 99, 235, 0.28);
+
+  /* 动效 */
+  --motion-duration-fast: 150ms;
+  --motion-duration-normal: 180ms;
+  --motion-duration-slow: 220ms;
+  --motion-duration-reveal: 500ms;
+  --motion-easing-standard: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  /* 层级 */
+  --z-index-grid-corner: 6;
+  --z-index-sticky: 50;
+  --z-index-float: 80;
+  --z-index-modal: 100;
+
+  /* 布局 */
+  --topbar-h: 60px;
+  --topbar-h-mobile: 56px;
+  --side-panel-w: 296px;
+  --ph-desktop: 64px;
+  --ph-tablet: 52px;
+  --ph-mobile: 56px;
+  --tc-w: 84px;
+
+  color-scheme: light;
+}

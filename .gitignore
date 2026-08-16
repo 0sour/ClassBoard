@@ -1,0 +1,15 @@
+# 依赖
+node_modules/
+
+# 构建产物
+frontend/dist/
+dist/
+
+# 本地数据（数据库与 WAL）
+server/lib/data/*.db
+server/lib/data/*.db-*
+
+# 日志与临时文件
+*.log
+.DS_Store
+Thumbs.db

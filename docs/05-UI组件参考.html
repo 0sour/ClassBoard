@@ -1,0 +1,2454 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>ClassBoard · UI 组件参考</title>
+<style>
+/* ==========================================================================
+   ClassBoard 设计系统组件参考页 · v2.2 · 清新浅色极简
+   样式基座：原样嵌入《03-设计语言文档》v2.1 第 10 节（:root Token，唯一权威来源）。
+   页面组件样式一律引用上述 token 变量。v2.x 明确本期不做暗色模式。
+   组件规范对齐《04-UI设计文档》v2.2（组件清单、三态、交互与无障碍）。
+   ========================================================================== */
+
+/* ===== 第 10 节：Token 输出（CSS 自定义属性）— 原样嵌入，唯一权威来源 ===== */
+:root {
+  /* 中性色 */
+  --color-neutral-50: #f6f7f9;
+  --color-neutral-100: #eef1f5;
+  --color-neutral-200: #e7eaf0;
+  --color-neutral-300: #d8dde6;
+  --color-neutral-500: #6b7280;
+  --color-neutral-600: #4b5563;
+  --color-neutral-800: #1f2933;
+  --color-neutral-900: #111827;
+  --color-white: #ffffff;
+
+  /* 主色 */
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #bfdbfe;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+
+  /* 语义色 */
+  --color-success-500: #16a34a;
+  --color-warning-500: #f59e0b;
+  --color-error-500: #ef4444;
+  --color-info-500: #06b6d4;
+  --color-warning-bg: #fffbeb;
+  --color-warning-line: #fde68a;
+  --color-warning-text: #b45309;
+
+  /* 课程色板（底 / 描边 / 文字） */
+  --course-1-bg: #eef4ff;   --course-1-line: #c3d8fb;   --course-1-text: #1e40af;
+  --course-2-bg: #ecf8f0;   --course-2-line: #bce6cd;   --course-2-text: #166534;
+  --course-3-bg: #f3efff;   --course-3-line: #d4c6fb;   --course-3-text: #5b21b6;
+  --course-4-bg: #fdf2e7;   --course-4-line: #f6d5b0;   --course-4-text: #9a3412;
+  --course-5-bg: #ecf9fb;   --course-5-line: #b7e3ec;   --course-5-text: #155e75;
+  --course-6-bg: #fdeef1;   --course-6-line: #f6c4ce;   --course-6-text: #9f1239;
+  --course-7-bg: #eef1fd;   --course-7-line: #c7cff9;   --course-7-text: #3730a3;
+  --course-8-bg: #fdf8e3;   --course-8-line: #f2e2a0;   --course-8-text: #713f12;
+
+  /* 语义层 */
+  --color-brand: var(--color-primary-500);
+  --color-brand-hover: var(--color-primary-600);
+  --color-brand-active: var(--color-primary-700);
+  --color-brand-subtle: var(--color-primary-50);
+  --color-brand-line: var(--color-primary-100);
+  --color-text-primary: var(--color-neutral-900);
+  --color-text-body: var(--color-neutral-800);
+  --color-text-secondary: var(--color-neutral-600);
+  --color-text-tertiary: var(--color-neutral-500);
+  --color-text-inverse: var(--color-white);
+  --color-bg-page: var(--color-neutral-50);
+  --color-bg-surface: var(--color-white);
+  --color-bg-subtle: var(--color-neutral-100);
+  --color-bg-hover: #f1f4f8;
+  --color-bg-corner: #fbfcfe;
+  --color-border-default: var(--color-neutral-200);
+  --color-border-strong: var(--color-neutral-300);
+  --color-border-focus: var(--color-primary-500);
+  --color-feedback-success: var(--color-success-500);
+  --color-feedback-warning: var(--color-warning-500);
+  --color-feedback-error: var(--color-error-500);
+  --color-feedback-info: var(--color-info-500);
+
+  /* 间距 */
+  --spacing-2xs: 3px;
+  --spacing-xs: 6px;
+  --spacing-sm: 9px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+  --spacing-2xl: 32px;
+
+  /* 字体 */
+  --font-family-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13.5px;
+  --font-size-body: 14px;
+  --font-size-lg: 15px;
+  --font-size-xl: 16px;
+  --font-size-2xl: 18px;
+  --font-size-stat: 26px;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-bold: 600;
+  --font-weight-heavy: 700;
+  --line-height-tight: 1.35;
+  --line-height-normal: 1.55;
+
+  /* 圆角 */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-full: 9999px;
+
+  /* 阴影 */
+  --shadow-card: 0 1px 2px rgba(16,24,40,.04), 0 6px 18px rgba(16,24,40,.05);
+  --shadow-hover: 0 4px 12px rgba(16,24,40,.09);
+  --shadow-pop: 0 12px 32px rgba(16,24,40,.12), 0 2px 6px rgba(16,24,40,.06);
+  --shadow-btn: 0 1px 2px rgba(37,99,235,.28);
+
+  /* 动效 */
+  --motion-duration-fast: 150ms;
+  --motion-duration-normal: 180ms;
+  --motion-duration-slow: 220ms;
+  --motion-duration-reveal: 500ms;
+  --motion-easing-standard: cubic-bezier(.2,.7,.2,1);
+
+  /* 层级 */
+  --z-index-grid-corner: 6;
+  --z-index-sticky: 50;
+  --z-index-float: 80;
+  --z-index-modal: 100;
+
+  /* 布局扩展 Token（v2.1 补充，与 frontend/src/styles/tokens.css 对齐） */
+  --topbar-h: 60px;
+  --topbar-h-mobile: 56px;
+  --side-panel-w: 296px;
+  --ph-desktop: 64px;
+  --ph-tablet: 52px;
+  --ph-mobile: 56px;
+  --tc-w: 84px;
+
+  color-scheme: light;
+}
+
+/* ===== 页面辅助（页面演示私有常量，非产品契约 token；一律引用契约变量） ===== */
+:root {
+  --content-max-width: 1180px;
+  --ph: var(--ph-desktop);    /* 课表每节行高（演示容器别名，产品用 --ph-desktop/tablet/mobile） */
+  --color-scrim: rgba(15, 23, 42, .42);
+  --color-brand-faint: rgba(59, 130, 246, .045);
+}
+
+/* ===== 基础 ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; color-scheme: light; }
+body {
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-body);
+  background: var(--color-bg-page);
+  -webkit-font-smoothing: antialiased;
+}
+body.no-scroll { overflow: hidden; }
+button { font-family: inherit; }
+:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 2px; border-radius: var(--radius-sm); }
+::selection { background: var(--color-brand-subtle); }
+svg { display: block; }
+[hidden] { display: none !important; }
+.icon { width: 24px; height: 24px; flex: none; }
+.icon--12 { width: 12px; height: 12px; }
+.icon--14 { width: 14px; height: 14px; }
+.icon--16 { width: 16px; height: 16px; }
+.icon--18 { width: 18px; height: 18px; }
+.icon--20 { width: 20px; height: 20px; }
+.icon--24 { width: 24px; height: 24px; }
+.icon--28 { width: 28px; height: 28px; }
+
+/* 入场动画（克制） */
+.reveal { opacity: 0; animation: fadeUp var(--motion-duration-reveal) var(--motion-easing-standard) forwards; }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; animation: none; }
+  * { transition: none !important; animation: none !important; }
+}
+
+.container { max-width: var(--content-max-width); margin: 0 auto; padding: 0 var(--spacing-xl); }
+
+/* ===== 顶部：毛玻璃品牌栏 + 胶囊二级导航 ===== */
+.app-header {
+  position: sticky; top: 0; z-index: var(--z-index-sticky);
+  background: rgba(255, 255, 255, .92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--color-border-default);
+}
+.app-header__top {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 60px;
+}
+.app-brand { display: flex; align-items: center; gap: var(--spacing-sm); min-width: 0; }
+.app-brand__mark {
+  width: 32px; height: 32px; flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-brand); color: var(--color-text-inverse);
+  display: flex; align-items: center; justify-content: center;
+}
+.app-brand__name {
+  font-size: var(--font-size-xl); font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary); letter-spacing: .2px; white-space: nowrap;
+}
+.app-brand__sub, .app-header__meta {
+  font-size: var(--font-size-sm); color: var(--color-text-tertiary); white-space: nowrap;
+  padding: 2px 10px; border: 1px solid var(--color-border-default); border-radius: var(--radius-full);
+}
+.section-nav {
+  display: flex; gap: var(--spacing-xs);
+  padding: 0 0 var(--spacing-md);
+  overflow-x: auto; scrollbar-width: none;
+}
+.section-nav::-webkit-scrollbar { display: none; }
+.section-nav__link {
+  flex: none; padding: var(--spacing-xs) var(--spacing-md);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-sm); color: var(--color-text-secondary);
+  text-decoration: none; white-space: nowrap;
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard),
+              background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.section-nav__link:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
+.section-nav__link.is-active {
+  background: var(--color-brand-subtle); color: var(--color-brand);
+  font-weight: var(--font-weight-medium);
+}
+
+/* ===== 页首介绍 ===== */
+.page-intro { padding: var(--spacing-xl) 0 var(--spacing-xl); }
+.page-intro h1 {
+  font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary); line-height: var(--line-height-tight);
+}
+.page-intro p {
+  margin-top: var(--spacing-sm); max-width: 780px;
+  font-size: var(--font-size-body); color: var(--color-text-secondary);
+}
+.page-intro__meta { display: flex; flex-wrap: wrap; gap: var(--spacing-sm); margin-top: var(--spacing-lg); }
+.meta-chip {
+  font-size: var(--font-size-sm); color: var(--color-text-secondary);
+  padding: var(--spacing-xs) var(--spacing-md); border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-full); background: var(--color-bg-surface);
+}
+
+/* ===== 区块骨架 ===== */
+.section { padding: var(--spacing-2xl) 0; scroll-margin-top: 120px; }
+.section + .section { border-top: 1px solid var(--color-border-default); }
+.section__head { display: flex; align-items: baseline; gap: var(--spacing-md); margin-bottom: var(--spacing-xl); }
+.section__index {
+  font-size: var(--font-size-sm); font-weight: var(--font-weight-bold);
+  color: var(--color-brand); font-variant-numeric: tabular-nums;
+}
+.section__title { font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+
+.demo {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-xl);
+  box-shadow: var(--shadow-card);
+}
+.demo h3 { font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.demo__desc { margin-top: var(--spacing-xs); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.demo__content { margin-top: var(--spacing-lg); }
+.demo-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-md); }
+.demo-grid { display: grid; gap: var(--spacing-xl); margin-top: var(--spacing-xl); }
+.demo-grid--2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.demo-grid--3 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.demo-note {
+  display: flex; align-items: center; gap: var(--spacing-xs);
+  margin-top: var(--spacing-md);
+  font-size: var(--font-size-xs); color: var(--color-text-secondary);
+}
+.sub-label {
+  margin: var(--spacing-lg) 0 var(--spacing-sm);
+  font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); color: var(--color-text-secondary);
+}
+.sub-label:first-child { margin-top: 0; }
+
+/* ===== 01 设计 Token 总览 ===== */
+.swatch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: var(--spacing-sm); }
+.swatch {
+  display: flex; flex-direction: column; justify-content: space-between; gap: var(--spacing-xs);
+  min-height: 64px; padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs); line-height: var(--line-height-tight);
+}
+.swatch__name { font-weight: var(--font-weight-medium); }
+.swatch__hex { opacity: .82; font-variant-numeric: tabular-nums; }
+
+/* 课程色板：浅底 + 描边 + 深色文字 小色块卡，三值三圆点 */
+.course-swatch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: var(--spacing-sm); }
+.course-swatch {
+  display: flex; flex-direction: column; gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  background: var(--sw-bg); border: 1px solid var(--sw-line);
+}
+.course-swatch__name { font-size: var(--font-size-sm); font-weight: var(--font-weight-bold); color: var(--sw-text); font-variant-numeric: tabular-nums; }
+.course-swatch__sample { font-size: var(--font-size-xs); color: var(--sw-text); opacity: .88; }
+.course-swatch__triple { display: flex; align-items: center; gap: 6px; margin-top: auto; }
+.course-swatch__triple .dot { width: 12px; height: 12px; border-radius: 3px; }
+.course-swatch__hex { font-size: var(--font-size-xs); color: var(--color-text-tertiary); font-variant-numeric: tabular-nums; }
+
+.type-row {
+  display: flex; align-items: baseline; gap: var(--spacing-lg);
+  padding: 6px 0; border-bottom: 1px dashed var(--color-border-default);
+}
+.type-row:last-child { border-bottom: none; }
+.type-row__label { flex: none; width: 190px; font-size: var(--font-size-xs); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.type-row__sample { color: var(--color-text-primary); font-variant-numeric: tabular-nums; }
+.t-2xl { font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); line-height: var(--line-height-tight); }
+.t-xl  { font-size: var(--font-size-xl);  font-weight: var(--font-weight-bold); line-height: var(--line-height-tight); }
+.t-lg  { font-size: var(--font-size-lg);  font-weight: var(--font-weight-bold); line-height: var(--line-height-tight); }
+.t-body { font-size: var(--font-size-body); }
+.t-md  { font-size: var(--font-size-md);  font-weight: var(--font-weight-medium); }
+.t-sm  { font-size: var(--font-size-sm); }
+.t-xs  { font-size: var(--font-size-xs); }
+.t-stat { font-size: var(--font-size-stat); font-weight: var(--font-weight-heavy); line-height: var(--line-height-tight); }
+
+.space-row { display: flex; align-items: center; gap: var(--spacing-md); padding: 5px 0; }
+.space-row__label { flex: none; width: 190px; font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.space-row__bar { height: 14px; flex: none; background: var(--color-brand); border-radius: var(--radius-sm); }
+
+.radius-grid, .shadow-grid { display: flex; flex-wrap: wrap; gap: var(--spacing-xl); }
+.radius-item, .shadow-item { display: flex; flex-direction: column; align-items: center; gap: var(--spacing-sm); }
+.radius-item__box { width: 48px; height: 48px; background: var(--color-brand-subtle); border: 1px solid var(--color-border-default); }
+.radius-item__name, .shadow-item__name { font-size: var(--font-size-xs); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.shadow-card-demo {
+  width: 168px; height: 88px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default); border-radius: var(--radius-lg);
+  font-size: var(--font-size-xs); color: var(--color-text-tertiary);
+}
+
+/* ===== 02 按钮 Button ===== */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--spacing-sm);
+  border: 1px solid transparent; border-radius: var(--radius-sm);
+  font-size: var(--font-size-md); font-weight: var(--font-weight-medium);
+  cursor: pointer; text-decoration: none; white-space: nowrap;
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard),
+             border-color var(--motion-duration-fast) var(--motion-easing-standard),
+             color var(--motion-duration-fast) var(--motion-easing-standard),
+             box-shadow var(--motion-duration-fast) var(--motion-easing-standard),
+             transform var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.btn--sm { height: 32px; padding: 0 var(--spacing-md); font-size: var(--font-size-sm); }
+.btn--md { height: 40px; padding: 0 var(--spacing-lg); }
+.btn--lg { height: 48px; padding: 0 var(--spacing-xl); }
+.btn--primary { background: var(--color-brand); color: var(--color-text-inverse); box-shadow: var(--shadow-btn); }
+.btn--primary:hover { background: var(--color-brand-hover); box-shadow: 0 3px 8px rgba(37, 99, 235, .32); }
+.btn--primary:active { background: var(--color-brand-active); transform: translateY(1px); }
+.btn--secondary { background: var(--color-bg-surface); border-color: var(--color-border-default); color: var(--color-text-body); }
+.btn--secondary:hover { background: var(--color-bg-hover); border-color: var(--color-border-strong); }
+.btn--ghost { background: transparent; color: var(--color-brand); }
+.btn--ghost:hover { background: var(--color-brand-subtle); }
+.btn--ghost:active { background: var(--color-primary-100); }
+.btn--danger { background: var(--color-feedback-error); color: var(--color-text-inverse); }
+.btn--danger:hover { filter: brightness(.94); }
+.btn--danger:active { filter: brightness(.88); transform: translateY(1px); }
+.btn:disabled { opacity: .5; cursor: not-allowed; pointer-events: none; }
+.btn__spinner {
+  display: none; width: 14px; height: 14px; flex: none;
+  border: 2px solid currentColor; border-top-color: transparent;
+  border-radius: var(--radius-full);
+  animation: spin .7s linear infinite;
+}
+.btn.is-loading { cursor: wait; pointer-events: none; }
+.btn.is-loading .btn__spinner { display: inline-block; }
+.btn.is-loading .btn__label { opacity: .72; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===== 03 输入控件 ===== */
+.field { display: flex; flex-direction: column; gap: var(--spacing-sm); margin-bottom: var(--spacing-lg); }
+.field:last-child { margin-bottom: 0; }
+.field__label { font-size: var(--font-size-md); color: var(--color-text-body); font-weight: var(--font-weight-medium); }
+.field__error { display: flex; align-items: center; gap: var(--spacing-xs); font-size: var(--font-size-xs); color: var(--color-feedback-error); }
+.input {
+  width: 100%; height: 40px; padding: 0 var(--spacing-md);
+  border: 1px solid var(--color-border-default); border-radius: var(--radius-sm);
+  background: var(--color-bg-surface); color: var(--color-text-body);
+  font-family: inherit; font-size: var(--font-size-md);
+  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard),
+             outline-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.input:focus { outline: 2px solid var(--color-border-focus); outline-offset: 0; border-color: var(--color-border-focus); }
+.input::placeholder { color: var(--color-text-tertiary); }
+.input:disabled { background: var(--color-bg-subtle); color: var(--color-text-tertiary); cursor: not-allowed; }
+.input--invalid, .field--error .input { border-color: var(--color-feedback-error); }
+.input--invalid:focus, .field--error .input:focus { border-color: var(--color-feedback-error); outline-color: var(--color-feedback-error); }
+.input-wrap { position: relative; }
+.input-wrap__icon {
+  position: absolute; left: var(--spacing-md); top: 50%; transform: translateY(-50%);
+  color: var(--color-text-tertiary); pointer-events: none;
+}
+.input-wrap__icon--right { left: auto; right: var(--spacing-md); }
+.input--icon { padding-left: 36px; }
+.input--with-right-icon { padding-right: 40px; }
+.select-native { appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 40px; }
+
+/* 自定义下拉 Select */
+.select { position: relative; }
+.select__trigger {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-sm);
+  width: 100%; height: 40px; padding: 0 var(--spacing-md);
+  background: var(--color-bg-surface); color: var(--color-text-body);
+  border: 1px solid var(--color-border-default); border-radius: var(--radius-md);
+  font-size: var(--font-size-md); cursor: pointer; text-align: left;
+  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard),
+             outline-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.select__trigger:hover { border-color: var(--color-border-strong); }
+.select.is-open .select__trigger { border-color: var(--color-border-focus); outline: 2px solid var(--color-border-focus); outline-offset: 0; }
+.select__trigger .icon { color: var(--color-text-tertiary); transition: transform var(--motion-duration-fast) var(--motion-easing-standard); }
+.select.is-open .select__trigger .icon { transform: rotate(180deg); }
+.select__menu {
+  position: absolute; top: calc(100% + 6px); left: 0; min-width: 100%;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop); padding: var(--spacing-xs);
+  z-index: var(--z-index-float);
+  visibility: hidden; opacity: 0; transform: translateY(-4px);
+  transition: opacity var(--motion-duration-normal) var(--motion-easing-standard),
+             transform var(--motion-duration-normal) var(--motion-easing-standard),
+             visibility 0s linear var(--motion-duration-normal);
+}
+.select.is-open .select__menu { visibility: visible; opacity: 1; transform: none; transition: opacity var(--motion-duration-normal) var(--motion-easing-standard), transform var(--motion-duration-normal) var(--motion-easing-standard); }
+.select-option {
+  display: flex; align-items: center; gap: var(--spacing-sm);
+  width: 100%; padding: var(--spacing-sm) var(--spacing-md);
+  background: none; border: none; border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm); color: var(--color-text-body);
+  cursor: pointer; text-align: left;
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.select-option:hover { background: var(--color-bg-subtle); }
+.select-option.is-selected { background: var(--color-brand-subtle); color: var(--color-brand); font-weight: var(--font-weight-medium); }
+.select-option__check { display: none; margin-left: auto; color: var(--color-brand); }
+.select-option.is-selected .select-option__check { display: inline-block; }
+
+/* 开关 Switch */
+.switch-row { display: flex; align-items: center; gap: var(--spacing-md); padding: 6px 0; }
+.switch-row label { flex: 1; font-size: var(--font-size-md); color: var(--color-text-body); cursor: pointer; }
+.switch {
+  appearance: none; -webkit-appearance: none; position: relative; flex: none;
+  width: 44px; height: 26px; margin: 0;
+  background: var(--color-bg-subtle); border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background-color var(--motion-duration-normal) var(--motion-easing-standard);
+}
+.switch::after {
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 20px; height: 20px;
+  background: var(--color-white); border-radius: var(--radius-full);
+  box-shadow: var(--shadow-card);
+  transition: transform var(--motion-duration-normal) var(--motion-easing-standard);
+}
+.switch:checked { background: var(--color-brand); }
+.switch:checked::after { transform: translateX(18px); }
+.switch:disabled { opacity: .5; cursor: not-allowed; }
+
+/* 日期选择 */
+.date-field { position: relative; }
+.date-field .input { padding-right: 44px; cursor: pointer; }
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; flex: none;
+  background: transparent; border: none; border-radius: var(--radius-sm);
+  color: var(--color-text-secondary); cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard),
+             color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.icon-btn:hover { background: var(--color-bg-hover); color: var(--color-text-body); }
+.icon-btn--inset { position: absolute; right: 4px; top: 4px; width: 32px; height: 32px; }
+.popover {
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: var(--z-index-float);
+  width: 280px; padding: var(--spacing-md);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  visibility: hidden; opacity: 0; transform: translateY(-4px);
+  transition: opacity var(--motion-duration-normal) var(--motion-easing-standard),
+             transform var(--motion-duration-normal) var(--motion-easing-standard),
+             visibility 0s linear var(--motion-duration-normal);
+}
+.popover.is-open { visibility: visible; opacity: 1; transform: none; transition: opacity var(--motion-duration-normal) var(--motion-easing-standard), transform var(--motion-duration-normal) var(--motion-easing-standard); }
+.date-head { display: flex; align-items: center; justify-content: space-between; }
+.date-head__title { font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); color: var(--color-text-primary); }
+.date-nav {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  background: none; border: none; border-radius: var(--radius-sm);
+  color: var(--color-text-secondary); cursor: pointer;
+}
+.date-nav:hover { background: var(--color-bg-subtle); color: var(--color-text-body); }
+.date-weekdays {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  margin-top: var(--spacing-sm);
+  text-align: center; font-size: var(--font-size-xs); color: var(--color-text-tertiary);
+}
+.date-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin-top: var(--spacing-xs); }
+.date-blank { height: 32px; }
+.date-cell {
+  height: 32px; border: none; border-radius: var(--radius-sm);
+  background: none; cursor: pointer;
+  font-family: inherit; font-size: var(--font-size-sm); color: var(--color-text-body);
+  font-variant-numeric: tabular-nums;
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.date-cell:hover { background: var(--color-bg-subtle); }
+.date-cell--today { color: var(--color-brand); font-weight: var(--font-weight-bold); }
+.date-cell--selected { background: var(--color-brand); color: var(--color-text-inverse); }
+.date-cell--selected:hover { background: var(--color-brand); }
+
+/* ===== 04 标签与徽章 ===== */
+.tag {
+  display: inline-flex; align-items: center; gap: var(--spacing-xs);
+  height: 24px; padding: 0 10px;
+  border: 1px solid var(--tag-line, var(--color-brand-line));
+  border-radius: var(--radius-full);
+  background: var(--tag-bg, var(--color-brand-subtle));
+  color: var(--tag-text, var(--color-brand));
+  font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); line-height: 1;
+}
+.tag--sm { height: 20px; padding: 0 8px; }
+.tag--success { --tag-bg: var(--course-2-bg); --tag-line: var(--course-2-line); --tag-text: var(--color-feedback-success); }
+.tag--warning { --tag-bg: var(--color-warning-bg); --tag-line: var(--color-warning-line); --tag-text: var(--color-warning-text); }
+.tag--error   { --tag-bg: var(--course-6-bg); --tag-line: var(--course-6-line); --tag-text: var(--color-feedback-error); }
+.tag--info    { --tag-bg: var(--course-5-bg); --tag-line: var(--course-5-line); --tag-text: var(--color-feedback-info); }
+.tag--outline { --tag-bg: transparent; --tag-line: var(--color-border-default); --tag-text: var(--color-text-secondary); }
+.tag__close {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; padding: 0;
+  background: none; border: none; border-radius: var(--radius-full);
+  color: currentColor; opacity: .7; cursor: pointer;
+}
+.tag__close:hover { opacity: 1; background: rgba(0, 0, 0, .08); }
+.badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 6px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs); font-weight: var(--font-weight-bold); line-height: 1;
+}
+.badge--brand   { background: var(--color-brand); color: var(--color-text-inverse); }
+.badge--success { background: var(--color-feedback-success); color: var(--color-text-inverse); }
+.badge--error   { background: var(--color-feedback-error); color: var(--color-text-inverse); }
+.badge--warning { background: var(--color-feedback-warning); color: var(--color-text-inverse); }
+.badge--neutral { background: var(--color-bg-subtle); color: var(--color-text-secondary); }
+.badge--dot { width: 8px; height: 8px; min-width: 0; padding: 0; }
+.icon-wrap { position: relative; display: inline-flex; }
+.icon-wrap .badge { position: absolute; top: -6px; right: -10px; }
+.status-dot-row { display: inline-flex; align-items: center; gap: var(--spacing-sm); font-size: var(--font-size-sm); color: var(--color-text-body); }
+
+/* ===== 05 卡片 Card ===== */
+.card {
+  display: flex; flex-direction: column;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: var(--spacing-xl);
+  transition: box-shadow var(--motion-duration-normal) var(--motion-easing-standard),
+             transform var(--motion-duration-normal) var(--motion-easing-standard);
+}
+.card:hover { box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+.card__head { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-sm); }
+.card__head h3 { font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.card__head-actions { display: flex; align-items: center; gap: var(--spacing-xs); }
+.card__text { margin-top: var(--spacing-sm); font-size: var(--font-size-sm); color: var(--color-text-body); }
+.card__meta {
+  display: flex; align-items: center; gap: var(--spacing-xs);
+  margin-top: var(--spacing-md);
+  font-size: var(--font-size-xs); color: var(--color-text-secondary);
+}
+.card__meta .icon { color: var(--color-text-tertiary); }
+.card__foot {
+  display: flex; align-items: center; justify-content: flex-end; gap: var(--spacing-sm);
+  margin-top: var(--spacing-lg); padding-top: var(--spacing-md);
+  border-top: 1px solid var(--color-border-default);
+}
+.card__foot--left { justify-content: flex-start; }
+.card--course { padding: 0; overflow: hidden; }
+.card__course-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-sm);
+  padding: var(--spacing-lg);
+  background: var(--cc-bg); border-bottom: 1px solid var(--cc-line);
+}
+.card__course-head h3 { font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); color: var(--cc-text); }
+.card__course-body { display: flex; flex-direction: column; gap: 6px; padding: var(--spacing-lg); }
+.card__course-body .card__meta { margin-top: 0; }
+.meta-dot { width: 6px; height: 6px; flex: none; border-radius: var(--radius-full); background: var(--cc-text); }
+
+/* ===== 06 课表组件 ===== */
+.tabs {
+  display: inline-flex; gap: 2px; padding: 3px;
+  background: var(--color-bg-subtle); border: 1px solid var(--color-border-default); border-radius: var(--radius-md);
+}
+.tab {
+  height: 34px; padding: 0 var(--spacing-lg);
+  background: transparent; border: none; border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm); color: var(--color-text-secondary); cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard),
+             color var(--motion-duration-fast) var(--motion-easing-standard),
+             box-shadow var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.tab:hover { color: var(--color-text-primary); }
+.tab.is-active { background: var(--color-bg-surface); color: var(--color-text-primary); font-weight: var(--font-weight-medium); box-shadow: var(--shadow-card); }
+.tab-panel[hidden] { display: none; }
+.tab-panel__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--spacing-md); margin-top: var(--spacing-xl); }
+.tab-panel__head h4 { font-size: var(--font-size-md); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.tab-panel__head p { font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+
+.legend { display: flex; flex-wrap: wrap; gap: var(--spacing-sm) var(--spacing-lg); margin-top: var(--spacing-lg); }
+.legend__item { display: inline-flex; align-items: center; gap: var(--spacing-xs); font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.legend__item::before { content: ''; width: 12px; height: 12px; border-radius: 4px; background: var(--c-bg); border: 1px solid var(--c-line); }
+
+/* 周视图网格（复刻风格预览 01：角落/时间列/表头 bg-corner、今天列主色浅底、课程色块浅底描边） */
+.week-scroll { overflow: hidden; margin-top: var(--spacing-lg); }
+.week-grid {
+  display: grid;
+  grid-template-columns: var(--tc-w) minmax(0, 1fr);
+  grid-template-rows: auto repeat(12, var(--ph));
+}
+.wg-day-cols { grid-column: 2; grid-row: 1/14; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); min-width: 0; }
+.wg-corner {
+  grid-column: 1; grid-row: 1;
+  position: sticky; top: 0; left: 0; z-index: var(--z-index-grid-corner);
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-bg-corner);
+  border-right: 1px solid var(--color-border-default); border-bottom: 1px solid var(--color-border-default);
+}
+.wg-corner__label { font-size: var(--font-size-xs); color: var(--color-text-tertiary); }
+.wg-time-col {
+  grid-column: 1; grid-row: 2/14;
+  position: sticky; left: 0; z-index: 4;
+  display: grid; grid-template-rows: repeat(12, var(--ph));
+  background: var(--color-bg-corner); border-right: 1px solid var(--color-border-default);
+}
+.wg-time-cell { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.wg-time-cell b { font-size: var(--font-size-sm); font-weight: var(--font-weight-bold); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.wg-time-cell span { font-size: var(--font-size-xs); color: var(--color-text-tertiary); font-variant-numeric: tabular-nums; }
+
+.wg-day-col { min-width: 0; }
+.wg-day-col:not(:first-child) { border-left: 1px solid var(--color-border-default); }
+.wg-day-head {
+  position: sticky; top: 0; z-index: 5;
+  background: var(--color-bg-corner); border-bottom: 1px solid var(--color-border-default);
+  padding: 10px 6px 9px;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  transition: background-color var(--motion-duration-normal) var(--motion-easing-standard);
+}
+.wg-day-head .wd { display: flex; align-items: center; gap: 5px; font-size: var(--font-size-md); font-weight: var(--font-weight-bold); color: var(--color-text-secondary); }
+.wg-day-head .pill {
+  font-size: var(--font-size-xs); font-weight: var(--font-weight-bold); color: var(--color-text-inverse);
+  background: var(--color-brand); border-radius: var(--radius-full); padding: 1px 7px; line-height: 1.5;
+}
+.wg-day-head .dt { font-size: var(--font-size-xs); color: var(--color-text-tertiary); font-variant-numeric: tabular-nums; }
+.wg-day-col.today .wg-day-head { background: var(--color-brand-subtle); }
+.wg-day-col.today .wd { color: var(--color-brand-hover); }
+.wg-day-col.today .dt { color: var(--color-brand-hover); font-weight: var(--font-weight-bold); }
+.wg-day-body {
+  position: relative;
+  display: grid; grid-template-rows: repeat(12, var(--ph));
+  background-image: repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--ph) - 1px), var(--color-border-default) var(--ph));
+}
+.wg-day-col.today .wg-day-body { background-color: var(--color-brand-faint); }
+
+/* 课程色块：浅底 + 同色系描边 + 深色文字 */
+.course-block {
+  position: relative; margin: var(--spacing-2xs);
+  border: 1px solid var(--cb-line); border-radius: var(--radius-sm);
+  background: var(--cb-bg);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  text-align: left;
+  display: flex; flex-direction: column; gap: 3px; overflow: hidden; min-height: 0;
+  cursor: pointer;
+  transition: box-shadow var(--motion-duration-normal) var(--motion-easing-standard),
+             transform var(--motion-duration-normal) var(--motion-easing-standard),
+             border-color var(--motion-duration-normal) var(--motion-easing-standard);
+}
+.course-block:hover { box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+.course-block:active { transform: none; }
+.course-block__name {
+  font-size: var(--font-size-sm); font-weight: var(--font-weight-bold);
+  color: var(--cb-text); line-height: var(--line-height-tight);
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.course-block__loc { font-size: var(--font-size-xs); color: var(--color-text-secondary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.course-block__weeks {
+  align-self: flex-start; margin-top: auto;
+  padding: 1px 6px; border-radius: var(--radius-full);
+  background: var(--cb-line); color: var(--cb-text);
+  font-size: var(--font-size-xs); line-height: 1.4; font-weight: var(--font-weight-medium);
+}
+
+/* 日视图卡片列表 */
+.day-list { display: flex; flex-direction: column; gap: var(--spacing-md); margin-top: var(--spacing-lg); }
+.day-card {
+  display: flex; align-items: center; gap: var(--spacing-lg);
+  width: 100%; text-align: left;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 15px 18px;
+  cursor: pointer;
+  transition: box-shadow var(--motion-duration-normal) var(--motion-easing-standard),
+             transform var(--motion-duration-normal) var(--motion-easing-standard),
+             border-color var(--motion-duration-normal) var(--motion-easing-standard);
+}
+.day-card:hover { box-shadow: var(--shadow-hover); transform: translateY(-1px); border-color: var(--color-border-strong); }
+.day-card__dot { width: 10px; height: 10px; flex: none; border-radius: 3px; background: var(--dc-text); }
+.day-card__time { font-size: var(--font-size-md); font-weight: var(--font-weight-bold); min-width: 96px; color: var(--color-text-body); font-variant-numeric: tabular-nums; }
+.day-card__main { flex: 1; min-width: 0; }
+.day-card__name { display: block; font-size: var(--font-size-body); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.day-card__meta { display: block; font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-top: 2px; }
+.day-card__slot { font-size: var(--font-size-xs); color: var(--color-text-tertiary); white-space: nowrap; }
+
+/* ===== 07 弹层 ===== */
+.overlay {
+  position: fixed; inset: 0; z-index: var(--z-index-modal);
+  background: var(--color-scrim);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--spacing-xl);
+  visibility: hidden; opacity: 0;
+  transition: opacity var(--motion-duration-slow) var(--motion-easing-standard),
+             visibility 0s linear var(--motion-duration-slow);
+}
+.overlay.is-open { visibility: visible; opacity: 1; transition: opacity var(--motion-duration-slow) var(--motion-easing-standard); }
+.modal {
+  width: min(400px, 100%); max-height: calc(100vh - 64px); overflow-y: auto;
+  background: var(--color-bg-surface);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-pop);
+  padding: var(--spacing-xl);
+  transform: translateY(12px) scale(.98);
+  transition: transform var(--motion-duration-slow) var(--motion-easing-standard);
+}
+.overlay.is-open .modal { transform: none; }
+.modal--sm { width: min(400px, 100%); }
+.modal__handle { display: none; width: 40px; height: 4px; margin: 0 auto var(--spacing-md); background: var(--color-border-default); border-radius: var(--radius-full); }
+.modal__head { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-md); }
+.modal__title-row { display: flex; align-items: center; gap: var(--spacing-sm); min-width: 0; }
+.modal__dot { width: 10px; height: 10px; flex: none; border-radius: 3px; }
+.modal__head h3 { font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.modal__body { display: flex; flex-direction: column; gap: var(--spacing-lg); margin-top: var(--spacing-lg); }
+.modal__desc { font-size: var(--font-size-sm); color: var(--color-text-body); }
+.modal__foot { display: flex; justify-content: flex-end; gap: var(--spacing-md); margin-top: var(--spacing-xl); }
+.m-row { display: grid; grid-template-columns: 88px 1fr; gap: var(--spacing-md); font-size: var(--font-size-sm); align-items: start; }
+.m-row__k { display: flex; align-items: center; gap: 7px; color: var(--color-text-tertiary); padding-top: 1px; }
+.m-row__k .icon { width: 14px; height: 14px; }
+.m-row__v { color: var(--color-text-body); font-weight: var(--font-weight-medium); }
+.m-note .m-row__v {
+  font-weight: var(--font-weight-regular); color: var(--color-text-secondary); line-height: var(--line-height-normal);
+  background: var(--color-bg-subtle); border: 1px solid var(--color-border-default); border-radius: var(--radius-sm); padding: 8px 10px;
+}
+.swatch-picks { display: flex; flex-wrap: wrap; gap: var(--spacing-sm); }
+.swatch-pick {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; padding: 0;
+  background: var(--sw-bg); color: var(--sw-text);
+  border: 1px solid var(--sw-line); border-radius: var(--radius-sm); cursor: pointer;
+  transition: transform var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.swatch-pick:hover { transform: scale(1.08); }
+.swatch-pick .icon { display: none; }
+.swatch-pick.is-selected { outline: 2px solid var(--color-border-focus); outline-offset: 1px; }
+.swatch-pick.is-selected .icon { display: block; }
+
+.overlay--sheet { align-items: flex-end; padding: 0; }
+.sheet {
+  width: min(480px, 100%); max-height: 85vh; overflow-y: auto;
+  background: var(--color-bg-surface);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: var(--shadow-pop);
+  padding: var(--spacing-md) var(--spacing-lg) var(--spacing-xl);
+  transform: translateY(100%);
+  transition: transform var(--motion-duration-slow) var(--motion-easing-standard);
+}
+.overlay.is-open .sheet { transform: none; }
+.sheet__handle { width: 40px; height: 4px; margin: 0 auto var(--spacing-md); background: var(--color-border-default); border-radius: var(--radius-full); }
+.sheet__head { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-md); padding: 0 var(--spacing-sm); }
+.sheet__head h3 { font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.sheet__body { margin-top: var(--spacing-md); }
+.sheet-row {
+  display: flex; align-items: center; gap: var(--spacing-md);
+  width: 100%; padding: var(--spacing-md) var(--spacing-sm);
+  background: none; border: none; border-radius: var(--radius-md);
+  font-size: var(--font-size-md); color: var(--color-text-body); cursor: pointer; text-align: left;
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.sheet-row:hover { background: var(--color-bg-subtle); }
+.sheet-row--danger { color: var(--color-feedback-error); }
+.sheet-row__arrow { margin-left: auto; color: var(--color-text-tertiary); }
+
+/* ===== 08 反馈 ===== */
+.toast-region {
+  position: fixed; left: 50%; top: calc(var(--topbar-h) + var(--spacing-md));
+  transform: translateX(-50%);
+  z-index: var(--z-index-modal);
+  display: flex; flex-direction: column; align-items: center; gap: var(--spacing-sm);
+  pointer-events: none;
+}
+.toast {
+  display: flex; align-items: center; gap: var(--spacing-sm);
+  max-width: min(88vw, 420px);
+  padding: var(--spacing-sm) var(--spacing-lg);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-left: 4px solid var(--toast-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--font-size-md);
+  opacity: 0; transform: translateY(-8px);
+  transition: opacity var(--motion-duration-fast) var(--motion-easing-standard),
+             transform var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.toast.is-in { opacity: 1; transform: none; }
+.toast.is-out { opacity: 0; transform: translateY(-4px); }
+.toast__icon { flex: none; color: var(--toast-color); }
+.toast--success { --toast-color: var(--color-feedback-success); }
+.toast--warning { --toast-color: var(--color-feedback-warning); }
+.toast--error   { --toast-color: var(--color-feedback-error); }
+.toast--info    { --toast-color: var(--color-feedback-info); }
+
+.skeleton-card {
+  display: flex; align-items: center; gap: var(--spacing-md);
+  margin-top: var(--spacing-lg); padding: var(--spacing-lg);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default); border-radius: var(--radius-lg);
+}
+.skeleton-card__avatar {
+  width: 44px; height: 44px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-full);
+  background: var(--ca-bg); color: var(--ca-text);
+  font-size: var(--font-size-lg); font-weight: var(--font-weight-bold);
+}
+.skeleton-card__lines { display: flex; flex-direction: column; gap: var(--spacing-sm); flex: 1; }
+.skeleton-card--real h4 { font-size: var(--font-size-md); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.skeleton-card--real p { margin-top: 2px; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+/* 骨架屏：浅底呼吸 */
+.skeleton { background: var(--color-bg-subtle); border-radius: var(--radius-sm); animation: breathe 1.5s ease-in-out infinite; }
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+.skeleton--avatar { width: 44px; height: 44px; flex: none; border-radius: var(--radius-full); }
+.skeleton--line { height: 12px; width: 100%; }
+.skeleton--line-60 { width: 60%; }
+.skeleton--line-80 { width: 80%; }
+
+.empty {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: var(--spacing-sm); padding: var(--spacing-2xl) var(--spacing-lg);
+  border: 1px dashed var(--color-border-strong); border-radius: var(--radius-lg);
+}
+.empty__icon {
+  width: 56px; height: 56px; margin-bottom: var(--spacing-xs);
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-brand-subtle); color: var(--color-brand);
+  border-radius: var(--radius-full);
+}
+.empty__title { font-size: var(--font-size-md); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.empty__desc { max-width: 320px; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.empty__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--spacing-sm); margin-top: var(--spacing-xs); }
+
+/* ===== 09 图标 Icon ===== */
+.icon-demo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: var(--spacing-md); }
+.icon-demo__cell {
+  display: flex; flex-direction: column; align-items: center; gap: var(--spacing-sm);
+  padding: var(--spacing-lg) var(--spacing-md);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default); border-radius: var(--radius-md);
+}
+.icon-demo__sizes { display: flex; align-items: center; gap: var(--spacing-md); color: var(--color-text-body); }
+.icon-demo__name { font-size: var(--font-size-xs); color: var(--color-text-secondary); text-align: center; }
+
+/* ===== 01 Token 总览扩展：语义层角色 / 动效 / 层级 / 布局（v2.2 补全） ===== */
+.role-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: var(--spacing-sm); }
+.role-item {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-border-default); border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+.role-item__sw { height: 16px; border-radius: var(--radius-sm); border: 1px solid var(--color-border-default); }
+.role-item__name { display: block; margin-top: var(--spacing-xs); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); color: var(--color-text-body); font-variant-numeric: tabular-nums; }
+.role-item__val { display: block; font-size: var(--font-size-xs); color: var(--color-text-tertiary); font-variant-numeric: tabular-nums; }
+.token-row {
+  display: flex; align-items: baseline; gap: var(--spacing-lg);
+  padding: 5px 0; border-bottom: 1px dashed var(--color-border-default);
+  font-size: var(--font-size-xs); font-variant-numeric: tabular-nums;
+}
+.token-row:last-child { border-bottom: none; }
+.token-row__name { flex: none; width: 190px; color: var(--color-text-secondary); }
+.token-row__val { color: var(--color-text-body); }
+.token-row__use { color: var(--color-text-tertiary); margin-left: auto; text-align: right; }
+
+/* ===== 06 课表组件扩展：周导航 / 三子 Tab / 冲突错位 / 实验课标签（v2.2 补全） ===== */
+/* 周导航条 WeekNav：上一周 | 标题（日期 + 第N周 + 单双周/未开学/假期徽标） | 下一周 + 回到本周 */
+.wnav {
+  position: relative;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--spacing-md); padding: var(--spacing-md) 0;
+}
+.wnav__title {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: flex; align-items: center; gap: var(--spacing-sm);
+  font-size: var(--font-size-lg); font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary); white-space: nowrap;
+}
+.wnav__dates { min-width: 9.5em; text-align: center; }
+.wnav__week {
+  font-size: var(--font-size-xs); font-weight: var(--font-weight-bold); color: var(--color-text-inverse);
+  background: var(--color-brand); border-radius: var(--radius-full); padding: 2px 10px;
+  min-width: 5.4em; text-align: center;
+}
+.wnav__odd { font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); color: var(--color-brand); background: var(--color-brand-subtle); border-radius: var(--radius-full); padding: 2px 8px; }
+.wnav__holiday { font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); color: var(--color-text-tertiary); background: var(--color-bg-subtle); border-radius: var(--radius-full); padding: 2px 8px; }
+.wnav__right { display: flex; align-items: center; gap: var(--spacing-sm); }
+
+/* 分段控件 SegSwitch：按钮等宽 104px，激活块白底 + shadow-card（04 文档 4.1） */
+.seg { display: inline-flex; background: var(--color-bg-subtle); border-radius: var(--radius-md); padding: 3px; }
+.seg__btn {
+  width: 104px; height: 34px; border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--color-text-tertiary);
+  font-family: inherit; font-size: var(--font-size-md); cursor: pointer;
+  transition: background-color var(--motion-duration-normal) var(--motion-easing-standard),
+             color var(--motion-duration-normal) var(--motion-easing-standard),
+             box-shadow var(--motion-duration-normal) var(--motion-easing-standard);
+}
+.seg__btn.is-active { background: var(--color-bg-surface); color: var(--color-text-primary); font-weight: var(--font-weight-medium); box-shadow: var(--shadow-card); }
+
+/* 冲突错位课程块：后导入者右移半格 + 右上角 warning 圆点（04 文档 4.5） */
+.course-block.is-conflict { margin-left: 50%; }
+.course-block__flag {
+  position: absolute; top: 4px; right: 4px;
+  width: 8px; height: 8px; border-radius: var(--radius-full);
+  background: var(--color-feedback-warning);
+}
+/* 实验课标签：course-3 紫（04 文档 3.1 D 区） */
+.course-block__lab {
+  position: absolute; top: 4px; right: 4px;
+  font-size: var(--font-size-xs); font-weight: var(--font-weight-bold);
+  color: var(--course-3-text); background: var(--color-white);
+  border: 1px solid var(--course-3-line); border-radius: var(--radius-full);
+  padding: 0 6px; line-height: 1.6;
+}
+
+/* 信息面板 SidePanel（04 文档 3.1 E 区）：桌面右侧 296px 栏 */
+.side-demo { display: flex; flex-direction: column; gap: var(--spacing-lg); max-width: var(--side-panel-w); }
+.sp-card { background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); padding: var(--spacing-lg); }
+.sp-head { display: flex; align-items: center; gap: var(--spacing-sm); margin-bottom: var(--spacing-md); }
+.sp-head h3 { font-size: var(--font-size-sm); color: var(--color-text-tertiary); font-weight: var(--font-weight-medium); letter-spacing: .8px; }
+.ic {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: var(--radius-full);
+  background: var(--color-brand-subtle); color: var(--color-brand);
+}
+.ic .icon { width: 15px; height: 15px; }
+.summary-nums { display: flex; gap: var(--spacing-md); }
+.num-item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.num-item b { font-size: var(--font-size-stat); font-weight: var(--font-weight-heavy); color: var(--color-text-primary); line-height: 1.2; font-variant-numeric: tabular-nums; }
+.num-item span { font-size: var(--font-size-sm); color: var(--color-text-tertiary); }
+.date-chip {
+  display: inline-block; font-size: var(--font-size-sm); font-weight: var(--font-weight-bold);
+  color: var(--color-warning-text); background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-line); border-radius: var(--radius-full);
+  padding: 1px 10px; margin-bottom: 4px;
+}
+.sp-item { padding: var(--spacing-sm) 0; border-top: 1px solid var(--color-border-default); }
+.sp-item:first-of-type { border-top: none; }
+.sp-item__title { font-size: var(--font-size-body); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.sp-item__meta { font-size: var(--font-size-sm); color: var(--color-text-tertiary); margin-top: 2px; }
+
+/* 事项页列表项（04 文档 3.5）：Tag + 名称 + 时间，作业完成划线 */
+.matter-list { display: flex; flex-direction: column; margin-top: var(--spacing-sm); }
+.matter-item {
+  display: flex; align-items: center; gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-surface); border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md); margin-bottom: var(--spacing-sm);
+}
+.matter-item__name { flex: 1; min-width: 0; font-size: var(--font-size-body); font-weight: var(--font-weight-bold); color: var(--color-text-primary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.matter-item__time { font-size: var(--font-size-xs); color: var(--color-text-tertiary); white-space: nowrap; }
+.matter-item.is-done .matter-item__name { color: var(--color-text-tertiary); text-decoration: line-through; font-weight: var(--font-weight-regular); }
+
+/* 移动端底部 Tab 栏 BottomTabBar：4 项 今天/周课表/事项/设置（04 文档 1.2） */
+.tabbar {
+  display: flex;
+  background: var(--color-bg-surface);
+  border-top: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.tabbar__item {
+  flex: 1; min-height: 44px; height: 56px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  background: none; border: none; color: var(--color-text-tertiary);
+  font-family: inherit; font-size: var(--font-size-xs); cursor: pointer;
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.tabbar__item.is-active { color: var(--color-brand); }
+.tabbar__item .icon { width: 22px; height: 22px; }
+
+/* 错误态 ErrorState（04 文档三态表现，v2.2 补全） */
+.error-state {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: var(--spacing-sm); padding: var(--spacing-2xl) var(--spacing-lg);
+  border: 1px dashed var(--color-border-strong); border-radius: var(--radius-lg);
+}
+.error-state__icon {
+  width: 56px; height: 56px; margin-bottom: var(--spacing-xs);
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-bg-subtle); color: var(--color-feedback-error);
+  border-radius: var(--radius-full);
+}
+.error-state__title { font-size: var(--font-size-md); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.error-state__desc { max-width: 320px; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+
+/* 图标按钮激活态（04 文档 1.2：所在页激活/展开时 brand-subtle 底 + brand 图标） */
+.icon-btn.is-active { background: var(--color-brand-subtle); color: var(--color-brand); }
+
+/* ===== 页脚 ===== */
+.app-footer {
+  margin-top: var(--spacing-2xl);
+  padding: var(--spacing-2xl) 0;
+  text-align: center;
+  font-size: var(--font-size-xs); color: var(--color-text-tertiary);
+  border-top: 1px solid var(--color-border-default);
+}
+.app-footer p + p { margin-top: var(--spacing-xs); }
+
+/* ===== 响应式 ===== */
+@media (max-width: 1279px) {
+  .week-scroll { --ph: 52px; }
+}
+@media (max-width: 767px) {
+  .container { padding: 0 var(--spacing-lg); }
+  .app-header__top { height: 56px; }
+  .app-brand__sub, .app-header__meta { display: none; }
+  .demo-grid--2, .demo-grid--3 { grid-template-columns: 1fr; }
+  .type-row__label, .space-row__label { width: 132px; }
+  .overlay { align-items: flex-end; padding: 0; }
+  .modal {
+    width: 100%; max-height: 85vh;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    transform: translateY(100%);
+  }
+  .overlay.is-open .modal { transform: none; }
+  .modal__handle { display: block; }
+  .btn--md { height: 44px; }
+  .week-scroll {
+    --ph: 56px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    max-height: calc(100dvh - 158px); min-height: 420px;
+  }
+  .week-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
+  .week-scroll::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: var(--radius-full); }
+  .week-scroll::-webkit-scrollbar-track { background: transparent; }
+  .week-grid { grid-template-columns: var(--tc-w) 980px; grid-template-rows: auto repeat(12, var(--ph)); }
+  .wg-day-cols { grid-template-columns: repeat(7, 140px); }
+  .day-card { gap: var(--spacing-md); padding: 13px 14px; }
+  .day-card__time { min-width: 84px; font-size: var(--font-size-sm); }
+  .day-card__slot { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- 图标符号库（统一 24x24 viewBox、1.75px 描边、currentColor 继承） -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></symbol>
+  <symbol id="i-arrow-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></symbol>
+  <symbol id="i-arrow-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></symbol>
+  <symbol id="i-arrow-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+</svg>
+
+<header class="app-header">
+  <div class="container">
+    <div class="app-header__top">
+      <div class="app-brand">
+        <span class="app-brand__mark"><svg class="icon icon--20"><use href="#i-grid"/></svg></span>
+        <span class="app-brand__name">ClassBoard</span>
+        <span class="app-brand__sub">UI 组件参考</span>
+      </div>
+      <span class="app-header__meta">清新浅色极简 · v2.2</span>
+    </div>
+    <nav class="section-nav" aria-label="区块导航">
+      <a class="section-nav__link" href="#sec-tokens">设计 Token</a>
+      <a class="section-nav__link" href="#sec-button">按钮</a>
+      <a class="section-nav__link" href="#sec-input">输入控件</a>
+      <a class="section-nav__link" href="#sec-tag">标签徽章</a>
+      <a class="section-nav__link" href="#sec-card">卡片</a>
+      <a class="section-nav__link" href="#sec-timetable">课表组件</a>
+      <a class="section-nav__link" href="#sec-overlay">弹层</a>
+      <a class="section-nav__link" href="#sec-feedback">反馈</a>
+      <a class="section-nav__link" href="#sec-icon">图标</a>
+    </nav>
+  </div>
+</header>
+
+<main class="container">
+  <div class="page-intro reveal">
+    <h1>ClassBoard 设计系统组件参考</h1>
+    <p>本页为课程表 Web 应用的组件落地规范：所有样式直接引用《03-设计语言文档》v2.1 第 10 节中的 CSS 自定义属性（唯一权威 token 来源），组件与交互对齐《04-UI设计文档》v2.2，视觉观感与选定的「清新浅色极简」风格（预览 01）保持一致。请在浏览器直接打开预览，各组件均可交互。</p>
+    <div class="page-intro__meta">
+      <span class="meta-chip">文档版本 v2.2</span>
+      <span class="meta-chip">风格：清新浅色极简（预览 01）</span>
+      <span class="meta-chip">token 来源：设计语言文档 第 10 节（v2.1）</span>
+      <span class="meta-chip">组件规范：UI 设计文档 v2.2</span>
+      <span class="meta-chip">本期不做暗色模式</span>
+      <span class="meta-chip">单文件自包含 · 离线可用</span>
+    </div>
+  </div>
+
+  <!-- ================= 01 设计 Token 总览 ================= -->
+  <section class="section" id="sec-tokens">
+    <div class="section__head">
+      <span class="section__index">01</span>
+      <h2 class="section__title">设计 Token 总览</h2>
+    </div>
+
+    <div class="demo-grid demo-grid--2">
+      <div class="demo reveal" style="animation-delay:.03s">
+        <h3>主色与中性色</h3>
+        <div class="demo__content">
+          <div class="sub-label">主色 Primary</div>
+          <div class="swatch-grid">
+            <div class="swatch" style="background:var(--color-primary-50);color:var(--color-text-body)"><span class="swatch__name">primary-50</span><span class="swatch__hex">#eff6ff</span></div>
+            <div class="swatch" style="background:var(--color-primary-100);color:var(--color-text-body)"><span class="swatch__name">primary-100</span><span class="swatch__hex">#bfdbfe</span></div>
+            <div class="swatch" style="background:var(--color-primary-500);color:var(--color-text-inverse)"><span class="swatch__name">primary-500</span><span class="swatch__hex">#3b82f6</span></div>
+            <div class="swatch" style="background:var(--color-primary-600);color:var(--color-text-inverse)"><span class="swatch__name">primary-600</span><span class="swatch__hex">#2563eb</span></div>
+            <div class="swatch" style="background:var(--color-primary-700);color:var(--color-text-inverse)"><span class="swatch__name">primary-700</span><span class="swatch__hex">#1d4ed8</span></div>
+          </div>
+          <div class="sub-label">中性色 Neutral</div>
+          <div class="swatch-grid">
+            <div class="swatch" style="background:var(--color-neutral-50);color:var(--color-text-body)"><span class="swatch__name">neutral-50</span><span class="swatch__hex">#f6f7f9</span></div>
+            <div class="swatch" style="background:var(--color-neutral-100);color:var(--color-text-body)"><span class="swatch__name">neutral-100</span><span class="swatch__hex">#eef1f5</span></div>
+            <div class="swatch" style="background:var(--color-neutral-200);color:var(--color-text-body)"><span class="swatch__name">neutral-200</span><span class="swatch__hex">#e7eaf0</span></div>
+            <div class="swatch" style="background:var(--color-neutral-300);color:var(--color-text-body)"><span class="swatch__name">neutral-300</span><span class="swatch__hex">#d8dde6</span></div>
+            <div class="swatch" style="background:var(--color-neutral-500);color:var(--color-text-body)"><span class="swatch__name">neutral-500</span><span class="swatch__hex">#6b7280</span></div>
+            <div class="swatch" style="background:var(--color-neutral-600);color:var(--color-text-inverse)"><span class="swatch__name">neutral-600</span><span class="swatch__hex">#4b5563</span></div>
+            <div class="swatch" style="background:var(--color-neutral-800);color:var(--color-text-inverse)"><span class="swatch__name">neutral-800</span><span class="swatch__hex">#1f2933</span></div>
+            <div class="swatch" style="background:var(--color-neutral-900);color:var(--color-text-inverse)"><span class="swatch__name">neutral-900</span><span class="swatch__hex">#111827</span></div>
+            <div class="swatch" style="background:var(--color-white);color:var(--color-text-body);border:1px solid var(--color-border-default)"><span class="swatch__name">white</span><span class="swatch__hex">#ffffff</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="demo reveal" style="animation-delay:.09s">
+        <h3>语义色 Semantic</h3>
+        <div class="demo__content">
+          <div class="swatch-grid">
+            <div class="swatch" style="background:var(--color-brand);color:var(--color-text-inverse)"><span class="swatch__name">brand</span><span class="swatch__hex">#3b82f6</span></div>
+            <div class="swatch" style="background:var(--color-feedback-success);color:var(--color-text-inverse)"><span class="swatch__name">success</span><span class="swatch__hex">#16a34a</span></div>
+            <div class="swatch" style="background:var(--color-feedback-warning);color:var(--color-text-inverse)"><span class="swatch__name">warning</span><span class="swatch__hex">#f59e0b</span></div>
+            <div class="swatch" style="background:var(--color-feedback-error);color:var(--color-text-inverse)"><span class="swatch__name">error</span><span class="swatch__hex">#ef4444</span></div>
+            <div class="swatch" style="background:var(--color-feedback-info);color:var(--color-text-inverse)"><span class="swatch__name">info</span><span class="swatch__hex">#06b6d4</span></div>
+          </div>
+          <div class="sub-label">课程色板 Course（8 色 · 浅底 / 描边 / 文字 三值）</div>
+          <div class="course-swatch-grid">
+            <div class="course-swatch" style="--sw-bg:var(--course-1-bg);--sw-line:var(--course-1-line);--sw-text:var(--course-1-text)">
+              <span class="course-swatch__name">course-1 · 蓝</span>
+              <span class="course-swatch__sample">高等数学</span>
+              <div class="course-swatch__triple">
+                <span class="dot" style="background:var(--sw-bg);border:1px solid var(--sw-line)"></span>
+                <span class="dot" style="background:var(--sw-line)"></span>
+                <span class="dot" style="background:var(--sw-text)"></span>
+              </div>
+              <span class="course-swatch__hex">#eef4ff / #c3d8fb / #1e40af</span>
+            </div>
+            <div class="course-swatch" style="--sw-bg:var(--course-2-bg);--sw-line:var(--course-2-line);--sw-text:var(--course-2-text)">
+              <span class="course-swatch__name">course-2 · 绿</span>
+              <span class="course-swatch__sample">数据结构</span>
+              <div class="course-swatch__triple">
+                <span class="dot" style="background:var(--sw-bg);border:1px solid var(--sw-line)"></span>
+                <span class="dot" style="background:var(--sw-line)"></span>
+                <span class="dot" style="background:var(--sw-text)"></span>
+              </div>
+              <span class="course-swatch__hex">#ecf8f0 / #bce6cd / #166534</span>
+            </div>
+            <div class="course-swatch" style="--sw-bg:var(--course-3-bg);--sw-line:var(--course-3-line);--sw-text:var(--course-3-text)">
+              <span class="course-swatch__name">course-3 · 紫</span>
+              <span class="course-swatch__sample">大学英语</span>
+              <div class="course-swatch__triple">
+                <span class="dot" style="background:var(--sw-bg);border:1px solid var(--sw-line)"></span>
+                <span class="dot" style="background:var(--sw-line)"></span>
+                <span class="dot" style="background:var(--sw-text)"></span>
+              </div>
+              <span class="course-swatch__hex">#f3efff / #d4c6fb / #5b21b6</span>
+            </div>
+            <div class="course-swatch" style="--sw-bg:var(--course-4-bg);--sw-line:var(--course-4-line);--sw-text:var(--course-4-text)">
+              <span class="course-swatch__name">course-4 · 橙</span>
+              <span class="course-swatch__sample">大学物理</span>
+              <div class="course-swatch__triple">
+                <span class="dot" style="background:var(--sw-bg);border:1px solid var(--sw-line)"></span>
+                <span class="dot" style="background:var(--sw-line)"></span>
+                <span class="dot" style="background:var(--sw-text)"></span>
+              </div>
+              <span class="course-swatch__hex">#fdf2e7 / #f6d5b0 / #9a3412</span>
+            </div>
+            <div class="course-swatch" style="--sw-bg:var(--course-5-bg);--sw-line:var(--course-5-line);--sw-text:var(--course-5-text)">
+              <span class="course-swatch__name">course-5 · 青</span>
+              <span class="course-swatch__sample">体育</span>
+              <div class="course-swatch__triple">
+                <span class="dot" style="background:var(--sw-bg);border:1px solid var(--sw-line)"></span>
+                <span class="dot" style="background:var(--sw-line)"></span>
+                <span class="dot" style="background:var(--sw-text)"></span>
+              </div>
+              <span class="course-swatch__hex">#ecf9fb / #b7e3ec / #155e75</span>
+            </div>
+            <div class="course-swatch" style="--sw-bg:var(--course-6-bg);--sw-line:var(--course-6-line);--sw-text:var(--course-6-text)">
+              <span class="course-swatch__name">course-6 · 玫红</span>
+              <span class="course-swatch__sample">操作系统</span>
+              <div class="course-swatch__triple">
+                <span class="dot" style="background:var(--sw-bg);border:1px solid var(--sw-line)"></span>
+                <span class="dot" style="background:var(--sw-line)"></span>
+                <span class="dot" style="background:var(--sw-text)"></span>
+              </div>
+              <span class="course-swatch__hex">#fdeef1 / #f6c4ce / #9f1239</span>
+            </div>
+            <div class="course-swatch" style="--sw-bg:var(--course-7-bg);--sw-line:var(--course-7-line);--sw-text:var(--course-7-text)">
+              <span class="course-swatch__name">course-7 · 靛蓝</span>
+              <span class="course-swatch__sample">线性代数</span>
+              <div class="course-swatch__triple">
+                <span class="dot" style="background:var(--sw-bg);border:1px solid var(--sw-line)"></span>
+                <span class="dot" style="background:var(--sw-line)"></span>
+                <span class="dot" style="background:var(--sw-text)"></span>
+              </div>
+              <span class="course-swatch__hex">#eef1fd / #c7cff9 / #3730a3</span>
+            </div>
+            <div class="course-swatch" style="--sw-bg:var(--course-8-bg);--sw-line:var(--course-8-line);--sw-text:var(--course-8-text)">
+              <span class="course-swatch__name">course-8 · 黄</span>
+              <span class="course-swatch__sample">程序设计</span>
+              <div class="course-swatch__triple">
+                <span class="dot" style="background:var(--sw-bg);border:1px solid var(--sw-line)"></span>
+                <span class="dot" style="background:var(--sw-line)"></span>
+                <span class="dot" style="background:var(--sw-text)"></span>
+              </div>
+              <span class="course-swatch__hex">#fdf8e3 / #f2e2a0 / #713f12</span>
+            </div>
+          </div>
+          <p class="demo-note"><svg class="icon icon--14"><use href="#i-info"/></svg>每卡三圆点依次对应底 / 描边 / 文字 色值；色块内课程名恒用深色文字，对比度 ≥ 7:1</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="demo-grid demo-grid--2">
+      <div class="demo">
+        <h3>字体与字号 Type</h3>
+        <div class="demo__content">
+          <div class="type-row"><span class="type-row__label">font-size-2xl · 18px 页面大标题</span><span class="type-row__sample t-2xl">8月13日 周二</span></div>
+          <div class="type-row"><span class="type-row__label">font-size-xl · 16px 弹窗 / 品牌名</span><span class="type-row__sample t-xl">本周课程安排</span></div>
+          <div class="type-row"><span class="type-row__label">font-size-lg · 15px 周标题 / 分段</span><span class="type-row__sample t-lg">高等数学</span></div>
+          <div class="type-row"><span class="type-row__label">font-size-body · 14px 正文</span><span class="type-row__sample t-body">第 1 节 08:00 – 08:45</span></div>
+          <div class="type-row"><span class="type-row__label">font-size-md · 13.5px 按钮 / 表单标签</span><span class="type-row__sample t-md">王立 老师 · 教1-201</span></div>
+          <div class="type-row"><span class="type-row__label">font-size-sm · 12px 课程地点 / 元信息</span><span class="type-row__sample t-sm">08:55 – 09:40 · 第 3 节</span></div>
+          <div class="type-row"><span class="type-row__label">font-size-xs · 11px 时间 / 辅助文字</span><span class="type-row__sample t-xs">08:55</span></div>
+          <div class="type-row"><span class="type-row__label">font-size-stat · 26px 统计大数字</span><span class="type-row__sample t-stat">8</span></div>
+          <div class="type-row"><span class="type-row__label">字重 regular / medium / bold / heavy</span><span class="type-row__sample"><span style="font-weight:var(--font-weight-regular)">常规</span> · <span style="font-weight:var(--font-weight-medium)">中等</span> · <span style="font-weight:var(--font-weight-bold)">加粗</span> · <span style="font-weight:var(--font-weight-heavy)">特粗</span></span></div>
+          <div class="type-row"><span class="type-row__label">等宽数字 tabular-nums</span><span class="type-row__sample t-md">08:00　12:34　第 1-16 周</span></div>
+        </div>
+      </div>
+
+      <div class="demo">
+        <h3>间距、圆角与阴影</h3>
+        <div class="demo__content">
+          <div class="sub-label">间距（4px 基准网格）</div>
+          <div class="space-row"><span class="space-row__label">spacing-2xs · 3px</span><span class="space-row__bar" style="width:3px"></span></div>
+          <div class="space-row"><span class="space-row__label">spacing-xs · 6px</span><span class="space-row__bar" style="width:6px"></span></div>
+          <div class="space-row"><span class="space-row__label">spacing-sm · 9px</span><span class="space-row__bar" style="width:9px"></span></div>
+          <div class="space-row"><span class="space-row__label">spacing-md · 12px</span><span class="space-row__bar" style="width:12px"></span></div>
+          <div class="space-row"><span class="space-row__label">spacing-lg · 16px</span><span class="space-row__bar" style="width:16px"></span></div>
+          <div class="space-row"><span class="space-row__label">spacing-xl · 24px</span><span class="space-row__bar" style="width:24px"></span></div>
+          <div class="space-row"><span class="space-row__label">spacing-2xl · 32px</span><span class="space-row__bar" style="width:32px"></span></div>
+          <div class="sub-label">圆角</div>
+          <div class="radius-grid">
+            <div class="radius-item"><div class="radius-item__box" style="border-radius:var(--radius-sm)"></div><span class="radius-item__name">radius-sm · 8px</span></div>
+            <div class="radius-item"><div class="radius-item__box" style="border-radius:var(--radius-md)"></div><span class="radius-item__name">radius-md · 10px</span></div>
+            <div class="radius-item"><div class="radius-item__box" style="border-radius:var(--radius-lg)"></div><span class="radius-item__name">radius-lg · 12px</span></div>
+            <div class="radius-item"><div class="radius-item__box" style="border-radius:var(--radius-xl)"></div><span class="radius-item__name">radius-xl · 14px</span></div>
+            <div class="radius-item"><div class="radius-item__box" style="border-radius:var(--radius-full)"></div><span class="radius-item__name">radius-full</span></div>
+          </div>
+          <div class="sub-label">阴影</div>
+          <div class="shadow-grid">
+            <div class="shadow-item"><div class="shadow-card-demo" style="box-shadow:var(--shadow-card)">shadow-card</div><span class="shadow-item__name">卡片静置</span></div>
+            <div class="shadow-item"><div class="shadow-card-demo" style="box-shadow:var(--shadow-hover)">shadow-hover</div><span class="shadow-item__name">课程色块悬停</span></div>
+            <div class="shadow-item"><div class="shadow-card-demo" style="box-shadow:var(--shadow-pop)">shadow-pop</div><span class="shadow-item__name">弹层 / 下拉</span></div>
+            <div class="shadow-item"><div class="shadow-card-demo"><button class="btn btn--primary btn--sm" type="button">shadow-btn</button></div><span class="shadow-item__name">主按钮投影</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="demo-grid demo-grid--2">
+      <div class="demo">
+        <h3>语义层角色 Semantic Role（v2.2 补全）</h3>
+        <div class="demo__content">
+          <div class="sub-label">品牌与文字 / 背景角色</div>
+          <div class="role-grid">
+            <div class="role-item"><span class="role-item__sw" style="display:block;background:var(--color-brand-hover)"></span><span class="role-item__name">brand-hover</span><span class="role-item__val">primary-600</span></div>
+            <div class="role-item"><span class="role-item__sw" style="display:block;background:var(--color-brand-active)"></span><span class="role-item__name">brand-active</span><span class="role-item__val">primary-700</span></div>
+            <div class="role-item"><span class="role-item__sw" style="display:block;background:var(--color-brand-subtle)"></span><span class="role-item__name">brand-subtle</span><span class="role-item__val">primary-50</span></div>
+            <div class="role-item"><span class="role-item__sw" style="display:block;background:var(--color-brand-line)"></span><span class="role-item__name">brand-line</span><span class="role-item__val">primary-100</span></div>
+            <div class="role-item"><span class="role-item__sw" style="display:block;background:var(--color-bg-page)"></span><span class="role-item__name">bg-page</span><span class="role-item__val">neutral-50</span></div>
+            <div class="role-item"><span class="role-item__sw" style="display:block;background:var(--color-bg-surface)"></span><span class="role-item__name">bg-surface</span><span class="role-item__val">white</span></div>
+            <div class="role-item"><span class="role-item__sw" style="display:block;background:var(--color-bg-subtle)"></span><span class="role-item__name">bg-subtle</span><span class="role-item__val">neutral-100</span></div>
+            <div class="role-item"><span class="role-item__sw" style="display:block;background:var(--color-bg-hover)"></span><span class="role-item__name">bg-hover</span><span class="role-item__val">#f1f4f8</span></div>
+            <div class="role-item"><span class="role-item__sw" style="display:block;background:var(--color-bg-corner)"></span><span class="role-item__name">bg-corner</span><span class="role-item__val">#fbfcfe</span></div>
+          </div>
+          <div class="sub-label">文字 / 边框 / 反馈角色</div>
+          <div class="role-grid">
+            <div class="role-item"><span class="role-item__name">text-primary</span><span class="role-item__val">neutral-900 · 标题</span></div>
+            <div class="role-item"><span class="role-item__name">text-body</span><span class="role-item__val">neutral-800 · 正文</span></div>
+            <div class="role-item"><span class="role-item__name">text-secondary</span><span class="role-item__val">neutral-600 · 次级</span></div>
+            <div class="role-item"><span class="role-item__name">text-tertiary</span><span class="role-item__val">neutral-500 · 说明</span></div>
+            <div class="role-item"><span class="role-item__name">text-inverse</span><span class="role-item__val">white · 按钮文字</span></div>
+            <div class="role-item"><span class="role-item__sw" style="display:block;background:var(--color-border-default)"></span><span class="role-item__name">border-default</span><span class="role-item__val">neutral-200</span></div>
+            <div class="role-item"><span class="role-item__sw" style="display:block;background:var(--color-border-strong)"></span><span class="role-item__name">border-strong</span><span class="role-item__val">neutral-300</span></div>
+            <div class="role-item"><span class="role-item__sw" style="display:block;background:var(--color-border-focus)"></span><span class="role-item__name">border-focus</span><span class="role-item__val">primary-500</span></div>
+            <div class="role-item"><span class="role-item__sw" style="display:block;background:var(--color-feedback-success)"></span><span class="role-item__name">feedback-success</span><span class="role-item__val">success-500</span></div>
+            <div class="role-item"><span class="role-item__sw" style="display:block;background:var(--color-feedback-warning)"></span><span class="role-item__name">feedback-warning</span><span class="role-item__val">warning-500</span></div>
+            <div class="role-item"><span class="role-item__sw" style="display:block;background:var(--color-feedback-error)"></span><span class="role-item__name">feedback-error</span><span class="role-item__val">error-500</span></div>
+            <div class="role-item"><span class="role-item__sw" style="display:block;background:var(--color-feedback-info)"></span><span class="role-item__name">feedback-info</span><span class="role-item__val">info-500</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="demo">
+        <h3>动效 / 层级 / 布局（v2.2 补全）</h3>
+        <div class="demo__content">
+          <div class="sub-label">动效 Motion</div>
+          <div class="token-row"><span class="token-row__name">motion-duration-fast</span><span class="token-row__val">150ms</span><span class="token-row__use">图标按钮悬停 / Toast 进出</span></div>
+          <div class="token-row"><span class="token-row__name">motion-duration-normal</span><span class="token-row__val">180ms</span><span class="token-row__use">分段切换 / 色块悬停</span></div>
+          <div class="token-row"><span class="token-row__name">motion-duration-slow</span><span class="token-row__val">220ms</span><span class="token-row__use">弹窗 pop / 底部弹层</span></div>
+          <div class="token-row"><span class="token-row__name">motion-duration-reveal</span><span class="token-row__val">500ms</span><span class="token-row__use">页面元素入场</span></div>
+          <div class="token-row"><span class="token-row__name">motion-easing-standard</span><span class="token-row__val">cubic-bezier(.2,.7,.2,1)</span><span class="token-row__use">标准曲线</span></div>
+          <div class="sub-label">层级 z-index</div>
+          <div class="token-row"><span class="token-row__name">z-index-grid-corner</span><span class="token-row__val">6</span><span class="token-row__use">课表角落</span></div>
+          <div class="token-row"><span class="token-row__name">z-index-sticky</span><span class="token-row__val">50</span><span class="token-row__use">顶栏 / 表头 / 时间列</span></div>
+          <div class="token-row"><span class="token-row__name">z-index-float</span><span class="token-row__val">80</span><span class="token-row__use">下拉面板</span></div>
+          <div class="token-row"><span class="token-row__name">z-index-modal</span><span class="token-row__val">100</span><span class="token-row__use">弹窗 / 遮罩 / Toast</span></div>
+          <div class="sub-label">布局扩展 Layout（v2.1 新增）</div>
+          <div class="token-row"><span class="token-row__name">topbar-h / topbar-h-mobile</span><span class="token-row__val">60px / 56px</span><span class="token-row__use">顶栏高度</span></div>
+          <div class="token-row"><span class="token-row__name">side-panel-w</span><span class="token-row__val">296px</span><span class="token-row__use">右侧信息面板宽</span></div>
+          <div class="token-row"><span class="token-row__name">ph-desktop / tablet / mobile</span><span class="token-row__val">64 / 52 / 56px</span><span class="token-row__use">课表节次行高</span></div>
+          <div class="token-row"><span class="token-row__name">tc-w</span><span class="token-row__val">84px</span><span class="token-row__use">节次时间列宽</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 02 按钮 Button ================= -->
+  <section class="section" id="sec-button">
+    <div class="section__head">
+      <span class="section__index">02</span>
+      <h2 class="section__title">按钮 Button</h2>
+    </div>
+
+    <div class="demo-grid demo-grid--2">
+      <div class="demo">
+        <h3>变体</h3>
+        <p class="demo__desc">primary（品牌底 + 白字 + shadow-btn）/ secondary（白底描边）/ ghost（透明品牌字）/ danger（错误红）</p>
+        <div class="demo__content demo-row">
+          <button class="btn btn--primary btn--md" type="button">主要按钮</button>
+          <button class="btn btn--secondary btn--md" type="button">次要按钮</button>
+          <button class="btn btn--ghost btn--md" type="button">幽灵按钮</button>
+          <button class="btn btn--danger btn--md" type="button">危险按钮</button>
+        </div>
+      </div>
+
+      <div class="demo">
+        <h3>尺寸</h3>
+        <p class="demo__desc">sm 32px / md 40px / lg 48px，圆角统一 radius-sm</p>
+        <div class="demo__content demo-row">
+          <button class="btn btn--primary btn--sm" type="button">小按钮</button>
+          <button class="btn btn--primary btn--md" type="button">中按钮</button>
+          <button class="btn btn--primary btn--lg" type="button">大按钮</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="demo-grid demo-grid--2">
+      <div class="demo">
+        <h3>状态</h3>
+        <p class="demo__desc">禁用态与加载态（带 spinner）</p>
+        <div class="demo__content demo-row">
+          <button class="btn btn--primary btn--md" type="button" disabled>禁用主按钮</button>
+          <button class="btn btn--secondary btn--md" type="button" disabled>禁用次按钮</button>
+          <button class="btn btn--primary btn--md" type="button" id="btn-loading">
+            <span class="btn__spinner" aria-hidden="true"></span>
+            <span class="btn__label">加载数据</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="demo">
+        <h3>带图标</h3>
+        <p class="demo__desc">图标与文字间距使用 spacing-sm</p>
+        <div class="demo__content demo-row">
+          <button class="btn btn--primary btn--md" type="button"><svg class="icon icon--16"><use href="#i-plus"/></svg>添加课程</button>
+          <button class="btn btn--secondary btn--md" type="button"><svg class="icon icon--16"><use href="#i-search"/></svg>查询</button>
+          <button class="btn btn--danger btn--md" type="button"><svg class="icon icon--16"><use href="#i-trash"/></svg>删除</button>
+          <button class="btn btn--ghost btn--md" type="button">标记完成<svg class="icon icon--16"><use href="#i-check"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 03 输入控件 ================= -->
+  <section class="section" id="sec-input">
+    <div class="section__head">
+      <span class="section__index">03</span>
+      <h2 class="section__title">输入控件</h2>
+    </div>
+
+    <div class="demo-grid demo-grid--2">
+      <div class="demo">
+        <h3>Input 输入框</h3>
+        <div class="demo__content">
+          <div class="field">
+            <label class="field__label" for="inp-name">课程名称</label>
+            <input class="input" id="inp-name" type="text" placeholder="例如：高等数学">
+          </div>
+          <div class="field">
+            <label class="field__label" for="inp-search">搜索课程（带图标）</label>
+            <div class="input-wrap">
+              <svg class="icon icon--18 input-wrap__icon"><use href="#i-search"/></svg>
+              <input class="input input--icon" id="inp-search" type="text" placeholder="搜索课程、教师或教室">
+            </div>
+          </div>
+          <div class="field field--error">
+            <label class="field__label" for="inp-weeks">开课周次</label>
+            <input class="input" id="inp-weeks" type="text" value="第 1-16" aria-invalid="true">
+            <p class="field__error"><svg class="icon icon--12"><use href="#i-alert"/></svg>格式不正确，示例：第 1-16 周</p>
+          </div>
+          <div class="field">
+            <label class="field__label" for="inp-note">备注（禁用态）</label>
+            <input class="input" id="inp-note" type="text" disabled placeholder="暂无修改权限">
+          </div>
+        </div>
+      </div>
+
+      <div class="demo">
+        <h3>Select / Switch / 日期</h3>
+        <div class="demo__content">
+          <div class="field">
+            <label class="field__label" for="select-semester-trigger">学期（自定义下拉 AppSelect）</label>
+            <div class="select" id="select-semester">
+              <button class="select__trigger" id="select-semester-trigger" type="button" role="combobox" aria-label="选择学期" aria-expanded="false">
+                <span id="select-semester-label">2026 春季学期</span>
+                <svg class="icon icon--16"><use href="#i-arrow-down"/></svg>
+              </button>
+              <div class="select__menu" id="select-semester-menu" role="listbox" aria-label="选择学期">
+                <button class="select-option is-selected" type="button" role="option" aria-selected="true" data-value="2026-spring">2026 春季学期<svg class="icon icon--16 select-option__check"><use href="#i-check"/></svg></button>
+                <button class="select-option" type="button" role="option" aria-selected="false" data-value="2026-summer">2026 夏季学期<svg class="icon icon--16 select-option__check"><use href="#i-check"/></svg></button>
+                <button class="select-option" type="button" role="option" aria-selected="false" data-value="2026-fall">2026 秋季学期<svg class="icon icon--16 select-option__check"><use href="#i-check"/></svg></button>
+              </div>
+            </div>
+            <p class="demo-note"><svg class="icon icon--14"><use href="#i-info"/></svg>AppSelect 尺寸：sm 32px（顶栏内嵌）/ md 40px（表单，本示例）；触发器 role="combobox" + aria-expanded，点击外部关闭（文档级 mousedown 监听，无遮罩）。</p>
+          </div>
+          <div class="field">
+            <label class="field__label">课程颜色（课程色板三值色卡）</label>
+            <div class="swatch-picks" id="color-picks-static">
+              <span class="swatch-pick is-selected" style="--sw-bg:var(--course-1-bg);--sw-line:var(--course-1-line);--sw-text:var(--course-1-text)" aria-label="蓝色"></span>
+              <span class="swatch-pick" style="--sw-bg:var(--course-2-bg);--sw-line:var(--course-2-line);--sw-text:var(--course-2-text)" aria-label="绿色"></span>
+              <span class="swatch-pick" style="--sw-bg:var(--course-3-bg);--sw-line:var(--course-3-line);--sw-text:var(--course-3-text)" aria-label="紫色"></span>
+              <span class="swatch-pick" style="--sw-bg:var(--course-4-bg);--sw-line:var(--course-4-line);--sw-text:var(--course-4-text)" aria-label="橙色"></span>
+              <span class="swatch-pick" style="--sw-bg:var(--course-5-bg);--sw-line:var(--course-5-line);--sw-text:var(--course-5-text)" aria-label="青色"></span>
+              <span class="swatch-pick" style="--sw-bg:var(--course-6-bg);--sw-line:var(--course-6-line);--sw-text:var(--course-6-text)" aria-label="玫红色"></span>
+              <span class="swatch-pick" style="--sw-bg:var(--course-7-bg);--sw-line:var(--course-7-line);--sw-text:var(--course-7-text)" aria-label="靛蓝色"></span>
+              <span class="swatch-pick" style="--sw-bg:var(--course-8-bg);--sw-line:var(--course-8-line);--sw-text:var(--course-8-text)" aria-label="黄色"></span>
+            </div>
+            <p class="demo-note"><svg class="icon icon--14"><use href="#i-info"/></svg>颜色选择一律使用课程色板色卡（选中描边 --color-border-focus 圆环）；不使用原生 select（文档 4.9 禁用）。</p>
+          </div>
+          <div class="field">
+            <label class="field__label" for="date-input">选课开始日期（日期选择）</label>
+            <div class="date-field" id="date-field">
+              <input class="input" id="date-input" type="text" readonly placeholder="请选择日期">
+              <button class="icon-btn icon-btn--inset" id="date-trigger" type="button" aria-label="打开日历"><svg class="icon icon--18"><use href="#i-calendar"/></svg></button>
+              <div class="popover" id="date-popover" role="dialog" aria-label="选择日期">
+                <div class="date-head">
+                  <button class="date-nav" id="date-prev" type="button" aria-label="上个月"><svg class="icon icon--16"><use href="#i-arrow-left"/></svg></button>
+                  <span class="date-head__title" id="date-title"></span>
+                  <button class="date-nav" id="date-next" type="button" aria-label="下个月"><svg class="icon icon--16"><use href="#i-arrow-right"/></svg></button>
+                </div>
+                <div class="date-weekdays"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+                <div class="date-grid" id="date-grid"></div>
+              </div>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field__label">开关 Switch（关闭态 bg-subtle / 开启态 brand）</label>
+            <div class="switch-row">
+              <input class="switch" type="checkbox" id="switch-ring" role="switch" checked>
+              <label for="switch-ring">铃声提醒</label>
+            </div>
+            <div class="switch-row">
+              <input class="switch" type="checkbox" id="switch-biweek" role="switch">
+              <label for="switch-biweek">双周课程提醒</label>
+            </div>
+            <div class="switch-row">
+              <input class="switch" type="checkbox" id="switch-exam" role="switch" checked disabled>
+              <label for="switch-exam">考试倒计时（禁用态）</label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 04 标签与徽章 ================= -->
+  <section class="section" id="sec-tag">
+    <div class="section__head">
+      <span class="section__index">04</span>
+      <h2 class="section__title">标签与徽章</h2>
+    </div>
+
+    <div class="demo-grid demo-grid--2">
+      <div class="demo">
+        <h3>Tag 标签（浅底描边结构）</h3>
+        <div class="demo__content">
+          <div class="sub-label">课程色 Tag（课程色三值）</div>
+          <div class="demo-row">
+            <span class="tag" style="--tag-bg:var(--course-1-bg);--tag-line:var(--course-1-line);--tag-text:var(--course-1-text)">高等数学</span>
+            <span class="tag" style="--tag-bg:var(--course-2-bg);--tag-line:var(--course-2-line);--tag-text:var(--course-2-text)">数据结构</span>
+            <span class="tag" style="--tag-bg:var(--course-3-bg);--tag-line:var(--course-3-line);--tag-text:var(--course-3-text)">大学英语</span>
+            <span class="tag" style="--tag-bg:var(--course-4-bg);--tag-line:var(--course-4-line);--tag-text:var(--course-4-text)">大学物理</span>
+            <span class="tag" style="--tag-bg:var(--course-6-bg);--tag-line:var(--course-6-line);--tag-text:var(--course-6-text)">操作系统</span>
+            <span class="tag" style="--tag-bg:var(--course-8-bg);--tag-line:var(--course-8-line);--tag-text:var(--course-8-text)">程序设计</span>
+          </div>
+          <div class="sub-label">语义 Tag 与中性 Tag</div>
+          <div class="demo-row">
+            <span class="tag tag--brand">默认选中</span>
+            <span class="tag tag--success">已完成</span>
+            <span class="tag tag--warning">考试安排</span>
+            <span class="tag tag--error">已取消</span>
+            <span class="tag tag--info">信息</span>
+            <span class="tag tag--outline">草稿</span>
+            <span class="tag tag--outline" id="tag-removable">期中<button class="tag__close" type="button" aria-label="移除标签"><svg class="icon icon--12"><use href="#i-close"/></svg></button></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="demo">
+        <h3>Badge 徽章（实心语义色）</h3>
+        <div class="demo__content">
+          <div class="sub-label">数字角标</div>
+          <div class="demo-row">
+            <span class="icon-wrap"><svg class="icon icon--24"><use href="#i-bell"/></svg><span class="badge badge--brand">3</span></span>
+            <span class="icon-wrap"><svg class="icon icon--24"><use href="#i-calendar"/></svg><span class="badge badge--error">8</span></span>
+            <span class="icon-wrap"><svg class="icon icon--24"><use href="#i-clock"/></svg><span class="badge badge--neutral">99+</span></span>
+          </div>
+          <div class="sub-label">独立徽章</div>
+          <div class="demo-row">
+            <span class="badge badge--brand">12 条消息</span>
+            <span class="badge badge--success">已同步</span>
+            <span class="badge badge--warning">考试</span>
+            <span class="badge badge--neutral">草稿</span>
+            <span class="status-dot-row"><span class="badge badge--dot badge--success"></span>在线</span>
+            <button class="btn btn--ghost btn--sm" type="button">通知<span class="badge badge--error">5</span></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 05 卡片 Card ================= -->
+  <section class="section" id="sec-card">
+    <div class="section__head">
+      <span class="section__index">05</span>
+      <h2 class="section__title">卡片 Card</h2>
+    </div>
+
+    <div class="demo-grid demo-grid--3">
+      <article class="card">
+        <div class="card__head">
+          <h3>本周安排</h3>
+          <span class="tag tag--outline tag--sm">第 1 周</span>
+        </div>
+        <p class="card__text">共 8 门课程、2 场考试。周五前需提交程序设计实验报告。</p>
+        <div class="card__meta"><svg class="icon icon--16"><use href="#i-clock"/></svg><span>更新于 8月13日 08:00</span></div>
+        <div class="card__foot card__foot--left">
+          <a class="btn btn--ghost btn--sm" href="#sec-timetable">查看详情<svg class="icon icon--14"><use href="#i-arrow-right"/></svg></a>
+        </div>
+      </article>
+
+      <article class="card card--course" style="--cc-bg:var(--course-3-bg);--cc-line:var(--course-3-line);--cc-text:var(--course-3-text)">
+        <div class="card__course-head">
+          <h3>大学英语</h3>
+          <span class="tag tag--outline tag--sm">周三 · 第 3 节</span>
+        </div>
+        <div class="card__course-body">
+          <div class="card__meta"><svg class="icon icon--16"><use href="#i-clock"/></svg><span>10:00 – 10:45</span></div>
+          <div class="card__meta"><svg class="icon icon--16"><use href="#i-calendar"/></svg><span>第 1-16 周 · 每周三</span></div>
+          <div class="card__meta"><span class="meta-dot"></span><span>Lucy 老师 · 外语楼 301</span></div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card__head">
+          <h3>导入课程表</h3>
+          <div class="card__head-actions">
+            <button class="icon-btn" type="button" aria-label="更多操作"><svg class="icon icon--18"><use href="#i-more"/></svg></button>
+          </div>
+        </div>
+        <p class="card__text">支持从教务系统导出文件一键导入，自动识别课程名称、周次与任课教师。</p>
+        <div class="card__foot">
+          <button class="btn btn--secondary btn--sm" type="button">取消</button>
+          <button class="btn btn--primary btn--sm" type="button">导入文件</button>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= 06 课表组件 ================= -->
+  <section class="section" id="sec-timetable">
+    <div class="section__head">
+      <span class="section__index">06</span>
+      <h2 class="section__title">课表组件</h2>
+    </div>
+
+    <div class="demo">
+      <h3>视图切换 Tab</h3>
+      <div class="demo__content" data-tab-group="timetable">
+        <div class="tabs" role="tablist" aria-label="视图切换">
+          <button class="tab is-active" type="button" role="tab" aria-selected="true" data-tab="panel-week">周视图</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" data-tab="panel-day">日视图</button>
+        </div>
+
+        <div class="tab-panel is-active" id="panel-week" role="tabpanel">
+          <div class="tab-panel__head">
+            <h4>周视图网格</h4>
+            <p>节次时间列吸左 + 7 天列 · 今天列主色浅底 · 跨节次合并 · 默认 12 节（含晚自习）</p>
+          </div>
+          <div class="sub-label">周导航条 WeekNav（v2.2 补全）：上一周 | 居中标题 | 下一周 + 回到本周；学期外显示「未开学」/「假期」徽标</div>
+          <div class="wnav">
+            <button class="btn btn--secondary btn--sm" type="button"><svg class="icon icon--14"><use href="#i-arrow-left"/></svg>上一周</button>
+            <div class="wnav__title">
+              <span class="wnav__dates">9月1日–9月7日</span>
+              <span class="wnav__week">第 1 周</span>
+              <span class="wnav__odd">单周</span>
+            </div>
+            <div class="wnav__right">
+              <button class="btn btn--secondary btn--sm" type="button">下一周<svg class="icon icon--14"><use href="#i-arrow-right"/></svg></button>
+              <button class="btn btn--secondary btn--sm" type="button"><svg class="icon icon--14"><use href="#i-refresh"/></svg>回到本周</button>
+            </div>
+          </div>
+          <div class="wnav">
+            <button class="btn btn--secondary btn--sm" type="button"><svg class="icon icon--14"><use href="#i-arrow-left"/></svg>上一周</button>
+            <div class="wnav__title">
+              <span class="wnav__dates">8月10日–8月16日</span>
+              <span class="wnav__holiday">假期</span>
+            </div>
+            <div class="wnav__right">
+              <button class="btn btn--secondary btn--sm" type="button">下一周<svg class="icon icon--14"><use href="#i-arrow-right"/></svg></button>
+              <button class="btn btn--secondary btn--sm" type="button"><svg class="icon icon--14"><use href="#i-refresh"/></svg>回到本周</button>
+            </div>
+          </div>
+          <div class="legend" id="week-legend">
+            <span class="legend__item" style="--c-bg:var(--course-1-bg);--c-line:var(--course-1-line)">高等数学</span>
+            <span class="legend__item" style="--c-bg:var(--course-2-bg);--c-line:var(--course-2-line)">数据结构</span>
+            <span class="legend__item" style="--c-bg:var(--course-3-bg);--c-line:var(--course-3-line)">大学英语</span>
+            <span class="legend__item" style="--c-bg:var(--course-4-bg);--c-line:var(--course-4-line)">大学物理</span>
+            <span class="legend__item" style="--c-bg:var(--course-5-bg);--c-line:var(--course-5-line)">体育</span>
+            <span class="legend__item" style="--c-bg:var(--course-6-bg);--c-line:var(--course-6-line)">操作系统</span>
+            <span class="legend__item" style="--c-bg:var(--course-7-bg);--c-line:var(--course-7-line)">线性代数</span>
+            <span class="legend__item" style="--c-bg:var(--course-8-bg);--c-line:var(--course-8-line)">程序设计</span>
+          </div>
+          <div class="week-scroll">
+            <div class="week-grid" id="week-grid" aria-label="本周课程表">
+              <div class="wg-corner"><span class="wg-corner__label">节次</span></div>
+              <div class="wg-time-col" id="wg-time-col"></div>
+              <div class="wg-day-cols" id="wg-day-cols"></div>
+            </div>
+          </div>
+          <p class="demo-note"><svg class="icon icon--14"><use href="#i-info"/></svg>跨节次课程自动合并单元格；课程色块为「浅底 + 同色系描边 + 深色文字」，悬停上浮 shadow-hover；窄屏下可横向滚动，时间列与表头吸左 / 吸顶。点击课程查看详情。</p>
+        </div>
+
+        <div class="tab-panel" id="panel-day" role="tabpanel" hidden>
+          <div class="tab-panel__head">
+            <h4>日视图卡片列表（周三）</h4>
+            <p>白卡 + 课程色圆点 · 触控目标 ≥ 44px</p>
+          </div>
+          <div class="day-list" id="day-list"></div>
+          <p class="demo-note"><svg class="icon icon--14"><use href="#i-info"/></svg>圆点取课程深色文字色（三值之一）；卡片 hover 上浮 shadow-hover。点击卡片查看详情。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="demo-grid demo-grid--2">
+      <div class="demo">
+        <h3>事项页三子 Tab SegSwitch（v2.2 补全）</h3>
+        <p class="demo__desc">按钮等宽 104px（文档 4.1 防位移）；激活块白底 + shadow-card；对应 04 文档 3.5 考试 / 实验 / 作业</p>
+        <div class="demo__content">
+          <div class="seg" role="tablist" aria-label="事项分类" data-seg-group="matters">
+            <button class="seg__btn is-active" type="button" role="tab" aria-selected="true" data-seg="考试">考试</button>
+            <button class="seg__btn" type="button" role="tab" aria-selected="false" data-seg="实验">实验</button>
+            <button class="seg__btn" type="button" role="tab" aria-selected="false" data-seg="作业">作业</button>
+          </div>
+          <div class="sub-label">列表项（作业：蓝色 info 标签 + 勾选划线态）</div>
+          <div class="matter-list">
+            <div class="matter-item"><span class="tag tag--info">作业</span><span class="matter-item__name">数字信号处理第 3 章习题</span><span class="matter-item__time">09月18日截止</span></div>
+            <div class="matter-item is-done"><span class="tag tag--info">作业</span><span class="matter-item__name">模拟集成电路设计实验报告</span><span class="matter-item__time">已完成</span></div>
+            <div class="matter-item"><span class="tag tag--warning">考试</span><span class="matter-item__name">大学物理期中</span><span class="matter-item__time">10月12日 09:00</span></div>
+            <div class="matter-item"><span class="tag" style="--tag-bg:var(--course-3-bg);--tag-line:var(--course-3-line);--tag-text:var(--course-3-text)">实验</span><span class="matter-item__name">集成电路设计综合实践</span><span class="matter-item__time">周三 · 第 9-10 节</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="demo">
+        <h3>信息面板 SidePanel（v2.2 补全）</h3>
+        <p class="demo__desc">桌面右侧 296px 栏（--side-panel-w）：本周摘要 + 待交作业（日期胶囊 warning 三件套）+ 实践与其他；平板折为三列</p>
+        <div class="demo__content side-demo">
+          <div class="sp-card">
+            <div class="sp-head">
+              <span class="ic"><svg class="icon icon--14"><use href="#i-refresh"/></svg></span>
+              <h3>本周摘要</h3>
+            </div>
+            <div class="summary-nums">
+              <div class="num-item"><b>11</b><span>门课程</span></div>
+              <div class="num-item"><b>3</b><span>实验课</span></div>
+              <div class="num-item"><b>4</b><span>今日课程</span></div>
+            </div>
+          </div>
+          <div class="sp-card">
+            <div class="sp-head">
+              <span class="ic"><svg class="icon icon--14"><use href="#i-file"/></svg></span>
+              <h3>待交作业</h3>
+            </div>
+            <div class="sp-item">
+              <div class="date-chip">09月18日截止</div>
+              <div class="sp-item__title">数字信号处理第 3 章习题</div>
+              <div class="sp-item__meta">未完成</div>
+            </div>
+            <div class="sp-item">
+              <div class="date-chip">09月25日截止</div>
+              <div class="sp-item__title">模拟集成电路设计实验报告</div>
+              <div class="sp-item__meta">未完成</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="demo">
+      <h3>移动端底部 Tab 栏 BottomTabBar（v2.2 补全）</h3>
+      <p class="demo__desc">4 项：今天 / 周课表 / 事项 / 设置；图标 + 文字竖排，选中项 --color-brand；触控目标 ≥ 44px；栏底适配安全区。桌面（≥768px）隐藏</p>
+      <div class="demo__content">
+        <div class="tabbar">
+          <button class="tabbar__item" type="button"><svg class="icon"><use href="#i-calendar"/></svg><span>今天</span></button>
+          <button class="tabbar__item is-active" type="button"><svg class="icon"><use href="#i-grid"/></svg><span>周课表</span></button>
+          <button class="tabbar__item" type="button"><svg class="icon"><use href="#i-check"/></svg><span>事项</span></button>
+          <button class="tabbar__item" type="button"><svg class="icon"><use href="#i-gear"/></svg><span>设置</span></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 07 弹层 ================= -->
+  <section class="section" id="sec-overlay">
+    <div class="section__head">
+      <span class="section__index">07</span>
+      <h2 class="section__title">弹层</h2>
+    </div>
+
+    <div class="demo-grid demo-grid--2">
+      <div class="demo">
+        <h3>桌面居中弹窗 Modal</h3>
+        <p class="demo__desc">白底 radius-xl + shadow-pop；遮罩 rgba(15,23,42,.42) + blur(4px)。窗口收窄到 768px 以下自动切换为底部弹层形态。</p>
+        <div class="demo__content">
+          <button class="btn btn--primary btn--md" type="button" data-open-overlay="overlay-modal">打开弹窗</button>
+        </div>
+      </div>
+      <div class="demo">
+        <h3>移动端底部弹层 BottomSheet</h3>
+        <p class="demo__desc">自底部滑入、顶部圆角与拖拽柄，常用于移动端操作菜单。</p>
+        <div class="demo__content">
+          <button class="btn btn--secondary btn--md" type="button" data-open-overlay="overlay-sheet">打开底部弹层</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 08 反馈 ================= -->
+  <section class="section" id="sec-feedback">
+    <div class="section__head">
+      <span class="section__index">08</span>
+      <h2 class="section__title">反馈</h2>
+    </div>
+
+    <div class="demo-grid demo-grid--2">
+      <div class="demo">
+        <h3>Toast 轻提示</h3>
+        <p class="demo__desc">白底 + shadow-pop + 语义色左条，自动消失，支持成功 / 警告 / 错误 / 信息四类</p>
+        <div class="demo__content demo-row">
+          <button class="btn btn--secondary btn--sm" type="button" data-toast="success">成功</button>
+          <button class="btn btn--secondary btn--sm" type="button" data-toast="warning">警告</button>
+          <button class="btn btn--secondary btn--sm" type="button" data-toast="error">错误</button>
+          <button class="btn btn--secondary btn--sm" type="button" data-toast="info">信息</button>
+        </div>
+      </div>
+
+      <div class="demo">
+        <h3>确认对话框 Confirm</h3>
+        <p class="demo__desc">复用弹层组件，危险操作二次确认，确认后触发对应反馈</p>
+        <div class="demo__content">
+          <button class="btn btn--danger btn--md" type="button" id="btn-confirm-open">删除课程</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="demo-grid demo-grid--2">
+      <div class="demo">
+        <h3>骨架屏 Skeleton</h3>
+        <p class="demo__desc">bg-subtle 浅底呼吸占位，无内容加载时提供稳定布局</p>
+        <div class="demo__content">
+          <button class="btn btn--secondary btn--sm" type="button" id="btn-skeleton">模拟重新加载</button>
+          <div class="skeleton-card" id="skeleton-ui" hidden>
+            <div class="skeleton skeleton--avatar" aria-hidden="true"></div>
+            <div class="skeleton-card__lines" aria-hidden="true">
+              <div class="skeleton skeleton--line skeleton--line-60"></div>
+              <div class="skeleton skeleton--line"></div>
+              <div class="skeleton skeleton--line skeleton--line-80"></div>
+            </div>
+          </div>
+          <div class="skeleton-card skeleton-card--real" id="real-content" style="--ca-bg:var(--course-1-bg);--ca-text:var(--course-1-text)">
+            <div class="skeleton-card__avatar">高</div>
+            <div>
+              <h4>高等数学</h4>
+              <p>王立 老师 · 教1-201 · 双周</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="demo">
+        <h3>空状态 Empty</h3>
+        <p class="demo__desc">无数据时的引导展示：虚线框 border-strong + 主/次双按钮（对应 04 文档 3.1 空态）</p>
+        <div class="demo__content">
+          <div class="empty">
+            <div class="empty__icon"><svg class="icon icon--28"><use href="#i-calendar"/></svg></div>
+            <h4 class="empty__title">还没有课程，先导入或手动添加</h4>
+            <p class="empty__desc">导入教务系统导出的课表 PDF，或手动录入课程，课程将自动显示在周视图中。</p>
+            <div class="empty__actions">
+              <button class="btn btn--primary btn--sm" type="button">从 PDF 导入</button>
+              <button class="btn btn--secondary btn--sm" type="button">手动添加课程</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="demo-grid demo-grid--2">
+      <div class="demo">
+        <h3>错误态 ErrorState（v2.2 补全）</h3>
+        <p class="demo__desc">三态表现之错误态：--color-feedback-error 文字图标 + 重试按钮，网格/列表整体替换（04 文档 3.1）</p>
+        <div class="demo__content">
+          <div class="error-state">
+            <div class="error-state__icon"><svg class="icon icon--28"><use href="#i-alert"/></svg></div>
+            <h4 class="error-state__title">课表加载失败</h4>
+            <p class="error-state__desc">网络异常，请检查后端服务后重试。</p>
+            <button class="btn btn--secondary btn--sm" type="button"><svg class="icon icon--14"><use href="#i-refresh"/></svg>重试</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="demo">
+        <h3>图标按钮状态（v2.2 补全）</h3>
+        <p class="demo__desc">图标按钮：悬停 --color-bg-hover；所在页激活/下拉展开时 --color-brand-subtle 底 + --color-brand 图标（04 文档 1.2）；未读角标 warning</p>
+        <div class="demo__content demo-row">
+          <button class="icon-btn" type="button" aria-label="铃铛提醒"><svg class="icon icon--18"><use href="#i-bell"/></svg></button>
+          <button class="icon-btn is-active" type="button" aria-label="设置（当前页）"><svg class="icon icon--18"><use href="#i-gear"/></svg></button>
+          <button class="icon-btn" type="button" aria-label="打印课表"><svg class="icon icon--18"><use href="#i-download"/></svg></button>
+          <span class="icon-wrap"><button class="icon-btn" type="button" aria-label="铃铛提醒（带未读角标）"><svg class="icon icon--18"><use href="#i-bell"/></svg></button><span class="badge badge--warning">3</span></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 09 图标 Icon ================= -->
+  <section class="section" id="sec-icon">
+    <div class="section__head">
+      <span class="section__index">09</span>
+      <h2 class="section__title">图标 Icon</h2>
+    </div>
+
+    <div class="demo">
+      <h3>线性图标集</h3>
+      <p class="demo__desc">统一 24×24 viewBox、1.75px 描边、currentColor 继承；每格展示 16 / 20 / 24px 三档</p>
+      <div class="demo__content icon-demo-grid">
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-grid"/></svg><svg class="icon icon--20"><use href="#i-grid"/></svg><svg class="icon icon--24"><use href="#i-grid"/></svg></div><span class="icon-demo__name">grid 周视图</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-calendar"/></svg><svg class="icon icon--20"><use href="#i-calendar"/></svg><svg class="icon icon--24"><use href="#i-calendar"/></svg></div><span class="icon-demo__name">calendar 日视图</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-clock"/></svg><svg class="icon icon--20"><use href="#i-clock"/></svg><svg class="icon icon--24"><use href="#i-clock"/></svg></div><span class="icon-demo__name">clock 时钟</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-plus"/></svg><svg class="icon icon--20"><use href="#i-plus"/></svg><svg class="icon icon--24"><use href="#i-plus"/></svg></div><span class="icon-demo__name">plus 加号</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-pencil"/></svg><svg class="icon icon--20"><use href="#i-pencil"/></svg><svg class="icon icon--24"><use href="#i-pencil"/></svg></div><span class="icon-demo__name">pencil 铅笔</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-trash"/></svg><svg class="icon icon--20"><use href="#i-trash"/></svg><svg class="icon icon--24"><use href="#i-trash"/></svg></div><span class="icon-demo__name">trash 删除</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-close"/></svg><svg class="icon icon--20"><use href="#i-close"/></svg><svg class="icon icon--24"><use href="#i-close"/></svg></div><span class="icon-demo__name">close 关闭</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-arrow-up"/></svg><svg class="icon icon--20"><use href="#i-arrow-up"/></svg><svg class="icon icon--24"><use href="#i-arrow-up"/></svg></div><span class="icon-demo__name">arrow-up 上</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-arrow-down"/></svg><svg class="icon icon--20"><use href="#i-arrow-down"/></svg><svg class="icon icon--24"><use href="#i-arrow-down"/></svg></div><span class="icon-demo__name">arrow-down 下</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-arrow-left"/></svg><svg class="icon icon--20"><use href="#i-arrow-left"/></svg><svg class="icon icon--24"><use href="#i-arrow-left"/></svg></div><span class="icon-demo__name">arrow-left 左</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-arrow-right"/></svg><svg class="icon icon--20"><use href="#i-arrow-right"/></svg><svg class="icon icon--24"><use href="#i-arrow-right"/></svg></div><span class="icon-demo__name">arrow-right 右</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-bell"/></svg><svg class="icon icon--20"><use href="#i-bell"/></svg><svg class="icon icon--24"><use href="#i-bell"/></svg></div><span class="icon-demo__name">bell 铃铛</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-download"/></svg><svg class="icon icon--20"><use href="#i-download"/></svg><svg class="icon icon--24"><use href="#i-download"/></svg></div><span class="icon-demo__name">download 下载</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-upload"/></svg><svg class="icon icon--20"><use href="#i-upload"/></svg><svg class="icon icon--24"><use href="#i-upload"/></svg></div><span class="icon-demo__name">upload 上传</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-gear"/></svg><svg class="icon icon--20"><use href="#i-gear"/></svg><svg class="icon icon--24"><use href="#i-gear"/></svg></div><span class="icon-demo__name">gear 设置</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-search"/></svg><svg class="icon icon--20"><use href="#i-search"/></svg><svg class="icon icon--24"><use href="#i-search"/></svg></div><span class="icon-demo__name">search 搜索</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-check"/></svg><svg class="icon icon--20"><use href="#i-check"/></svg><svg class="icon icon--24"><use href="#i-check"/></svg></div><span class="icon-demo__name">check 勾选</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-more"/></svg><svg class="icon icon--20"><use href="#i-more"/></svg><svg class="icon icon--24"><use href="#i-more"/></svg></div><span class="icon-demo__name">more 更多</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-user"/></svg><svg class="icon icon--20"><use href="#i-user"/></svg><svg class="icon icon--24"><use href="#i-user"/></svg></div><span class="icon-demo__name">user 用户</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-pin"/></svg><svg class="icon icon--20"><use href="#i-pin"/></svg><svg class="icon icon--24"><use href="#i-pin"/></svg></div><span class="icon-demo__name">pin 地点</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-refresh"/></svg><svg class="icon icon--20"><use href="#i-refresh"/></svg><svg class="icon icon--24"><use href="#i-refresh"/></svg></div><span class="icon-demo__name">refresh 循环</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-file"/></svg><svg class="icon icon--20"><use href="#i-file"/></svg><svg class="icon icon--24"><use href="#i-file"/></svg></div><span class="icon-demo__name">file 文件</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-alert"/></svg><svg class="icon icon--20"><use href="#i-alert"/></svg><svg class="icon icon--24"><use href="#i-alert"/></svg></div><span class="icon-demo__name">alert 警示</span></div>
+        <div class="icon-demo__cell"><div class="icon-demo__sizes"><svg class="icon icon--16"><use href="#i-info"/></svg><svg class="icon icon--20"><use href="#i-info"/></svg><svg class="icon icon--24"><use href="#i-info"/></svg></div><span class="icon-demo__name">info 信息</span></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="app-footer reveal">
+  <p>ClassBoard 设计系统参考页 · v2.2 · 清新浅色极简</p>
+  <p>设计 token 以《03-设计语言文档》第 10 节（v2.1）为唯一来源 · 组件规范以《04-UI设计文档》v2.2 为准 · 本期不做暗色模式</p>
+</footer>
+
+<!-- ================= 弹层（Modal / 课程详情 / BottomSheet / Confirm） ================= -->
+<div class="overlay" id="overlay-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-hidden="true">
+  <div class="modal">
+    <div class="modal__handle" aria-hidden="true"></div>
+    <div class="modal__head">
+      <h3 id="modal-title">添加课程</h3>
+      <button class="icon-btn" type="button" data-close-overlay aria-label="关闭"><svg class="icon icon--18"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="modal__body">
+      <div class="field">
+        <label class="field__label" for="modal-course-name">课程名称</label>
+        <input class="input" id="modal-course-name" type="text" placeholder="例如：高等数学">
+      </div>
+      <div class="field">
+        <label class="field__label">课程颜色（浅底三值色卡）</label>
+        <div class="swatch-picks" id="swatch-picks">
+          <button class="swatch-pick is-selected" type="button" style="--sw-bg:var(--course-1-bg);--sw-line:var(--course-1-line);--sw-text:var(--course-1-text)" data-color="course-1" aria-label="蓝色"><svg class="icon icon--14"><use href="#i-check"/></svg></button>
+          <button class="swatch-pick" type="button" style="--sw-bg:var(--course-2-bg);--sw-line:var(--course-2-line);--sw-text:var(--course-2-text)" data-color="course-2" aria-label="绿色"><svg class="icon icon--14"><use href="#i-check"/></svg></button>
+          <button class="swatch-pick" type="button" style="--sw-bg:var(--course-3-bg);--sw-line:var(--course-3-line);--sw-text:var(--course-3-text)" data-color="course-3" aria-label="紫色"><svg class="icon icon--14"><use href="#i-check"/></svg></button>
+          <button class="swatch-pick" type="button" style="--sw-bg:var(--course-4-bg);--sw-line:var(--course-4-line);--sw-text:var(--course-4-text)" data-color="course-4" aria-label="橙色"><svg class="icon icon--14"><use href="#i-check"/></svg></button>
+          <button class="swatch-pick" type="button" style="--sw-bg:var(--course-5-bg);--sw-line:var(--course-5-line);--sw-text:var(--course-5-text)" data-color="course-5" aria-label="青色"><svg class="icon icon--14"><use href="#i-check"/></svg></button>
+          <button class="swatch-pick" type="button" style="--sw-bg:var(--course-6-bg);--sw-line:var(--course-6-line);--sw-text:var(--course-6-text)" data-color="course-6" aria-label="玫红色"><svg class="icon icon--14"><use href="#i-check"/></svg></button>
+          <button class="swatch-pick" type="button" style="--sw-bg:var(--course-7-bg);--sw-line:var(--course-7-line);--sw-text:var(--course-7-text)" data-color="course-7" aria-label="靛蓝色"><svg class="icon icon--14"><use href="#i-check"/></svg></button>
+          <button class="swatch-pick" type="button" style="--sw-bg:var(--course-8-bg);--sw-line:var(--course-8-line);--sw-text:var(--course-8-text)" data-color="course-8" aria-label="黄色"><svg class="icon icon--14"><use href="#i-check"/></svg></button>
+        </div>
+      </div>
+      <div class="field">
+        <label class="field__label" for="modal-teacher">任课教师</label>
+        <input class="input" id="modal-teacher" type="text" placeholder="选填">
+      </div>
+    </div>
+    <div class="modal__foot">
+      <button class="btn btn--secondary btn--md" type="button" data-close-overlay>取消</button>
+      <button class="btn btn--primary btn--md" type="button" id="modal-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay-course" role="dialog" aria-modal="true" aria-labelledby="course-title" aria-hidden="true">
+  <div class="modal">
+    <div class="modal__handle" aria-hidden="true"></div>
+    <div class="modal__head">
+      <div class="modal__title-row">
+        <span class="modal__dot" id="course-dot"></span>
+        <h3 id="course-title"></h3>
+      </div>
+      <button class="icon-btn" type="button" data-close-overlay aria-label="关闭"><svg class="icon icon--18"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="modal__body">
+      <div class="m-row">
+        <span class="m-row__k"><svg class="icon"><use href="#i-user"/></svg>教师</span>
+        <span class="m-row__v" id="course-teacher"></span>
+      </div>
+      <div class="m-row">
+        <span class="m-row__k"><svg class="icon"><use href="#i-pin"/></svg>地点</span>
+        <span class="m-row__v" id="course-loc"></span>
+      </div>
+      <div class="m-row">
+        <span class="m-row__k"><svg class="icon"><use href="#i-refresh"/></svg>周次</span>
+        <span class="m-row__v" id="course-weeks"></span>
+      </div>
+      <div class="m-row">
+        <span class="m-row__k"><svg class="icon"><use href="#i-clock"/></svg>时间</span>
+        <span class="m-row__v" id="course-time"></span>
+      </div>
+      <div class="m-row m-note">
+        <span class="m-row__k"><svg class="icon"><use href="#i-file"/></svg>备注</span>
+        <span class="m-row__v" id="course-note"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay overlay--sheet" id="overlay-sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" aria-hidden="true">
+  <div class="sheet">
+    <div class="sheet__handle" aria-hidden="true"></div>
+    <div class="sheet__head">
+      <h3 id="sheet-title">课程操作</h3>
+      <button class="icon-btn" type="button" data-close-overlay aria-label="关闭"><svg class="icon icon--18"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="sheet__body">
+      <button class="sheet-row" type="button" data-sheet-action="edit"><svg class="icon icon--20"><use href="#i-pencil"/></svg><span>编辑课程</span><svg class="icon icon--16 sheet-row__arrow"><use href="#i-arrow-right"/></svg></button>
+      <button class="sheet-row sheet-row--danger" type="button" data-sheet-action="delete"><svg class="icon icon--20"><use href="#i-trash"/></svg><span>删除课程</span><svg class="icon icon--16 sheet-row__arrow"><use href="#i-arrow-right"/></svg></button>
+      <button class="sheet-row" type="button" data-sheet-action="export"><svg class="icon icon--20"><use href="#i-download"/></svg><span>导出课表</span><svg class="icon icon--16 sheet-row__arrow"><use href="#i-arrow-right"/></svg></button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay-confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-desc" aria-hidden="true">
+  <div class="modal modal--sm">
+    <div class="modal__handle" aria-hidden="true"></div>
+    <div class="modal__head">
+      <h3 id="confirm-title">删除课程</h3>
+    </div>
+    <div class="modal__body">
+      <p class="modal__desc" id="confirm-desc"></p>
+    </div>
+    <div class="modal__foot">
+      <button class="btn btn--secondary btn--md" type="button" data-close-overlay>取消</button>
+      <button class="btn btn--danger btn--md" type="button" id="confirm-ok">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-region" id="toast-region" aria-live="polite"></div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (sel, ctx) { return (ctx || document).querySelector(sel); };
+  var $$ = function (sel, ctx) { return Array.prototype.slice.call((ctx || document).querySelectorAll(sel)); };
+
+  /* ---------- Toast ---------- */
+  var toastRegion = $('#toast-region');
+  function toast(type, msg) {
+    var el = document.createElement('div');
+    el.className = 'toast toast--' + type;
+    el.setAttribute('role', 'status');
+    var icons = { success: '#i-check', warning: '#i-alert', error: '#i-close', info: '#i-info' };
+    el.innerHTML = '<svg class="icon icon--18 toast__icon"><use href="' + (icons[type] || '#i-info') + '"/></svg><span></span>';
+    el.querySelector('span').textContent = msg;
+    toastRegion.appendChild(el);
+    requestAnimationFrame(function () { el.classList.add('is-in'); });
+    setTimeout(function () {
+      el.classList.add('is-out');
+      setTimeout(function () { el.remove(); }, 150);
+    }, 3000);
+  }
+  $$('[data-toast]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var t = b.getAttribute('data-toast');
+      var msgs = { success: '保存成功', warning: '考试提醒：周三高等数学开考', error: '操作失败，请重试', info: '数据已同步' };
+      toast(t, msgs[t]);
+    });
+  });
+
+  /* ---------- 加载按钮 ---------- */
+  var btnLoading = $('#btn-loading');
+  btnLoading.addEventListener('click', function () {
+    if (this.classList.contains('is-loading')) return;
+    this.classList.add('is-loading'); this.disabled = true;
+    setTimeout(function () {
+      btnLoading.classList.remove('is-loading'); btnLoading.disabled = false;
+      toast('success', '数据加载完成');
+    }, 1600);
+  });
+
+  /* ---------- 自定义下拉 ---------- */
+  var semSel = $('#select-semester'), semTrigger = $('#select-semester-trigger'), semLabel = $('#select-semester-label');
+  function closeSelect() {
+    semSel.classList.remove('is-open');
+    semTrigger.setAttribute('aria-expanded', 'false');
+  }
+  semTrigger.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var open = semSel.classList.toggle('is-open');
+    semTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  $$('.select-option', semSel).forEach(function (opt) {
+    opt.addEventListener('click', function () {
+      semLabel.textContent = opt.textContent;
+      $$('.select-option', semSel).forEach(function (x) {
+        var on = x === opt;
+        x.classList.toggle('is-selected', on);
+        x.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      closeSelect();
+      toast('info', '学期已切换为 ' + opt.textContent);
+    });
+  });
+
+  /* ---------- 开关 ---------- */
+  $('#switch-ring').addEventListener('change', function (e) {
+    toast('info', e.target.checked ? '已开启铃声提醒' : '已关闭铃声提醒');
+  });
+  $('#switch-biweek').addEventListener('change', function (e) {
+    toast('info', e.target.checked ? '已开启双周课程提醒' : '已关闭双周课程提醒');
+  });
+
+  /* ---------- 日期选择 ---------- */
+  var dateField = $('#date-field'), dateInput = $('#date-input'),
+      datePop = $('#date-popover'), dateTitle = $('#date-title'), dateGrid = $('#date-grid');
+  var now = new Date(), dpY = now.getFullYear(), dpM = now.getMonth(), dpSel = null;
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function closeDate() { dateField.classList.remove('is-open'); datePop.classList.remove('is-open'); }
+  function openDate() {
+    dpY = now.getFullYear(); dpM = now.getMonth();
+    renderDate();
+    dateField.classList.add('is-open'); datePop.classList.add('is-open');
+  }
+  function renderDate() {
+    dateTitle.textContent = dpY + '年' + (dpM + 1) + '月';
+    dateGrid.innerHTML = '';
+    var first = new Date(dpY, dpM, 1);
+    var start = (first.getDay() + 6) % 7;
+    var dim = new Date(dpY, dpM + 1, 0).getDate();
+    for (var i = 0; i < start; i++) {
+      var blank = document.createElement('span');
+      blank.className = 'date-blank'; dateGrid.appendChild(blank);
+    }
+    for (var d = 1; d <= dim; d++) {
+      var isToday = d === now.getDate() && dpY === now.getFullYear() && dpM === now.getMonth();
+      var isSel = dpSel && dpSel.y === dpY && dpSel.m === dpM && dpSel.d === d;
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'date-cell' + (isToday ? ' date-cell--today' : '') + (isSel ? ' date-cell--selected' : '');
+      b.textContent = d;
+      b.addEventListener('click', function (day) {
+        return function () {
+          dpSel = { y: dpY, m: dpM, d: day };
+          dateInput.value = dpY + '-' + pad(dpM + 1) + '-' + pad(day);
+          renderDate(); closeDate();
+          toast('info', '已选择 ' + dpY + '年' + (dpM + 1) + '月' + day + '日');
+        };
+      }(d));
+      dateGrid.appendChild(b);
+    }
+  }
+  $('#date-prev').addEventListener('click', function () { dpM--; if (dpM < 0) { dpM = 11; dpY--; } renderDate(); });
+  $('#date-next').addEventListener('click', function () { dpM++; if (dpM > 11) { dpM = 0; dpY++; } renderDate(); });
+  $('#date-trigger').addEventListener('click', function (e) {
+    e.stopPropagation();
+    dateField.classList.contains('is-open') ? closeDate() : openDate();
+  });
+  dateInput.addEventListener('click', function (e) { e.stopPropagation(); openDate(); });
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('.date-field')) closeDate();
+    if (!e.target.closest('.select')) closeSelect();
+  });
+
+  /* ---------- Tab 切换 ---------- */
+  $$('[data-tab]').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      var group = tab.closest('[data-tab-group]');
+      $$('[data-tab]', group).forEach(function (x) {
+        var on = x === tab;
+        x.classList.toggle('is-active', on);
+        x.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      $$('[role="tabpanel"]', group).forEach(function (pn) {
+        pn.hidden = pn.id !== tab.getAttribute('data-tab');
+      });
+    });
+  });
+
+  /* ---------- 三子 Tab（SegSwitch）切换 ---------- */
+  $$('[data-seg]').forEach(function (segBtn) {
+    segBtn.addEventListener('click', function () {
+      var group = segBtn.closest('[data-seg-group]');
+      $$('[data-seg]', group).forEach(function (x) {
+        var on = x === segBtn;
+        x.classList.toggle('is-active', on);
+        x.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      toast('info', '已切换至「' + segBtn.getAttribute('data-seg') + '」分类');
+    });
+  });
+
+  /* ---------- 周视图 / 日视图（JS 生成，Mock 数据） ---------- */
+  var PERIODS = ['08:00–08:45', '08:55–09:40', '10:00–10:45', '10:55–11:40',
+                 '14:00–14:45', '14:55–15:40', '16:00–16:45', '16:55–17:40',
+                 '19:00–19:45', '19:55–20:40', '20:50–21:35', '21:45–22:30'];
+  var DAYS = [
+    { label: '周一', date: '9/1' },
+    { label: '周二', date: '9/2' },
+    { label: '周三', date: '9/3', today: true },
+    { label: '周四', date: '9/4' },
+    { label: '周五', date: '9/5' },
+    { label: '周六', date: '9/6' },
+    { label: '周日', date: '9/7' }
+  ];
+  var DAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  var COURSES = [
+    { day: 1, start: 1, span: 2, name: '高等数学', loc: '教1-201', teacher: '王立', weeks: '第 1–16 周', color: 'course-1', note: '教材：同济版《高等数学》上册。建议每周预留 2 小时完成课后习题，期中考试时间为 9 月 20 日。' },
+    { day: 1, start: 3, span: 1, name: '大学英语', loc: '外语楼 301', teacher: 'Lucy', weeks: '第 1–16 周', color: 'course-3', note: '使用《新视野大学英语》第三册，每单元含听力与写作训练，请提前完成 Unit 3 预习。' },
+    { day: 2, start: 1, span: 2, name: '数据结构', loc: '信工 A502', teacher: '赵明', weeks: '第 1–16 周', color: 'course-2', note: '上机课需自备笔记本电脑，安装好课程要求的开发环境。' },
+    { day: 2, start: 7, span: 2, name: '体育', loc: '操场东区', teacher: '陈教练', weeks: '第 1–16 周', color: 'course-5', note: '请穿运动装与运动鞋；如遇雨天，改至室内体育馆集合。' },
+    { day: 3, start: 1, span: 2, name: '大学物理', loc: '实验楼 202', teacher: '周航', weeks: '第 1–16 周', color: 'course-4', note: '实验报告需提交至课程平台，截止时间为次周周一 23:59。' },
+    { day: 3, start: 1, span: 2, name: '科技英语（选修）', loc: '教3-110', teacher: '郑宇', weeks: '第 1–16 周', color: 'course-8', conflict: true, note: '与大学物理时间重叠（示例演示冲突错位显示，见文档 4.5）：后导入者右移半格并排，右上角 warning 圆点标记。' },
+    { day: 3, start: 3, span: 2, name: '操作系统', loc: '信工 B301', teacher: '孙倩', weeks: '第 1–16 周', color: 'course-6', note: '随堂小测计入平时成绩，请携带教材与笔记本。' },
+    { day: 4, start: 1, span: 2, name: '线性代数', loc: '教2-105', teacher: '李博', weeks: '第 1–16 周', color: 'course-7', note: '随堂小测计入平时成绩，请携带教材与计算器。' },
+    { day: 4, start: 9, span: 2, name: '模拟集成电路设计实验', loc: '实验楼 305', teacher: '陈立', weeks: '第 1–16 周', color: 'course-3', lab: true, note: '实验课：需自备实验讲义，实验前完成预习报告，实验后一周内提交报告。' },
+    { day: 5, start: 3, span: 2, name: '程序设计', loc: '机房 C105', teacher: '吴桐', weeks: '第 1–16 周', color: 'course-8', note: '实验报告：9 月 15 日截止，内容为第 2 章数组与字符串练习。' }
+  ];
+
+  function buildWeekGrid() {
+    var timeCol = $('#wg-time-col');
+    PERIODS.forEach(function (p) {
+      var parts = p.split('–');
+      var cell = document.createElement('div');
+      cell.className = 'wg-time-cell';
+      cell.innerHTML = '<b>' + parts[0] + '</b><span>' + parts[1] + '</span>';
+      timeCol.appendChild(cell);
+    });
+    var dayCols = $('#wg-day-cols');
+    DAYS.forEach(function (d) {
+      var col = document.createElement('div');
+      col.className = 'wg-day-col' + (d.today ? ' today' : '');
+      var head = document.createElement('div');
+      head.className = 'wg-day-head';
+      head.innerHTML = '<div class="wd">' + d.label + (d.today ? '<span class="pill">今天</span>' : '') + '</div><div class="dt">' + d.date + '</div>';
+      var body = document.createElement('div');
+      body.className = 'wg-day-body';
+      col.appendChild(head);
+      col.appendChild(body);
+      dayCols.appendChild(col);
+    });
+    COURSES.forEach(function (c) {
+      var body = dayCols.children[c.day - 1].querySelector('.wg-day-body');
+      var el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'course-block' + (c.conflict ? ' is-conflict' : '');
+      el.style.gridRow = c.start + ' / ' + (c.start + c.span);
+      el.style.setProperty('--cb-bg', 'var(--' + c.color + '-bg)');
+      el.style.setProperty('--cb-line', 'var(--' + c.color + '-line)');
+      el.style.setProperty('--cb-text', 'var(--' + c.color + '-text)');
+      el.setAttribute('aria-label', c.name + '，' + c.loc);
+      el.innerHTML = '<span class="course-block__name">' + c.name + '</span>' +
+                     '<span class="course-block__loc">' + c.loc + '</span>' +
+                     (c.span > 1 ? '<span class="course-block__weeks">' + c.weeks + '</span>' : '') +
+                     (c.lab ? '<span class="course-block__lab">实验</span>' : '') +
+                     (c.conflict ? '<span class="course-block__flag" aria-hidden="true"></span>' : '');
+      el.addEventListener('click', function () { openModal(c); });
+      el.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openModal(c); }
+      });
+      body.appendChild(el);
+    });
+  }
+
+  function buildDayList() {
+    var todayCourses = COURSES.filter(function (c) { return c.day === 3; });
+    var list = $('#day-list');
+    todayCourses.forEach(function (c) {
+      var start = PERIODS[c.start - 1].split('–')[0];
+      var end = PERIODS[c.start + c.span - 2].split('–')[1];
+      var card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'day-card';
+      card.style.setProperty('--dc-text', 'var(--' + c.color + '-text)');
+      card.setAttribute('aria-label', c.name + '，' + c.loc);
+      card.innerHTML =
+        '<span class="day-card__dot" aria-hidden="true"></span>' +
+        '<span class="day-card__time">' + start + '–' + end + '</span>' +
+        '<span class="day-card__main"><span class="day-card__name">' + c.name + '</span><span class="day-card__meta">' + c.loc + ' · ' + c.teacher + '</span></span>' +
+        '<span class="day-card__slot">第 ' + c.start + '–' + c.end + ' 节</span>';
+      card.addEventListener('click', function () { openModal(c); });
+      list.appendChild(card);
+    });
+  }
+
+  /* ---------- 弹层（Modal / 课程详情 / BottomSheet） ---------- */
+  var lastTrigger = null;
+  function openOverlay(id) {
+    var ov = document.getElementById(id);
+    lastTrigger = document.activeElement;
+    ov.classList.add('is-open');
+    ov.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('no-scroll');
+    var f = ov.querySelector('input, button, [tabindex]');
+    if (f) f.focus({ preventScroll: true });
+  }
+  function closeOverlay(ov) {
+    ov.classList.remove('is-open');
+    ov.setAttribute('aria-hidden', 'true');
+    if (!$$('.overlay.is-open').length) document.body.classList.remove('no-scroll');
+    if (lastTrigger) lastTrigger.focus();
+  }
+  $$('[data-open-overlay]').forEach(function (b) {
+    b.addEventListener('click', function () { openOverlay(b.getAttribute('data-open-overlay')); });
+  });
+  $$('[data-close-overlay]').forEach(function (b) {
+    b.addEventListener('click', function () { closeOverlay(b.closest('.overlay')); });
+  });
+  $$('.overlay').forEach(function (ov) {
+    ov.addEventListener('click', function (e) { if (e.target === ov) closeOverlay(ov); });
+  });
+
+  /* ---------- 课程详情弹层 ---------- */
+  function openModal(c) {
+    var start = PERIODS[c.start - 1].split('–')[0];
+    var end = PERIODS[c.start + c.span - 2].split('–')[1];
+    $('#course-dot').style.background = 'var(--' + c.color + '-text)';
+    $('#course-title').textContent = c.name;
+    $('#course-teacher').textContent = c.teacher;
+    $('#course-loc').textContent = c.loc;
+    $('#course-weeks').textContent = c.weeks;
+    $('#course-time').textContent = DAY_NAMES[c.day - 1] + ' ' + start + '–' + end;
+    $('#course-note').textContent = c.note;
+    openOverlay('overlay-course');
+  }
+
+  /* ---------- 弹窗内的课程颜色选择 ---------- */
+  $$('#swatch-picks .swatch-pick').forEach(function (b) {
+    b.addEventListener('click', function () {
+      $$('#swatch-picks .swatch-pick').forEach(function (x) { x.classList.toggle('is-selected', x === b); });
+    });
+  });
+  $('#modal-save').addEventListener('click', function () {
+    var nameInput = $('#modal-course-name');
+    var name = nameInput.value.trim();
+    if (!name) {
+      nameInput.classList.add('input--invalid');
+      nameInput.focus();
+      toast('error', '请填写课程名称');
+      return;
+    }
+    nameInput.classList.remove('input--invalid');
+    closeOverlay($('#overlay-modal'));
+    nameInput.value = '';
+    $('#modal-teacher').value = '';
+    toast('success', '已保存课程「' + name + '」');
+  });
+
+  /* ---------- 底部弹层操作 ---------- */
+  $$('[data-sheet-action]').forEach(function (row) {
+    row.addEventListener('click', function () {
+      var action = row.getAttribute('data-sheet-action');
+      var sheet = $('#overlay-sheet');
+      if (action === 'edit') { closeOverlay(sheet); setTimeout(function () { toast('info', '进入课程编辑'); }, 80); }
+      if (action === 'export') { closeOverlay(sheet); setTimeout(function () { toast('success', '课表已导出'); }, 80); }
+      if (action === 'delete') {
+        closeOverlay(sheet);
+        setTimeout(function () {
+          openConfirm('删除课程', '删除后该课程的课表与提醒将一并移除，此操作不可撤销。', function () {
+            toast('error', '已删除课程「大学物理」');
+          });
+        }, 140);
+      }
+    });
+  });
+
+  /* ---------- 确认对话框 ---------- */
+  var confirmCallback = null;
+  function openConfirm(title, desc, cb) {
+    $('#confirm-title').textContent = title;
+    $('#confirm-desc').textContent = desc;
+    confirmCallback = cb;
+    openOverlay('overlay-confirm');
+  }
+  $('#btn-confirm-open').addEventListener('click', function () {
+    openConfirm('删除课程', '删除后该课程的课表与提醒将一并移除，此操作不可撤销。', function () {
+      toast('error', '已删除课程「大学英语」');
+    });
+  });
+  $('#confirm-ok').addEventListener('click', function () {
+    closeOverlay($('#overlay-confirm'));
+    var cb = confirmCallback; confirmCallback = null;
+    if (cb) cb();
+  });
+
+  /* ---------- 骨架屏 ---------- */
+  $('#btn-skeleton').addEventListener('click', function () {
+    if (this.classList.contains('is-loading')) return;
+    this.classList.add('is-loading'); this.disabled = true;
+    $('#skeleton-ui').hidden = false;
+    $('#real-content').hidden = true;
+    setTimeout(function () {
+      $('#skeleton-ui').hidden = true;
+      $('#real-content').hidden = false;
+      $('#btn-skeleton').classList.remove('is-loading');
+      $('#btn-skeleton').disabled = false;
+      toast('success', '本周 11 门课程已加载完成');
+    }, 1600);
+  });
+
+  /* ---------- 可移除标签 ---------- */
+  var removableTag = $('#tag-removable');
+  if (removableTag) {
+    removableTag.querySelector('.tag__close').addEventListener('click', function () {
+      removableTag.remove();
+      toast('info', '已移除标签「期中」');
+    });
+  }
+
+  /* ---------- Esc 关闭最上层浮层 ---------- */
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    closeSelect(); closeDate();
+    var ovs = $$('.overlay.is-open');
+    if (ovs.length) closeOverlay(ovs[ovs.length - 1]);
+  });
+
+  /* ---------- 二级导航滚动高亮 ---------- */
+  var spyLinks = $$('.section-nav__link');
+  var spySections = spyLinks.map(function (a) { return document.querySelector(a.getAttribute('href')); });
+  function updateSpy() {
+    var pos = window.scrollY + 150;
+    var cur = spySections[0];
+    spySections.forEach(function (s) { if (s.offsetTop <= pos) cur = s; });
+    spyLinks.forEach(function (a) { a.classList.toggle('is-active', a.getAttribute('href') === '#' + cur.id); });
+  }
+  window.addEventListener('scroll', updateSpy, { passive: true });
+  updateSpy();
+
+  /* ---------- 初始化构建 ---------- */
+  buildWeekGrid();
+  buildDayList();
+})();
+</script>
+</body>
+</html>
