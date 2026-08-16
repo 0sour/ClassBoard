@@ -249,7 +249,12 @@ function formatIssue(e: ImportError): string {
                         :class="{ 'has-course': !!startCellOf(wd, p) }"
                         :style="
                           startCellOf(wd, p)
-                            ? { gridRow: `${startCellOf(wd, p)!.startPeriod + 1} / ${startCellOf(wd, p)!.endPeriod + 2}` }
+                            ? {
+                                // 整表 grid：块必须同时指定所在星期列（col1 为节次列）与跨行区间，
+                                // 否则 auto-placement 会把块塞进节次列导致整表错位
+                                gridRow: `${startCellOf(wd, p)!.startPeriod + 1} / ${startCellOf(wd, p)!.endPeriod + 2}`,
+                                gridColumn: String(wd + 1),
+                              }
                             : undefined
                         "
                       >
