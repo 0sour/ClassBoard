@@ -4,6 +4,7 @@ import { computed, reactive, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import AppSelect, { type AppSelectOption } from '@/components/common/AppSelect.vue'
 import TimePicker from '@/components/common/TimePicker.vue'
+import DatePicker from '@/components/common/DatePicker.vue'
 import { confirm, toast } from '@/utils/ui'
 import type { Period, Semester } from '@/types'
 
@@ -408,11 +409,11 @@ async function toggleAccess(): Promise<void> {
           </label>
           <label class="edit-field">
             <span class="edit-field__label">开始日期</span>
-            <input v-model="newSemester.startDate" class="date-input" type="date" />
+            <DatePicker v-model="newSemester.startDate" size="sm" aria-label="开始日期" />
           </label>
           <label class="edit-field">
             <span class="edit-field__label">结束日期</span>
-            <input v-model="newSemester.endDate" class="date-input" type="date" />
+            <DatePicker v-model="newSemester.endDate" size="sm" aria-label="结束日期" />
           </label>
           <label class="edit-field">
             <span class="edit-field__label">每周起始日</span>
@@ -434,11 +435,11 @@ async function toggleAccess(): Promise<void> {
             <div class="edit-fields">
               <label class="edit-field">
                 <span class="edit-field__label">开始日期</span>
-                <input v-model="editStart" class="date-input" type="date" aria-label="开始日期" />
+                <DatePicker v-model="editStart" size="sm" aria-label="开始日期" />
               </label>
               <label class="edit-field">
                 <span class="edit-field__label">结束日期</span>
-                <input v-model="editEnd" class="date-input" type="date" aria-label="结束日期" />
+                <DatePicker v-model="editEnd" size="sm" aria-label="结束日期" />
               </label>
             </div>
             <p v-if="editError" class="edit-error" role="alert">{{ editError }}</p>

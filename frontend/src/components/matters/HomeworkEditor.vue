@@ -3,6 +3,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import AppSelect, { type AppSelectOption } from '@/components/common/AppSelect.vue'
 import TimePicker from '@/components/common/TimePicker.vue'
+import DatePicker from '@/components/common/DatePicker.vue'
 import { useScheduleStore } from '@/stores/schedule'
 import type { Homework } from '@/types'
 
@@ -121,7 +122,7 @@ async function submit(): Promise<void> {
               <label class="field field--full">
                 <span class="field__label">截止时间</span>
                 <div class="datetime-row">
-                  <input v-model="form.date" class="date-input" type="date" aria-label="截止日期" />
+                  <DatePicker v-model="form.date" size="md" aria-label="截止日期" />
                   <TimePicker v-model="form.time" size="md" aria-label="截止时间" />
                 </div>
               </label>

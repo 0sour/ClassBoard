@@ -493,6 +493,65 @@ svg { display: block; }
 .tp-opt.sel { background: var(--color-brand-subtle); color: var(--color-brand); font-weight: var(--font-weight-medium); }
 .tp-sep { display: flex; align-items: center; color: var(--color-text-tertiary); font-variant-numeric: tabular-nums; }
 
+/* ===== DatePicker 日期选择（v2.5 补全，文档 4.11） ===== */
+.dp { position: relative; display: inline-block; }
+.dp-trigger {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-xs);
+  width: 128px; padding: 0 var(--spacing-sm);
+  background: var(--color-bg-surface); color: var(--color-text-body);
+  border: 1px solid var(--color-border-default); border-radius: var(--radius-sm);
+  font-family: inherit; font-size: var(--font-size-md);
+  font-variant-numeric: tabular-nums; cursor: pointer; text-align: left;
+  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard),
+             outline-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.dp-trigger--sm { height: 32px; }
+.dp-trigger--md { height: 40px; width: 150px; }
+.dp-trigger:hover { border-color: var(--color-border-strong); }
+.dp.is-open .dp-trigger { border-color: var(--color-border-focus); outline: 2px solid var(--color-border-focus); outline-offset: 0; }
+.dp-trigger svg { flex: none; width: 14px; height: 14px; color: var(--color-text-tertiary); }
+.dp-value { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.dp-value.placeholder { color: var(--color-text-tertiary); }
+.dp-panel {
+  position: absolute; top: calc(100% + 6px); left: 0;
+  width: 264px; padding: var(--spacing-md);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop); z-index: var(--z-index-float);
+  visibility: hidden; opacity: 0; transform: translateY(-4px);
+  transition: opacity var(--motion-duration-normal) var(--motion-easing-standard),
+             transform var(--motion-duration-normal) var(--motion-easing-standard),
+             visibility 0s linear var(--motion-duration-normal);
+}
+.dp.is-open .dp-panel { visibility: visible; opacity: 1; transform: none; }
+.dp-head { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-xs); margin-bottom: var(--spacing-sm); }
+.dp-title { font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); color: var(--color-text-primary); }
+.dp-nav {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  border: none; border-radius: var(--radius-sm); background: none;
+  color: var(--color-text-secondary); cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard), color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.dp-nav:hover { background: var(--color-bg-subtle); color: var(--color-text-body); }
+.dp-nav svg { width: 15px; height: 15px; }
+.dp-week { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: var(--spacing-xs); }
+.dp-week span { text-align: center; font-size: var(--font-size-xs); color: var(--color-text-tertiary); }
+.dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.dp-day {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 30px;
+  border: none; border-radius: var(--radius-sm); background: none;
+  font-family: inherit; font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums; color: var(--color-text-body); cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard), color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.dp-day:hover { background: var(--color-bg-subtle); }
+.dp-day.today { color: var(--color-brand); font-weight: var(--font-weight-bold); }
+.dp-day.selected { background: var(--color-brand); color: var(--color-text-inverse); font-weight: var(--font-weight-medium); }
+.dp-day.selected:hover { background: var(--color-brand-hover); }
+.dp-day--blank { pointer-events: none; }
+
 /* 开关 Switch */
 .switch-row { display: flex; align-items: center; gap: var(--spacing-md); padding: 6px 0; }
 .switch-row label { flex: 1; font-size: var(--font-size-md); color: var(--color-text-body); cursor: pointer; }
@@ -1614,6 +1673,44 @@ svg { display: block; }
         <p class="demo-note"><svg class="icon icon--14"><use href="#i-info"/></svg>小时列 00–23、分钟列 00/05/…/55；选中项 brand-subtle 底 + brand 字；打开时选中项自动滚动到列中央；节次模板保存时校验时间冲突（相邻首尾相接允许）。</p>
       </div>
     </div>
+
+    <div class="demo">
+      <h3>日期选择 DatePicker（v2.5 补全）</h3>
+      <p class="demo__desc">自研日期选择（文档 4.11）：不用原生 date。触发器 + 日历面板（月份导航 / 星期表头 / 日期网格），周一为每周起始；今天 brand 加粗、选中日 brand 底白字；Teleport 到 body + fixed 跟随触发器</p>
+      <div class="demo__content">
+        <div class="sub-label">sm（设置页学期起止）与 md（考试/作业表单）</div>
+        <div class="demo-row">
+          <div class="dp" id="dp-demo">
+            <button class="dp-trigger dp-trigger--sm" type="button" role="combobox" aria-expanded="false" aria-label="开始日期">
+              <span class="dp-value" id="dp-demo-value">2026-09-07</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" /></svg>
+            </button>
+            <div class="dp-panel" id="dp-demo-panel" role="dialog" aria-label="选择日期">
+              <div class="dp-head">
+                <button class="dp-nav" type="button" aria-label="上个月" id="dp-demo-prev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg></button>
+                <span class="dp-title num" id="dp-demo-title"></span>
+                <button class="dp-nav" type="button" aria-label="下个月" id="dp-demo-next"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg></button>
+              </div>
+              <div class="dp-week" aria-hidden="true"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+              <div class="dp-grid" id="dp-demo-grid" role="grid"></div>
+            </div>
+          </div>
+          <div class="dp">
+            <button class="dp-trigger dp-trigger--md" type="button" role="combobox" aria-expanded="false">
+              <span class="dp-value">2026-12-27</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" /></svg>
+            </button>
+          </div>
+          <div class="dp">
+            <button class="dp-trigger dp-trigger--md" type="button" role="combobox" aria-expanded="false">
+              <span class="dp-value placeholder">请选择日期</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" /></svg>
+            </button>
+          </div>
+        </div>
+        <p class="demo-note"><svg class="icon icon--14"><use href="#i-info"/></svg>月份导航 28×28 hover bg-subtle；日按钮 30px 高，hover bg-subtle，今天 brand 加粗、选中 brand 底白字；超出可选范围置灰。</p>
+      </div>
+    </div>
   </section>
 
   <!-- ================= 04 标签与徽章 ================= -->
@@ -2304,6 +2401,61 @@ svg { display: block; }
     });
     document.addEventListener('click', function (e) {
       if (!e.target.closest('#tp-demo')) {
+        root.classList.remove('is-open');
+        trigger.setAttribute('aria-expanded', 'false');
+      }
+    });
+  })();
+
+  /* ---------- 日期选择 DatePicker ---------- */
+  (function () {
+    var root = $('#dp-demo'), trigger = root.querySelector('.dp-trigger'),
+        valueEl = $('#dp-demo-value'), titleEl = $('#dp-demo-title'), gridEl = $('#dp-demo-grid');
+    var y = 2026, m = 8; // 2026-09
+    var WEEK = ['一', '二', '三', '四', '五', '六', '日'];
+    function pad(n) { return String(n).padStart(2, '0'); }
+    function cur() { return valueEl.textContent; }
+    function render() {
+      titleEl.textContent = y + '年' + (m + 1) + '月';
+      gridEl.innerHTML = '';
+      var first = new Date(y, m, 1);
+      var start = (first.getDay() + 6) % 7;
+      var dim = new Date(y, m + 1, 0).getDate();
+      var parts = cur().split('-').map(Number);
+      for (var i = 0; i < start; i++) {
+        var b = document.createElement('span');
+        b.className = 'dp-day dp-day--blank'; gridEl.appendChild(b);
+      }
+      for (var d = 1; d <= dim; d++) {
+        var btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'dp-day';
+        btn.setAttribute('role', 'gridcell');
+        var now = new Date();
+        if (y === now.getFullYear() && m === now.getMonth() && d === now.getDate()) btn.classList.add('today');
+        if (parts[0] === y && parts[1] === m + 1 && parts[2] === d) {
+          btn.classList.add('selected');
+          btn.setAttribute('aria-selected', 'true');
+        }
+        btn.textContent = d;
+        btn.addEventListener('click', function (day) {
+          return function () {
+            var v = y + '-' + pad(m + 1) + '-' + pad(day);
+            valueEl.textContent = v; render();
+          };
+        }(d));
+        gridEl.appendChild(btn);
+      }
+    }
+    trigger.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var open = root.classList.toggle('is-open');
+      trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) render();
+    });
+    $('#dp-demo-prev').addEventListener('click', function (e) { e.stopPropagation(); m--; if (m < 0) { m = 11; y--; } render(); });
+    $('#dp-demo-next').addEventListener('click', function (e) { e.stopPropagation(); m++; if (m > 11) { m = 0; y++; } render(); });
+    document.addEventListener('click', function (e) {
+      if (!e.target.closest('#dp-demo')) {
         root.classList.remove('is-open');
         trigger.setAttribute('aria-expanded', 'false');
       }
