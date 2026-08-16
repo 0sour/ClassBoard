@@ -50,6 +50,7 @@ function setSemester(v: string | number | null): void {
  * 内容：未完成作业（作业截止提醒）+ 今日课程（上课提醒），数据来自真实接口 */
 const showReminderMenu = ref(false)
 const isSettings = computed(() => route.name === 'settings')
+const isMatters = computed(() => route.name === 'matters')
 
 const reminders = computed(() => {
   const list: { id: string; title: string; meta: string; kind: '课程' | '作业' }[] = []
@@ -178,6 +179,16 @@ const reminders = computed(() => {
         </div>
         <div class="menu-backdrop" v-if="showReminderMenu" @click="showReminderMenu = false"></div>
       </div>
+      <!-- 事项（考试/实验/作业，UI 设计文档 1.1：桌面顶栏入口） -->
+      <button
+        class="btn-icon"
+        :class="{ active: isMatters }"
+        type="button"
+        aria-label="事项"
+        @click="$router.push('/matters')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11H7a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-2" /><path d="M12 2v13" /><path d="m9 8 3-3 3 3" /></svg>
+      </button>
       <button
         class="btn-icon"
         :class="{ active: isSettings }"
