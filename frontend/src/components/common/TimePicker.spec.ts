@@ -26,10 +26,9 @@ describe('TimePicker', () => {
 
   it('点击触发器展开面板，包含 24 小时与 12 个 5 分钟选项', async () => {
     const w = mountPicker('08:00')
-    expect(w.find('.tp-panel').exists()).toBe(false)
+    expect(w.findAll('.tp-panel').length).toBe(0)
     await w.get('.tp-trigger').trigger('click')
     const panel = w.get('.tp-panel')
-    expect(panel.exists()).toBe(true)
     expect(panel.findAll('[role="option"]').length).toBe(24 + 12)
     w.unmount()
   })
@@ -52,10 +51,10 @@ describe('TimePicker', () => {
   it('点击外部关闭面板', async () => {
     const w = mountPicker('08:00')
     await w.get('.tp-trigger').trigger('click')
-    expect(w.find('.tp-panel').exists()).toBe(true)
+    expect(w.findAll('.tp-panel').length).toBe(1)
     await document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
     await w.vm.$nextTick()
-    expect(w.find('.tp-panel').exists()).toBe(false)
+    expect(w.findAll('.tp-panel').length).toBe(0)
     w.unmount()
   })
 })

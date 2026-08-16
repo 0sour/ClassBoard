@@ -128,6 +128,14 @@ onBeforeUnmount(() => {
 .tp {
   position: relative;
   display: inline-block;
+  /* 基础层叠归零：避免与周围内容互相干扰 */
+  z-index: 0;
+}
+
+/* 打开时把触发器连同面板整体提升到浮层层级（--z-index-float），
+   否则 absolute 面板会被页面后续内容（后续 panel）遮盖 */
+.tp.open {
+  z-index: var(--z-index-float);
 }
 
 .tp-trigger {
