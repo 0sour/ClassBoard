@@ -1,12 +1,13 @@
 <script setup lang="ts">
 // ============================================================
 // ClassBoard · TimePicker 时间选择（自研，对齐 UI 设计文档 4.10）
-// 触发器 + 弹出双列（小时 / 分钟，5 分钟步进），风格与 AppSelect 一致：
-// bg-surface 面板、border-default、shadow-pop、radius-md、z-index-float；
-// 点击外部关闭（文档级 mousedown 监听，无遮罩）。
+// 触发器 + 弹出双列（小时 / 分钟，5 分钟步进），风格与 AppSelect 一致。
+// 弹出面板通过 Teleport 渲染到 body 并以 fixed 定位跟随触发器，
+// 避免被页面内任意层叠上下文/裁剪容器遮挡（此前 z-index 方案在部分
+// 布局下失效）；滚动/缩放窗口时面板跟随触发器移动。
 // 全项目时间选择一律使用本组件，不使用原生 <input type="time">。
 // ============================================================
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = defineProps<{
   /** 值：HH:mm */
@@ -21,6 +22,11 @@ const emit = defineEmits<{ (e: 'update:modelValue', value: string): void }>()
 
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)
+const trigger = ref<HTMLElement | null>(null)
+
+// 面板 fixed 定位（相对视口）
+const panelX = ref(0)
+const panelY = ref(0)
 
 const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
 const minutes = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0'))
@@ -30,9 +36,30 @@ const minute = computed(() => props.modelValue?.slice(3, 5) || '00')
 
 const display = computed(() => (props.modelValue ? props.modelValue : (props.placeholder ?? '请选择时间')))
 
+const panelStyle = computed(() => ({
+  position: 'fixed' as const,
+  left: `${panelX.value}px`,
+  top: `${panelY.value}px`,
+  zIndex: 9999,
+}))
+
+/** 依据触发器位置计算面板坐标（底部 +6px；宽度溢出视口时回退对齐右缘） */
+function updatePosition(): void {
+  const r = trigger.value?.getBoundingClientRect()
+  if (!r) return
+  let x = r.left
+  const panelW = 132
+  if (x + panelW > window.innerWidth - 8) x = Math.max(8, window.innerWidth - panelW - 8)
+  panelX.value = Math.round(x)
+  panelY.value = Math.round(r.bottom + 6)
+}
+
 function toggle(): void {
   open.value = !open.value
-  if (open.value) scrollSelectedIntoView()
+  if (open.value) {
+    updatePosition()
+    scrollSelectedIntoView()
+  }
 }
 
 function pickHour(h: string): void {
@@ -51,6 +78,11 @@ function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape') open.value = false
 }
 
+/** 滚动/缩放时面板跟随触发器；同时用于外部点击关闭的兜底 */
+function onViewportChange(): void {
+  if (open.value) updatePosition()
+}
+
 /** 打开时把选中项滚动到列中央（仅滚动列容器，不影响页面） */
 function scrollSelectedIntoView(): void {
   nextTick(() => {
@@ -66,17 +98,27 @@ function scrollSelectedIntoView(): void {
 onMounted(() => {
   document.addEventListener('mousedown', onDocMouseDown)
   document.addEventListener('keydown', onKeydown)
+  window.addEventListener('scroll', onViewportChange, true)
+  window.addEventListener('resize', onViewportChange)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousedown', onDocMouseDown)
   document.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('scroll', onViewportChange, true)
+  window.removeEventListener('resize', onViewportChange)
+})
+
+// 值变化时刷新面板选中态滚动位置（面板打开状态下）
+watch(() => props.modelValue, () => {
+  if (open.value) scrollSelectedIntoView()
 })
 </script>
 
 <template>
   <div ref="root" class="tp" :class="[`tp--${size ?? 'sm'}`, { open }]">
     <button
+      ref="trigger"
       class="tp-trigger"
       type="button"
       role="combobox"
@@ -87,9 +129,18 @@ onBeforeUnmount(() => {
       <span class="tp-value" :class="{ placeholder: !modelValue }">{{ display }}</span>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
     </button>
+  </div>
 
+  <!-- 面板渲染到 body：fixed 定位跟随触发器，规避页面内层叠/裁剪遮挡 -->
+  <Teleport to="body">
     <Transition name="tp-pop">
-      <div v-if="open" class="tp-panel" role="dialog" :aria-label="`选择时间 ${ariaLabel ?? ''}`">
+      <div
+        v-if="open"
+        class="tp-panel"
+        :style="panelStyle"
+        role="dialog"
+        :aria-label="`选择时间 ${ariaLabel ?? ''}`"
+      >
         <div class="tp-col" role="listbox" aria-label="小时">
           <button
             v-for="h in hours"
@@ -121,21 +172,13 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </Transition>
-  </div>
+  </Teleport>
 </template>
 
 <style scoped>
 .tp {
   position: relative;
   display: inline-block;
-  /* 基础层叠归零：避免与周围内容互相干扰 */
-  z-index: 0;
-}
-
-/* 打开时把触发器连同面板整体提升到浮层层级（--z-index-float），
-   否则 absolute 面板会被页面后续内容（后续 panel）遮盖 */
-.tp.open {
-  z-index: var(--z-index-float);
 }
 
 .tp-trigger {
@@ -199,11 +242,8 @@ onBeforeUnmount(() => {
   color: var(--color-text-tertiary);
 }
 
-/* 弹出面板：小时 / 分钟 双列滚动 */
+/* 弹出面板：小时 / 分钟 双列滚动（位置由行内 fixed 样式控制） */
 .tp-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
   display: flex;
   align-items: stretch;
   gap: 2px;
@@ -213,7 +253,6 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-pop);
-  z-index: var(--z-index-float);
 }
 
 .tp-col {
