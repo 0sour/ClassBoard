@@ -54,8 +54,14 @@ const grid = computed<Record<number, PreviewCell[]>>(() => {
   return map
 })
 
-function cellOf(weekday: number, period: number): PreviewCell | undefined {
-  return grid.value[weekday]?.find((c) => c.startPeriod <= period && period <= c.endPeriod)
+/** 该位置是否为课程的起始节次（跨节次课程在此渲染合并块） */
+function startCellOf(weekday: number, period: number): PreviewCell | undefined {
+  return grid.value[weekday]?.find((c) => c.startPeriod === period)
+}
+
+/** 该位置是否被跨节次课程覆盖（非起始节次 → 跳过渲染，避免与合并块冲突） */
+function coveredBySpan(weekday: number, period: number): boolean {
+  return grid.value[weekday]?.some((c) => c.startPeriod < period && period <= c.endPeriod) ?? false
 }
 
 const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日']
@@ -234,11 +240,28 @@ function formatIssue(e: ImportError): string {
                   <div v-for="wd in 7" :key="'h' + wd" class="preview__head">{{ weekdayLabel(wd) }}</div>
                   <template v-for="p in GRID_PERIODS" :key="'r' + p">
                     <div class="preview__period">{{ p }}</div>
-                    <div v-for="wd in 7" :key="'c' + wd + '-' + p" class="preview__cell">
-                      <span v-if="cellOf(wd, p)" class="preview-course" :class="{ 'preview-course--lab': cellOf(wd, p)!.type === 'lab' }">
-                        {{ cellOf(wd, p)!.name }}
-                      </span>
-                    </div>
+                    <!-- 跨节次课程在起始节次渲染合并块（gridRow 跨到结束节次），
+                         被覆盖的中间/结束节次跳过渲染 -->
+                    <template v-for="wd in 7" :key="'c' + wd + '-' + p">
+                      <div
+                        v-if="!coveredBySpan(wd, p)"
+                        class="preview__cell"
+                        :class="{ 'has-course': !!startCellOf(wd, p) }"
+                        :style="
+                          startCellOf(wd, p)
+                            ? { gridRow: `${startCellOf(wd, p)!.startPeriod + 1} / ${startCellOf(wd, p)!.endPeriod + 2}` }
+                            : undefined
+                        "
+                      >
+                        <span
+                          v-if="startCellOf(wd, p)"
+                          class="preview-course"
+                          :class="{ 'preview-course--lab': startCellOf(wd, p)!.type === 'lab' }"
+                        >
+                          {{ startCellOf(wd, p)!.name }}
+                        </span>
+                      </div>
+                    </template>
                   </template>
                 </div>
               </div>
@@ -587,7 +610,9 @@ function formatIssue(e: ImportError): string {
 
 .preview__grid {
   display: grid;
+  /* 显式行轨道：第 1 行表头 + GRID_PERIODS 行，供跨节次课程块 gridRow 跨行 */
   grid-template-columns: 44px repeat(7, minmax(64px, 1fr));
+  grid-template-rows: auto repeat(10, minmax(34px, auto));
   min-width: 560px;
 }
 
@@ -618,8 +643,15 @@ function formatIssue(e: ImportError): string {
   border-right: 1px solid var(--color-border-default);
 }
 
+/* 跨节次合并块：撑满 cell（去 padding），块自身填满高度 */
+.preview__cell.has-course {
+  padding: 0;
+}
+
 .preview-course {
-  display: block;
+  display: flex;
+  align-items: center;
+  height: 100%;
   padding: 3px 5px;
   border-radius: var(--radius-sm);
   background: var(--color-brand-subtle);
