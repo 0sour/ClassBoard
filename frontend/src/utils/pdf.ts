@@ -22,7 +22,7 @@ export interface PdfPageData {
   spans: PdfSpan[]
 }
 
-/** 规范化后的导入行（与 Course 同构，缺 id/color/semesterId） */
+/** 规范化后的导入行（与 Course 同构，缺 id/semesterId；color 由前端轮询分配后随行提交） */
 export interface ImportRow {
   name: string
   type: CourseType
@@ -34,6 +34,8 @@ export interface ImportRow {
   startPeriod: number
   endPeriod: number
   remark: string
+  /** 颜色：前端按 8 色轮询规则分配（服务端缺省 course-1） */
+  color?: string
 }
 
 /** 行级错误 */

@@ -306,14 +306,22 @@ export const useScheduleStore = defineStore('schedule', () => {
   }
 
   /** 导入落库：remote 模式提交服务端事务（追加/覆盖），本地模式直接写入。
+   * 颜色分配与手动录入一致（技术设计 3.3.1）：按录入顺序 8 色轮询，同名复用。
    * @param semesterId 目标学期，缺省为当前学期
    * @returns 实际写入的课程数
    */
   async function importCourses(rows: ImportRow[], mode: 'append' | 'overwrite', semesterId?: number): Promise<number> {
     const targetId = semesterId ?? currentSemesterId.value
     if (targetId === null) throw new Error('未设置当前学期，请先创建学期')
+    // 逐行分配颜色：同名复用已有颜色，其余按顺序轮询（与 addCourse 一致）
+    let autoCount = courses.value.length
+    const colored = rows.map((row) => {
+      const { color, autoCount: next } = pickCourseColor(courses.value, row.name, autoCount)
+      autoCount = next
+      return { ...row, color }
+    })
     if (remote.value) {
-      const res = await api.importConfirm({ mode, semesterId: targetId, rows })
+      const res = await api.importConfirm({ mode, semesterId: targetId, rows: colored })
       await refreshSchedule()
       return res.count
     }
@@ -321,9 +329,8 @@ export const useScheduleStore = defineStore('schedule', () => {
     if (mode === 'overwrite') {
       courses.value = courses.value.filter((c) => c.semesterId !== targetId)
     }
-    let autoCount = courses.value.length
     let added = 0
-    for (const row of rows) {
+    for (const row of colored) {
       const { color, autoCount: next } = pickCourseColor(courses.value, row.name, autoCount)
       autoCount = next
       courses.value.push({ ...row, id: nextId(), semesterId: targetId, color })
