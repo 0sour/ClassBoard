@@ -2,6 +2,7 @@
 // 作业编辑弹窗（规范 3.5 / PRD 5.7）：新增与编辑共用
 import { computed, reactive, ref, watch } from 'vue'
 import AppSelect, { type AppSelectOption } from '@/components/common/AppSelect.vue'
+import TimePicker from '@/components/common/TimePicker.vue'
 import { useScheduleStore } from '@/stores/schedule'
 import type { Homework } from '@/types'
 
@@ -14,7 +15,8 @@ const store = useScheduleStore()
 const form = reactive({
   courseId: null as number | null,
   name: '',
-  dueAt: '',
+  date: '',
+  time: '',
   done: false,
   remark: '',
 })
@@ -37,13 +39,15 @@ watch(
     if (props.homework) {
       form.courseId = props.homework.courseId
       form.name = props.homework.name
-      form.dueAt = props.homework.dueAt.slice(0, 16)
+      form.date = props.homework.dueAt.slice(0, 10)
+      form.time = props.homework.dueAt.slice(11, 16)
       form.done = props.homework.done
       form.remark = props.homework.remark
     } else {
       form.courseId = null
       form.name = ''
-      form.dueAt = ''
+      form.date = ''
+      form.time = ''
       form.done = false
       form.remark = ''
     }
@@ -61,8 +65,8 @@ async function submit(): Promise<void> {
     error.value = '请填写作业名称'
     return
   }
-  if (!form.dueAt) {
-    error.value = '请选择截止时间'
+  if (!form.date || !form.time) {
+    error.value = '请选择截止日期与时间'
     return
   }
   busy.value = true
@@ -70,7 +74,7 @@ async function submit(): Promise<void> {
     const payload = {
       courseId: form.courseId,
       name,
-      dueAt: form.dueAt,
+      dueAt: `${form.date}T${form.time}`,
       done: form.done,
       remark: form.remark.trim(),
     }
@@ -116,7 +120,10 @@ async function submit(): Promise<void> {
               </label>
               <label class="field field--full">
                 <span class="field__label">截止时间</span>
-                <input v-model="form.dueAt" class="text-input" type="datetime-local" aria-label="截止时间" />
+                <div class="datetime-row">
+                  <input v-model="form.date" class="date-input" type="date" aria-label="截止日期" />
+                  <TimePicker v-model="form.time" size="md" aria-label="截止时间" />
+                </div>
               </label>
               <label class="field">
                 <span class="field__label">完成状态</span>
@@ -243,6 +250,31 @@ async function submit(): Promise<void> {
 }
 
 .text-input:focus {
+  outline: none;
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 2px var(--color-brand-subtle);
+}
+
+.datetime-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.date-input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0 var(--spacing-md);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-surface);
+  color: var(--color-text-body);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+}
+
+.date-input:focus {
   outline: none;
   border-color: var(--color-brand);
   box-shadow: 0 0 0 2px var(--color-brand-subtle);

@@ -3,6 +3,7 @@
 import { computed, reactive, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import AppSelect, { type AppSelectOption } from '@/components/common/AppSelect.vue'
+import TimePicker from '@/components/common/TimePicker.vue'
 import { confirm, toast } from '@/utils/ui'
 import type { Period, Semester } from '@/types'
 
@@ -482,9 +483,9 @@ async function toggleAccess(): Promise<void> {
                 <span class="p-idx">第 {{ p.index }} 节</span>
               </div>
               <div class="p-edit-row">
-                <input v-model="periodEditStart" class="time-input" type="time" aria-label="开始时间" />
+                <TimePicker v-model="periodEditStart" size="sm" aria-label="开始时间" />
                 <span class="p-dash">–</span>
-                <input v-model="periodEditEnd" class="time-input" type="time" aria-label="结束时间" />
+                <TimePicker v-model="periodEditEnd" size="sm" aria-label="结束时间" />
               </div>
               <p v-if="periodEditError" class="p-error" role="alert">{{ periodEditError }}</p>
               <div class="p-actions">
@@ -518,9 +519,9 @@ async function toggleAccess(): Promise<void> {
               <span class="p-idx">新节次</span>
             </div>
             <div class="p-edit-row">
-              <input v-model="newPeriod.startTime" class="time-input" type="time" aria-label="开始时间" />
+              <TimePicker v-model="newPeriod.startTime" size="sm" aria-label="开始时间" />
               <span class="p-dash">–</span>
-              <input v-model="newPeriod.endTime" class="time-input" type="time" aria-label="结束时间" />
+              <TimePicker v-model="newPeriod.endTime" size="sm" aria-label="结束时间" />
             </div>
             <p v-if="periodError" class="p-error" role="alert">{{ periodError }}</p>
             <div class="p-actions">
