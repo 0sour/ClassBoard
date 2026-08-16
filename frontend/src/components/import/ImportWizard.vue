@@ -643,26 +643,30 @@ function formatIssue(e: ImportError): string {
   border-right: 1px solid var(--color-border-default);
 }
 
-/* 跨节次合并块：撑满 cell（去 padding），块自身填满高度 */
+/* 跨节次合并块：保留 cell 内边距，块带外框独立于网格 */
 .preview__cell.has-course {
-  padding: 0;
+  padding: 2px;
 }
 
 .preview-course {
   display: flex;
   align-items: center;
+  justify-content: center;
   height: 100%;
   padding: 3px 5px;
   border-radius: var(--radius-sm);
+  border: 1px solid var(--color-brand-line);
   background: var(--color-brand-subtle);
   color: var(--color-brand);
   font-size: var(--font-size-xs);
   line-height: 1.35;
+  text-align: center;
   word-break: break-all;
 }
 
 .preview-course--lab {
-  background: var(--color-feedback-warning-subtle, #fff7e6);
+  background: #fff7e6;
+  border-color: #f6d5b0;
   color: #8a5a00;
 }
 
