@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import CourseBlock from './CourseBlock.vue'
 import { computeOverlapGroups } from '@/utils/course'
@@ -35,10 +35,34 @@ const columns = computed(() => {
   }
   return out
 })
+
+// ============================================================
+// 桌面端动态行高：让 12 节课表在常见分辨率（1280×720 / 1920×1080）下
+// 一屏完整显示、无需滚动页面。
+// 公式：行高 = (视口高 − 页面上部固定开销 200px − 表头 44px) / 12 节，
+// 上限 64px（设计 token），下限 36px（保证课程块可读）。
+// 平板/移动端仍用断点 token（52/56px）。
+// ============================================================
+const isDesktop = ref(window.innerWidth >= 1280)
+const viewportH = ref(window.innerHeight)
+
+function onResize(): void {
+  isDesktop.value = window.innerWidth >= 1280
+  viewportH.value = window.innerHeight
+}
+
+onMounted(() => window.addEventListener('resize', onResize))
+onBeforeUnmount(() => window.removeEventListener('resize', onResize))
+
+const rowHeight = computed(() => {
+  if (!isDesktop.value) return null
+  const h = Math.floor((viewportH.value - 244) / 12)
+  return Math.min(64, Math.max(36, h))
+})
 </script>
 
 <template>
-  <div class="weekgrid">
+  <div class="weekgrid" :style="rowHeight ? { '--ph-row-dyn': rowHeight + 'px' } : undefined">
     <!-- 时间列 -->
     <div class="col time-col" aria-hidden="true">
       <div class="day-head corner"></div>
@@ -94,7 +118,9 @@ const columns = computed(() => {
 }
 
 .col {
-  --ph-row: var(--ph-desktop);
+  /* 桌面端优先使用动态行高（--ph-row-dyn，WeekGrid 按视口计算），
+     未设置时回退设计 token；平板/移动端断点仍覆盖为 52/56px */
+  --ph-row: var(--ph-row-dyn, var(--ph-desktop));
   display: grid;
   /* 仅显式定义表头行；节次行由 grid-auto-rows 生成（行高跟随 --ph-row 断点）。
      注意：不可用 v-bind 拼接 var(--ph-row) —— 该变量在根元素计算时未定义，

@@ -58,27 +58,25 @@ async function exportPng(): Promise<void> {
       <div class="week-main">
         <WeekNav class="reveal" />
 
-        <!-- 打印 / 导出 PNG（UI 设计文档 4.7） -->
-        <div class="week-actions">
-          <button class="act-btn" type="button" @click="printWeek">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V2h12v7" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect width="12" height="8" x="6" y="14" rx="1" /></svg>
-            打印
-          </button>
-          <button class="act-btn" type="button" :disabled="exporting" @click="exportPng">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5" /><path d="M12 15V3" /></svg>
-            {{ exporting ? '导出中…' : '导出 PNG' }}
-          </button>
-        </div>
-
         <section class="schedule-card reveal">
-          <div class="scroll-hint">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6-6 6 6 6" /><path d="m15 6 6 6-6 6" /></svg>
-            <span>左右滑动查看本周全部课程 · 点击课程查看详情</span>
-          </div>
           <div class="sched-scroll">
             <WeekGrid @open="openCourse" />
           </div>
         </section>
+
+        <!-- 课表底部操作条：打印 / 导出 PNG（UI 设计文档 4.7，操作对象仅限课表网格） -->
+        <div class="card-foot">
+          <div class="week-actions">
+            <button class="act-btn" type="button" @click="printWeek">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V2h12v7" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect width="12" height="8" x="6" y="14" rx="1" /></svg>
+              打印
+            </button>
+            <button class="act-btn" type="button" :disabled="exporting" @click="exportPng">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5" /><path d="M12 15V3" /></svg>
+              {{ exporting ? '导出中…' : '导出 PNG' }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- 信息面板（桌面右侧 / 平板下方三列） -->
@@ -153,8 +151,7 @@ async function exportPng(): Promise<void> {
   :global(.topbar),
   :global(.tabbar),
   :global(.side-panel),
-  :global(.scroll-hint),
-  .week-actions {
+  .card-foot {
     display: none !important;
   }
 
@@ -181,22 +178,21 @@ async function exportPng(): Promise<void> {
   background: transparent;
 }
 
-.scroll-hint {
+/* 课表底部操作条（原卡片头部移至此）：打印/导出右对齐 */
+.card-foot {
   display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  font-size: var(--font-size-xs);
-  color: var(--color-text-tertiary);
+  justify-content: flex-end;
   padding: var(--spacing-sm) var(--spacing-md);
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border-default);
-  border-bottom: none;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-top: none;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
-.scroll-hint svg {
-  width: 14px;
-  height: 14px;
+/* 打印 / 导出操作条（文档 4.7：操作对象仅限课表网格） */
+.week-actions {
+  display: flex;
+  gap: var(--spacing-sm);
 }
 
 .sched-scroll {
