@@ -385,6 +385,8 @@ function formatIssue(e: ImportError): string {
   display: flex;
   align-items: center;
   padding: var(--spacing-lg) var(--spacing-xl) 0;
+  /* 重置 <ol> 默认序号：序号由 .steps-dot 自绘，避免出现多余的 "1. 2. 3." */
+  list-style: none;
 }
 
 .steps-item {
