@@ -179,7 +179,7 @@ const reminders = computed(() => {
         </div>
         <div class="menu-backdrop" v-if="showReminderMenu" @click="showReminderMenu = false"></div>
       </div>
-      <!-- 事项（考试/实验/作业，UI 设计文档 1.1：桌面顶栏入口） -->
+      <!-- 事项（考试/实验/作业，UI 设计文档 1.1：桌面顶栏入口；图标与底部 Tab 一致为列表） -->
       <button
         class="btn-icon"
         :class="{ active: isMatters }"
@@ -187,7 +187,7 @@ const reminders = computed(() => {
         aria-label="事项"
         @click="$router.push('/matters')"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11H7a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-2" /><path d="M12 2v13" /><path d="m9 8 3-3 3 3" /></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13" /><path d="M3 6h.01M3 12h.01M3 18h.01" /></svg>
       </button>
       <button
         class="btn-icon"
