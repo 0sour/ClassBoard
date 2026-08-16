@@ -4,7 +4,7 @@ import { computed, reactive, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import AppSelect, { type AppSelectOption } from '@/components/common/AppSelect.vue'
 import { confirm, toast } from '@/utils/ui'
-import type { Semester } from '@/types'
+import type { Period, Semester } from '@/types'
 
 const store = useScheduleStore()
 
@@ -137,25 +137,69 @@ async function removeSemester(s: Semester): Promise<void> {
   }
 }
 
-// ================= 节次时间模板 =================
+// ================= 节次时间模板（卡片网格 + 行内编辑 + 时间冲突校验） =================
 const periodBusy = ref(false)
 const periodError = ref('')
-const newPeriod = reactive({ startTime: '08:00', endTime: '08:45' })
+const showNewPeriodCard = ref(false)
+const newPeriod = reactive({ startTime: '', endTime: '' })
 
-async function addPeriod(): Promise<void> {
+/** 竖排双列分组：左列前半节次、右列后半节次（如 12 节 → 左 1-6、右 7-12） */
+const periodColumns = computed(() => {
+  const list = store.periods
+  const mid = Math.ceil(list.length / 2)
+  return [list.slice(0, mid), list.slice(mid)]
+})
+
+// 编辑态（含新建卡片：editingId=null 表示新建）
+const periodEditingId = ref<number | null>(null)
+const periodEditStart = ref('')
+const periodEditEnd = ref('')
+const periodEditError = ref('')
+const periodEditBusy = ref(false)
+
+/** 时间冲突检测：排除自身（相邻节次允许首尾相接，endA == startB 不算冲突） */
+function findPeriodConflict(start: string, end: string, excludeId?: number | null): Period | undefined {
+  return store.periods.find(
+    (o) => o.id !== excludeId && o.startTime < end && start < o.endTime,
+  )
+}
+
+/** 校验起止时间，返回错误信息（空串通过） */
+function validatePeriodTime(start: string, end: string): string {
+  if (!start || !end) return '请填写起止时间'
+  if (end <= start) return '结束时间须晚于开始时间'
+  return ''
+}
+
+function openNewPeriodCard(): void {
+  newPeriod.startTime = ''
+  newPeriod.endTime = ''
   periodError.value = ''
-  if (!newPeriod.startTime || !newPeriod.endTime) {
-    periodError.value = '请填写起止时间'
+  showNewPeriodCard.value = true
+}
+
+function cancelNewPeriod(): void {
+  showNewPeriodCard.value = false
+  periodError.value = ''
+}
+
+async function submitNewPeriod(): Promise<void> {
+  periodError.value = ''
+  const msg = validatePeriodTime(newPeriod.startTime, newPeriod.endTime)
+  if (msg) {
+    periodError.value = msg
     return
   }
-  if (newPeriod.endTime <= newPeriod.startTime) {
-    periodError.value = '结束时间须晚于开始时间'
+  const conflict = findPeriodConflict(newPeriod.startTime, newPeriod.endTime)
+  if (conflict) {
+    periodError.value = `与第 ${conflict.index} 节（${conflict.startTime}–${conflict.endTime}）时间冲突`
     return
   }
   periodBusy.value = true
   try {
     await store.addPeriod({ startTime: newPeriod.startTime, endTime: newPeriod.endTime })
     toast('节次已添加', 'success')
+    showNewPeriodCard.value = false
     newPeriod.startTime = ''
     newPeriod.endTime = ''
   } catch (e) {
@@ -165,16 +209,58 @@ async function addPeriod(): Promise<void> {
   }
 }
 
+function startPeriodEdit(p: (typeof store.periods)[number]): void {
+  periodEditingId.value = p.id
+  periodEditStart.value = p.startTime
+  periodEditEnd.value = p.endTime
+  periodEditError.value = ''
+}
+
+async function savePeriodEdit(): Promise<void> {
+  if (periodEditingId.value === null) return
+  periodEditError.value = ''
+  const msg = validatePeriodTime(periodEditStart.value, periodEditEnd.value)
+  if (msg) {
+    periodEditError.value = msg
+    return
+  }
+  const conflict = findPeriodConflict(periodEditStart.value, periodEditEnd.value, periodEditingId.value)
+  if (conflict) {
+    periodEditError.value = `与第 ${conflict.index} 节（${conflict.startTime}–${conflict.endTime}）时间冲突`
+    return
+  }
+  periodEditBusy.value = true
+  try {
+    await store.updatePeriod(periodEditingId.value, {
+      startTime: periodEditStart.value,
+      endTime: periodEditEnd.value,
+    })
+    periodEditingId.value = null
+    toast('节次时间已更新', 'success')
+  } catch (e) {
+    periodEditError.value = e instanceof Error ? e.message : '保存失败，请重试'
+  } finally {
+    periodEditBusy.value = false
+  }
+}
+
+function cancelPeriodEdit(): void {
+  periodEditingId.value = null
+  periodEditError.value = ''
+}
+
 async function removePeriod(index: number): Promise<void> {
+  const p = store.periods[index - 1]
+  if (!p) return
   const ok = await confirm({
     title: '删除节次',
-    desc: `将删除第 ${index} 节（${store.periods[index - 1]?.startTime}–${store.periods[index - 1]?.endTime}），其余节次自动重排。`,
+    desc: `将删除第 ${index} 节（${p.startTime}–${p.endTime}），其余节次自动重排。`,
     danger: true,
     confirmText: '删除',
   })
   if (!ok) return
   try {
-    await store.deletePeriod(store.periods[index - 1].id)
+    await store.deletePeriod(p.id)
     toast('节次已删除', 'success')
   } catch (e) {
     toast(e instanceof Error ? e.message : '删除失败，请重试', 'error')
@@ -374,29 +460,78 @@ async function toggleAccess(): Promise<void> {
       </div>
     </div>
 
-    <!-- 节次时间模板 -->
+    <!-- 节次时间模板（竖排双列卡片：左列前半节次、右列后半节次） -->
     <div class="panel reveal">
       <div class="panel-head">
         <h3>节次时间模板</h3>
-        <span class="panel-note">行数可增删，修改后课表即时生效</span>
+        <button class="btn-mini" type="button" @click="openNewPeriodCard">＋ 添加节次</button>
       </div>
-      <div v-for="p in store.periods" :key="p.id" class="row">
-        <span class="row-title num">第 {{ p.index }} 节</span>
-        <span class="row-meta num">{{ p.startTime }} – {{ p.endTime }}</span>
-        <button class="btn-mini btn-mini--danger" type="button" aria-label="删除第 {{ p.index }} 节" @click="removePeriod(p.index)">删除</button>
+      <p class="panel-note panel-note--block">悬停卡片显示编辑/删除；修改时间保存时自动校验与其他节次的冲突</p>
+
+      <div class="period-cols">
+        <div v-for="(col, ci) in periodColumns" :key="ci" class="period-col">
+          <div
+            v-for="p in col"
+            :key="p.id"
+            class="period-card"
+            :class="{ editing: periodEditingId === p.id }"
+          >
+            <!-- 编辑态 -->
+            <template v-if="periodEditingId === p.id">
+              <div class="p-card-head">
+                <span class="p-idx">第 {{ p.index }} 节</span>
+              </div>
+              <div class="p-edit-row">
+                <input v-model="periodEditStart" class="time-input" type="time" aria-label="开始时间" />
+                <span class="p-dash">–</span>
+                <input v-model="periodEditEnd" class="time-input" type="time" aria-label="结束时间" />
+              </div>
+              <p v-if="periodEditError" class="p-error" role="alert">{{ periodEditError }}</p>
+              <div class="p-actions">
+                <button class="btn-mini" type="button" :disabled="periodEditBusy" @click="cancelPeriodEdit">取消</button>
+                <button class="btn-mini btn-mini--primary" type="button" :disabled="periodEditBusy" @click="savePeriodEdit">
+                  {{ periodEditBusy ? '保存中…' : '保存' }}
+                </button>
+              </div>
+            </template>
+
+            <!-- 展示态 -->
+            <template v-else>
+              <div class="p-card-head">
+                <span class="p-idx">第 {{ p.index }} 节</span>
+                <div class="p-tools">
+                  <button class="p-tool" type="button" aria-label="编辑第 {{ p.index }} 节" @click="startPeriodEdit(p)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
+                  </button>
+                  <button class="p-tool p-tool--danger" type="button" aria-label="删除第 {{ p.index }} 节" @click="removePeriod(p.index)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="p-time num">{{ p.startTime }} – {{ p.endTime }}</div>
+            </template>
+          </div>
+
+          <!-- 新建节次卡片（在每列末尾展开） -->
+          <div v-if="showNewPeriodCard && ci === periodColumns.length - 1" class="period-card period-card--new editing">
+            <div class="p-card-head">
+              <span class="p-idx">新节次</span>
+            </div>
+            <div class="p-edit-row">
+              <input v-model="newPeriod.startTime" class="time-input" type="time" aria-label="开始时间" />
+              <span class="p-dash">–</span>
+              <input v-model="newPeriod.endTime" class="time-input" type="time" aria-label="结束时间" />
+            </div>
+            <p v-if="periodError" class="p-error" role="alert">{{ periodError }}</p>
+            <div class="p-actions">
+              <button class="btn-mini" type="button" :disabled="periodBusy" @click="cancelNewPeriod">取消</button>
+              <button class="btn-mini btn-mini--primary" type="button" :disabled="periodBusy" @click="submitNewPeriod">
+                {{ periodBusy ? '添加中…' : '添加' }}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="period-add">
-        <label class="edit-field">
-          <span class="edit-field__label">开始</span>
-          <input v-model="newPeriod.startTime" class="date-input" type="time" />
-        </label>
-        <label class="edit-field">
-          <span class="edit-field__label">结束</span>
-          <input v-model="newPeriod.endTime" class="date-input" type="time" />
-        </label>
-        <button class="btn-mini" type="button" :disabled="periodBusy" @click="addPeriod">{{ periodBusy ? '添加中…' : '＋ 添加节次' }}</button>
-      </div>
-      <p v-if="periodError" class="edit-error" role="alert">{{ periodError }}</p>
     </div>
 
     <!-- 单双周过滤 -->
@@ -776,13 +911,151 @@ async function toggleAccess(): Promise<void> {
   margin-bottom: var(--spacing-sm);
 }
 
-.period-add {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
+.period-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: var(--spacing-md);
-  padding-top: var(--spacing-md);
-  border-top: 1px solid var(--color-border-default);
+}
+
+.period-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.period-card {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  transition: box-shadow var(--motion-duration-fast) var(--motion-easing-standard),
+    border-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.period-card:hover {
+  box-shadow: var(--shadow-hover);
+  border-color: var(--color-border-strong);
+}
+
+.period-card.editing {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 2px var(--color-brand-subtle);
+}
+
+.period-card--new {
+  border-style: dashed;
+}
+
+.p-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}
+
+.p-idx {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.p-time {
+  margin-top: 2px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+/* 悬停才显示的操作图标（触摸屏常显） */
+.p-tools {
+  display: flex;
+  gap: 2px;
+}
+
+.p-tool {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--motion-duration-fast) var(--motion-easing-standard),
+    background var(--motion-duration-fast) var(--motion-easing-standard),
+    color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.period-card:hover .p-tool,
+.p-tool:focus-visible {
+  opacity: 1;
+}
+
+.p-tool:hover {
+  background: var(--color-bg-subtle);
+  color: var(--color-text-body);
+}
+
+.p-tool--danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-feedback-error);
+}
+
+.p-tool svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* 编辑态 */
+.p-edit-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin-top: var(--spacing-sm);
+}
+
+.time-input {
+  width: 92px;
+  height: 30px;
+  padding: 0 var(--spacing-sm);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-surface);
+  color: var(--color-text-body);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.time-input:focus {
+  outline: none;
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 2px var(--color-brand-subtle);
+}
+
+.p-dash {
+  color: var(--color-text-tertiary);
+}
+
+.p-error {
+  margin-top: var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-feedback-error);
+}
+
+.p-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+}
+
+@media (max-width: 560px) {
+  .period-cols {
+    grid-template-columns: 1fr;
+  }
 }
 
 .switch {
