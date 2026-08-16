@@ -4,9 +4,9 @@
 // ============================================================
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { api, type ScheduleResponse } from '@/api/client'
+import { api, type ScheduleResponse, type SettingsPayload } from '@/api/client'
 import { MOCK_COURSES, MOCK_PERIODS, MOCK_SEMESTER } from '@/data/mock'
-import type { Course, Period, Semester, Weekday, WeekType } from '@/types'
+import type { Course, Exam, Homework, Period, Semester, Weekday, WeekType } from '@/types'
 import { pickCourseColor } from '@/utils/course'
 import type { ImportRow } from '@/utils/pdf'
 import {
@@ -23,13 +23,29 @@ import {
 export const useScheduleStore = defineStore('schedule', () => {
   // 学期状态
   const semesters = ref<Semester[]>([MOCK_SEMESTER])
-  const currentSemesterId = ref<number>(MOCK_SEMESTER.id)
+  const currentSemesterId = ref<number | null>(MOCK_SEMESTER.id)
   const periods = ref<Period[]>(MOCK_PERIODS)
   const courses = ref<Course[]>(MOCK_COURSES)
+
+  // 事项状态（考试 / 作业，当前学期全量）
+  const exams = ref<Exam[]>([])
+  const homework = ref<Homework[]>([])
 
   // 周视图状态
   const weekOffset = ref(0) // 0=当前周，-1=上一周
   const showOddEvenFilter = ref(true)
+
+  // 设置（提醒等；remote 模式以服务端为准）
+  const settings = ref<SettingsPayload>({
+    showOddEvenFilter: true,
+    reminder: { enabled: false, mode: 'every', advanceMinutes: 10 },
+    labReminder: { enabled: false, mode: 'every', advanceMinutes: 10 },
+    homeworkReminder: { enabled: false, advanceDays: 2 },
+    accessEnabled: false,
+  })
+
+  // 访问口令：开启且未登录时为 true（App 层据此展示口令页）
+  const accessRequired = ref(false)
 
   // 远端模式：API 连接成功即为 true；weekContext 为 /api/schedule 的周聚合数据
   const remote = ref(false)
@@ -106,18 +122,44 @@ export const useScheduleStore = defineStore('schedule', () => {
     try {
       const ctx = await api.getContext()
       if (ctx.accessRequired) {
-        // 访问口令已开启：前端口令页（后续里程碑），当前保持 mock 展示
+        // 访问口令已开启且未登录：标记后由 App 层展示口令页
+        accessRequired.value = true
         return
       }
+      accessRequired.value = false
       semesters.value = ctx.semesters
       currentSemesterId.value = ctx.currentSemesterId ?? (ctx.semesters[0]?.id ?? null)
       periods.value = ctx.periods
       showOddEvenFilter.value = ctx.settings.showOddEvenFilter
+      settings.value = ctx.settings
       remote.value = true
       await refreshSchedule()
+      await loadMatters()
     } catch {
       remote.value = false
     }
+  }
+
+  /** 拉取当前学期考试与作业（事项页 / 信息面板 / 铃铛共用） */
+  async function loadMatters(): Promise<void> {
+    if (!remote.value) return
+    try {
+      const semId = currentSemesterId.value
+      const [examList, hwList] = await Promise.all([
+        api.listExams(semId ?? undefined),
+        api.listHomework(semId ?? undefined),
+      ])
+      exams.value = examList
+      homework.value = hwList
+    } catch {
+      // 拉取失败保留旧数据
+    }
+  }
+
+  /** 口令校验成功后的恢复流程：重新拉取 context 并进入应用 */
+  async function afterAccessVerified(): Promise<void> {
+    accessRequired.value = false
+    await bootstrap()
   }
 
   /** 按当前展示周刷新 /api/schedule */
@@ -155,9 +197,61 @@ export const useScheduleStore = defineStore('schedule', () => {
       const ctx = await api.getContext()
       periods.value = ctx.periods
       await refreshSchedule()
+      await loadMatters()
     } catch {
       // 失败保持本地切换
     }
+  }
+
+  /** 创建学期（服务端自动生成默认节次模板并设为当前学期） */
+  async function createSemester(payload: {
+    name: string
+    startDate: string
+    endDate: string
+    weekStartDay: 1 | 7
+  }): Promise<Semester> {
+    const created = await api.createSemester(payload)
+    semesters.value.push(created)
+    currentSemesterId.value = created.id
+    await setSemester(created.id)
+    return created
+  }
+
+  /** 删除学期（级联清理该学期全部数据；删除当前学期后自动切换） */
+  async function deleteSemester(id: number): Promise<void> {
+    await api.deleteSemester(id)
+    semesters.value = semesters.value.filter((s) => s.id !== id)
+    if (currentSemesterId.value === id) {
+      const next = semesters.value.length ? semesters.value[0] : null
+      currentSemesterId.value = next?.id ?? null
+      if (next) {
+        const ctx = await api.getContext()
+        periods.value = ctx.periods
+        await refreshSchedule()
+        await loadMatters()
+      }
+    }
+  }
+
+  /** 新增节次行（追加到学期末尾） */
+  async function addPeriod(payload: { startTime: string; endTime: string }): Promise<void> {
+    if (!currentSemesterId.value) throw new Error('未设置当前学期')
+    const created = await api.createPeriod({ semesterId: currentSemesterId.value, ...payload })
+    periods.value.push(created)
+  }
+  /** 修改节次行起止时间 */
+  async function updatePeriod(id: number, payload: { startTime: string; endTime: string }): Promise<void> {
+    const updated = await api.updatePeriod(id, payload)
+    const idx = periods.value.findIndex((p) => p.id === id)
+    if (idx >= 0) periods.value[idx] = updated
+    await refreshSchedule()
+  }
+
+  /** 删除节次行（剩余行自动重排） */
+  async function deletePeriod(id: number): Promise<void> {
+    await api.deletePeriod(id)
+    periods.value = periods.value.filter((p) => p.id !== id)
+    await refreshSchedule()
   }
 
   /** 更新学期信息（设置页编辑开始/结束日期） */
@@ -238,6 +332,150 @@ export const useScheduleStore = defineStore('schedule', () => {
     return added
   }
 
+  /** 更新课程（remote 走 API，mock 本地写入） */
+  async function updateCourse(id: number, payload: {
+    type: 'course' | 'lab'
+    name: string
+    teacher: string
+    location: string
+    color: string
+    weekType: WeekType
+    weekList: number[] | null
+    weekday: Weekday
+    startPeriod: number
+    endPeriod: number
+    remark?: string
+  }): Promise<Course> {
+    if (remote.value) {
+      const updated = await api.updateCourse(id, payload)
+      const idx = courses.value.findIndex((c) => c.id === id)
+      if (idx >= 0) courses.value[idx] = updated
+      await refreshSchedule()
+      return updated
+    }
+    const idx = courses.value.findIndex((c) => c.id === id)
+    if (idx < 0) throw new Error('课程不存在')
+    courses.value[idx] = { ...courses.value[idx], ...payload, remark: payload.remark ?? '' }
+    return courses.value[idx]
+  }
+
+  /** 删除课程（关联考试/作业的 courseId 由服务端置空保留） */
+  async function deleteCourse(id: number): Promise<void> {
+    if (remote.value) {
+      await api.deleteCourse(id)
+      await loadMatters()
+    }
+    courses.value = courses.value.filter((c) => c.id !== id)
+    await refreshSchedule()
+  }
+
+  // ---- 考试 ----
+  async function addExam(payload: { courseId?: number | null; name: string; datetime: string; location?: string; remark?: string }): Promise<Exam> {
+    const created = await api.createExam({ semesterId: currentSemesterId.value ?? undefined, ...payload })
+    exams.value.push(created)
+    await refreshSchedule()
+    return created
+  }
+
+  async function updateExam(id: number, payload: { courseId?: number | null; name: string; datetime: string; location?: string; remark?: string }): Promise<Exam> {
+    const updated = await api.updateExam(id, payload)
+    const idx = exams.value.findIndex((e) => e.id === id)
+    if (idx >= 0) exams.value[idx] = updated
+    await refreshSchedule()
+    return updated
+  }
+
+  async function deleteExam(id: number): Promise<void> {
+    await api.deleteExam(id)
+    exams.value = exams.value.filter((e) => e.id !== id)
+    await refreshSchedule()
+  }
+
+  // ---- 作业 ----
+  async function addHomework(payload: { courseId?: number | null; name: string; dueAt: string; remark?: string }): Promise<Homework> {
+    const created = await api.createHomework({ semesterId: currentSemesterId.value ?? undefined, ...payload })
+    homework.value.push(created)
+    await refreshSchedule()
+    return created
+  }
+
+  async function updateHomework(id: number, payload: { courseId?: number | null; name: string; dueAt: string; remark?: string }): Promise<Homework> {
+    const updated = await api.updateHomework(id, payload)
+    const idx = homework.value.findIndex((h) => h.id === id)
+    if (idx >= 0) homework.value[idx] = updated
+    await refreshSchedule()
+    return updated
+  }
+
+  /** 切换作业完成状态（列表勾选即时生效） */
+  async function setHomeworkDone(id: number, done: boolean): Promise<void> {
+    const idx = homework.value.findIndex((h) => h.id === id)
+    if (idx >= 0) homework.value[idx] = { ...homework.value[idx], done }
+    try {
+      await api.setHomeworkDone(id, done)
+      await refreshSchedule()
+    } catch (e) {
+      if (idx >= 0) homework.value[idx] = { ...homework.value[idx], done: !done }
+      throw e
+    }
+  }
+
+  async function deleteHomework(id: number): Promise<void> {
+    await api.deleteHomework(id)
+    homework.value = homework.value.filter((h) => h.id !== id)
+    await refreshSchedule()
+  }
+
+  // ---- 设置 ----
+  /** 部分写设置（提醒 / 单双周过滤），成功后同步本地 */
+  async function updateSettings(patch: Partial<SettingsPayload>): Promise<void> {
+    if (!remote.value) {
+      settings.value = { ...settings.value, ...patch }
+      if (patch.showOddEvenFilter !== undefined) showOddEvenFilter.value = patch.showOddEvenFilter
+      return
+    }
+    const updated = await api.updateSettings(patch)
+    settings.value = updated
+    showOddEvenFilter.value = updated.showOddEvenFilter
+    if (patch.showOddEvenFilter !== undefined) await refreshSchedule()
+  }
+
+  /** 单双周过滤开关（同时写回设置） */
+  async function setShowOddEvenFilter(v: boolean): Promise<void> {
+    showOddEvenFilter.value = v
+    if (!remote.value) {
+      settings.value = { ...settings.value, showOddEvenFilter: v }
+      return
+    }
+    try {
+      const updated = await api.updateSettings({ showOddEvenFilter: v })
+      settings.value = updated
+      await refreshSchedule()
+    } catch {
+      // 本地已生效，服务端失败时保留
+    }
+  }
+
+  // ---- 访问口令 ----
+  async function verifyAccess(passphrase: string): Promise<void> {
+    await api.verifyAccess(passphrase)
+    await afterAccessVerified()
+  }
+
+  async function enableAccess(passphrase: string): Promise<void> {
+    await api.enableAccess(passphrase)
+    settings.value = { ...settings.value, accessEnabled: true }
+  }
+
+  async function disableAccess(passphrase: string): Promise<void> {
+    await api.disableAccess(passphrase)
+    settings.value = { ...settings.value, accessEnabled: false }
+  }
+
+  async function logoutAccess(): Promise<void> {
+    await api.logoutAccess()
+  }
+
   /** 供日视图/聚合使用：某日期所在周信息 */
   function weekInfoOf(date: Date) {
     const mon = toMonday(date)
@@ -256,13 +494,18 @@ export const useScheduleStore = defineStore('schedule', () => {
   void bootstrap()
 
   return {
+    bootstrap,
     semesters,
     currentSemesterId,
     currentSemester,
     periods,
     courses,
+    exams,
+    homework,
     weekOffset,
     showOddEvenFilter,
+    settings,
+    accessRequired,
     remote,
     today,
     anchorMonday,
@@ -280,9 +523,30 @@ export const useScheduleStore = defineStore('schedule', () => {
     prevWeek,
     goNow,
     setSemester,
+    createSemester,
+    deleteSemester,
     updateSemester,
+    addPeriod,
+    updatePeriod,
+    deletePeriod,
     addCourse,
+    updateCourse,
+    deleteCourse,
     importCourses,
+    addExam,
+    updateExam,
+    deleteExam,
+    addHomework,
+    updateHomework,
+    setHomeworkDone,
+    deleteHomework,
+    loadMatters,
+    updateSettings,
+    setShowOddEvenFilter,
+    verifyAccess,
+    enableAccess,
+    disableAccess,
+    logoutAccess,
   }
 })
 

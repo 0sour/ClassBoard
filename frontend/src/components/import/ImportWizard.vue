@@ -20,7 +20,7 @@ const parseError = ref('')
 const doneCount = ref(0)
 
 const importMode = ref<'append' | 'overwrite'>('append')
-const targetSemesterId = ref<number>(store.currentSemesterId)
+const targetSemesterId = ref<number>(store.currentSemesterId ?? 0)
 
 const semesterOptions = computed<AppSelectOption[]>(() =>
   store.semesters.map((s) => ({ value: s.id, label: s.name })),
@@ -86,7 +86,7 @@ watch(
     result.value = null
     parseError.value = ''
     importMode.value = 'append'
-    targetSemesterId.value = store.currentSemesterId
+    targetSemesterId.value = store.currentSemesterId ?? 0
   },
 )
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
-import { MOCK_HOMEWORK, MOCK_PRACTICE } from '@/data/mock'
+import { MOCK_PRACTICE } from '@/data/mock'
 
 const store = useScheduleStore()
 
@@ -13,7 +13,8 @@ const todayCourseCount = computed(() => {
 const courseCount = computed(() => store.visibleCourses.length)
 const labCount = computed(() => store.visibleCourses.filter((c) => c.type === 'lab').length)
 
-const pendingHomework = computed(() => MOCK_HOMEWORK.filter((h) => !h.done))
+/** 待交作业：当前学期未完成（真实接口 /api/homework） */
+const pendingHomework = computed(() => store.homework.filter((h) => !h.done))
 </script>
 
 <template>

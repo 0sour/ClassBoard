@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
+import { confirm, toast } from '@/utils/ui'
 import type { Course } from '@/types'
 
 const props = defineProps<{ course: Course | null }>()
 
-const emit = defineEmits<{ (e: 'close'): void }>()
+const emit = defineEmits<{ (e: 'close'): void; (e: 'edit', course: Course): void }>()
 
 const store = useScheduleStore()
+const deleting = ref(false)
 
 const style = computed(() => ({
   '--cbg': props.course ? `var(--${props.course.color}-bg)` : 'transparent',
@@ -44,6 +46,27 @@ function onKeydown(e: KeyboardEvent): void {
 
 function onMaskClick(event: MouseEvent): void {
   if (event.target === event.currentTarget) emit('close')
+}
+
+async function onDelete(): Promise<void> {
+  if (!props.course) return
+  const ok = await confirm({
+    title: '删除课程',
+    desc: `将删除课程「${props.course.name}」，其关联的考试与作业记录保留（课程关联置空），此操作不可撤销。`,
+    danger: true,
+    confirmText: '删除',
+  })
+  if (!ok) return
+  deleting.value = true
+  try {
+    await store.deleteCourse(props.course.id)
+    toast('已删除课程', 'success')
+    emit('close')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '删除失败，请重试', 'error')
+  } finally {
+    deleting.value = false
+  }
 }
 </script>
 
@@ -109,6 +132,16 @@ function onMaskClick(event: MouseEvent): void {
               </span>
               <span class="v note">{{ course.remark }}</span>
             </div>
+          </div>
+
+          <!-- 操作栏：编辑 / 删除（删除需二次确认） -->
+          <div class="modal-foot">
+            <button class="btn btn--danger" type="button" :disabled="deleting" @click="onDelete">
+              {{ deleting ? '删除中…' : '删除' }}
+            </button>
+            <button class="btn btn--primary" type="button" @click="emit('edit', course)">
+              编辑
+            </button>
           </div>
         </div>
       </div>
@@ -234,6 +267,47 @@ function onMaskClick(event: MouseEvent): void {
   padding: var(--spacing-sm) var(--spacing-md);
   font-weight: var(--font-weight-regular);
   color: var(--color-text-secondary);
+}
+
+.modal-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-xl);
+}
+
+.btn {
+  height: 38px;
+  padding: 0 var(--spacing-lg);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard),
+    opacity var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.btn--primary {
+  background: var(--color-brand);
+  color: var(--color-text-inverse);
+}
+
+.btn--primary:hover {
+  background: var(--color-brand-hover);
+}
+
+.btn--danger {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  color: var(--color-feedback-error);
+}
+
+.btn--danger:hover {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* 桌面 pop 动画 */

@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import CourseModal from '@/components/schedule/CourseModal.vue'
-import { MOCK_HOMEWORK } from '@/data/mock'
+import CourseEditor from '@/components/course/CourseEditor.vue'
 import type { Course } from '@/types'
-import { ref } from 'vue'
 
 const store = useScheduleStore()
 const selected = ref<Course | null>(null)
+const editing = ref<Course | null>(null)
+const showEditor = ref(false)
 
 const today = computed(() => store.today)
 const todayLabel = computed(() => {
@@ -20,11 +21,17 @@ const todayCourses = computed(() => store.coursesOf(today.value))
 const todayHomework = computed(() => {
   const wd = ((today.value.getDay() + 6) % 7 + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7
   const ids = store.coursesByWeekday[wd].map((c) => c.id)
-  return MOCK_HOMEWORK.filter((h) => h.courseId === null || ids.includes(h.courseId))
+  return store.homework.filter((h) => !h.done && (h.courseId === null || ids.includes(h.courseId)))
 })
 
 function openCourse(course: Course): void {
   selected.value = course
+}
+
+function editCourse(course: Course): void {
+  selected.value = null
+  editing.value = course
+  showEditor.value = true
 }
 </script>
 
@@ -67,7 +74,13 @@ function openCourse(course: Course): void {
       </div>
     </div>
 
-    <CourseModal :course="selected" @close="selected = null" />
+    <CourseModal :course="selected" @close="selected = null" @edit="editCourse" />
+    <CourseEditor
+      :open="showEditor"
+      :course="editing"
+      @close="showEditor = false"
+      @done="showEditor = false"
+    />
   </div>
 </template>
 

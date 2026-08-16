@@ -2,22 +2,31 @@
 import { computed, reactive, ref, watch } from 'vue'
 import AppSelect, { type AppSelectOption } from '@/components/common/AppSelect.vue'
 import { useScheduleStore } from '@/stores/schedule'
-import type { CourseType, Weekday, WeekType } from '@/types'
+import { COURSE_COLOR_NAMES, type Course, type CourseType, type Weekday, type WeekType } from '@/types'
 import { calcWeekNumber, parseDate } from '@/utils/week'
 
-const props = defineProps<{ open: boolean }>()
+const props = defineProps<{
+  open: boolean
+  /** 编辑模式：传入课程时加载其数据，保存走更新 */
+  course?: Course | null
+  /** 新增模式下预选课程类型（如事项页「新增实验课」） */
+  presetType?: CourseType
+}>()
 
 const emit = defineEmits<{ (e: 'close'): void; (e: 'done', name: string): void }>()
 
 const store = useScheduleStore()
 
+const isEdit = computed(() => props.course !== undefined && props.course !== null)
+
 /** 表单初始值 */
 function blankForm() {
   return {
     name: '',
-    type: 'course' as CourseType,
+    type: props.presetType ?? ('course' as CourseType),
     teacher: '',
     location: '',
+    color: 'course-1',
     weekday: 1 as Weekday,
     startPeriod: 1,
     endPeriod: 2,
@@ -31,7 +40,7 @@ const form = reactive(blankForm())
 const error = ref('')
 const busy = ref(false)
 
-/** 当前标签页：fixed = 固定课表，per = 每节课调整 */
+/** 当前标签页：fixed = 固定课表，per = 每节课调整（编辑模式隐藏） */
 const activeTab = ref<'fixed' | 'per'>('fixed')
 
 /** 「每节课调整」：一个时间段（同一门课的一节课），周次由 weekList 自定义 */
@@ -98,14 +107,32 @@ function toggleWeek(w: number): void {
   else form.weekList.push(w)
 }
 
-/** 每次打开重置表单 */
+/** 每次打开重置表单（编辑模式加载课程数据） */
 watch(
   () => props.open,
   (v) => {
     if (!v) return
-    Object.assign(form, blankForm())
-    sessions.value = [blankSession()]
-    activeTab.value = 'fixed'
+    if (props.course) {
+      Object.assign(form, {
+        name: props.course.name,
+        type: props.course.type,
+        teacher: props.course.teacher,
+        location: props.course.location,
+        color: props.course.color,
+        weekday: props.course.weekday,
+        startPeriod: props.course.startPeriod,
+        endPeriod: props.course.endPeriod,
+        weekType: props.course.weekType,
+        weekList: props.course.weekList ? [...props.course.weekList] : [],
+        remark: props.course.remark,
+      })
+      sessions.value = [blankSession()]
+      activeTab.value = 'fixed'
+    } else {
+      Object.assign(form, blankForm())
+      sessions.value = [blankSession()]
+      activeTab.value = 'fixed'
+    }
     error.value = ''
     busy.value = false
   },
@@ -122,7 +149,7 @@ function validateSession(s: SessionRow, i: number): string {
   return ''
 }
 
-async function submit(): Promise<void> {
+async function submit(keepOpen = false): Promise<void> {
   error.value = ''
   const name = form.name.trim()
   if (!name) {
@@ -131,6 +158,33 @@ async function submit(): Promise<void> {
   }
   busy.value = true
   try {
+    if (isEdit.value && props.course) {
+      // 编辑模式：整体更新单条课程记录
+      if (form.startPeriod > form.endPeriod) {
+        error.value = '结束节次不能早于起始节次'
+        return
+      }
+      if (form.weekType === 'custom' && form.weekList.length === 0) {
+        error.value = '请选择至少一个周次'
+        return
+      }
+      await store.updateCourse(props.course.id, {
+        type: form.type,
+        name,
+        teacher: form.teacher.trim(),
+        location: form.location.trim(),
+        color: form.color,
+        weekType: form.weekType,
+        weekList: form.weekType === 'custom' ? [...form.weekList].sort((a, b) => a - b) : null,
+        weekday: form.weekday,
+        startPeriod: form.startPeriod,
+        endPeriod: form.endPeriod,
+        remark: form.remark.trim(),
+      })
+      emit('done', name)
+      emit('close')
+      return
+    }
     if (activeTab.value === 'per') {
       if (sessions.value.length === 0) {
         error.value = '请至少添加一节课'
@@ -180,7 +234,20 @@ async function submit(): Promise<void> {
         remark: form.remark.trim(),
       })
     }
-    emit('done', name)
+    if (keepOpen) {
+      // 保存并继续：清空已保存字段，预填常用字段（星期/地点/颜色保留）
+      Object.assign(form, {
+        name: '',
+        teacher: '',
+        remark: '',
+        weekType: 'all',
+        weekList: [],
+      })
+      emit('done', name)
+    } else {
+      emit('done', name)
+      emit('close')
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : '保存失败，请重试'
   } finally {
@@ -193,16 +260,16 @@ async function submit(): Promise<void> {
   <Teleport to="body">
     <Transition name="modal">
       <div v-if="open" class="modal-mask" @mousedown.self="emit('close')" @keydown="onKeydown">
-        <div class="modal" role="dialog" aria-modal="true" aria-label="手动录入课程">
+        <div class="modal" role="dialog" aria-modal="true" :aria-label="isEdit ? '编辑课程' : '手动录入课程'">
           <div class="modal-head">
-            <h3 class="m-title">手动录入课程</h3>
+            <h3 class="m-title">{{ isEdit ? '编辑课程' : '手动录入课程' }}</h3>
             <button class="modal-close" type="button" aria-label="关闭" @click="emit('close')">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
             </button>
           </div>
 
           <div class="step-body">
-            <div class="editor-tabs" role="tablist" aria-label="录入方式">
+            <div v-if="!isEdit" class="editor-tabs" role="tablist" aria-label="录入方式">
               <button
                 type="button"
                 role="tab"
@@ -252,6 +319,26 @@ async function submit(): Promise<void> {
                 <span class="field__label">教师</span>
                 <input v-model="form.teacher" class="text-input" type="text" placeholder="选填" maxlength="30" />
               </label>
+
+              <div class="field field--full">
+                <span class="field__label">课程颜色（按录入顺序轮询分配，可手动修改）</span>
+                <div class="swatch-picks" role="radiogroup" aria-label="课程颜色">
+                  <button
+                    v-for="cn in COURSE_COLOR_NAMES"
+                    :key="cn"
+                    class="swatch-pick"
+                    :class="{ selected: form.color === cn }"
+                    type="button"
+                    role="radio"
+                    :aria-checked="form.color === cn"
+                    :aria-label="cn"
+                    :style="{ '--sw-bg': `var(--${cn}-bg)`, '--sw-line': `var(--${cn}-line)`, '--sw-text': `var(--${cn}-text)` }"
+                    @click="form.color = cn"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+                  </button>
+                </div>
+              </div>
             </div>
 
             <!-- 固定课表：每周重复的时间安排 -->
@@ -383,8 +470,16 @@ async function submit(): Promise<void> {
 
             <div class="footer">
               <button class="btn btn--ghost" type="button" :disabled="busy" @click="emit('close')">取消</button>
-              <button class="btn btn--primary" type="button" :disabled="busy" @click="submit">
-                {{ busy ? '保存中…' : '保存课程' }}
+              <template v-if="!isEdit">
+                <button class="btn btn--primary" type="button" :disabled="busy" @click="submit(true)">
+                  {{ busy ? '保存中…' : '保存并继续' }}
+                </button>
+                <button class="btn btn--primary" type="button" :disabled="busy" @click="submit(false)">
+                  {{ busy ? '保存中…' : '保存' }}
+                </button>
+              </template>
+              <button v-else class="btn btn--primary" type="button" :disabled="busy" @click="submit(false)">
+                {{ busy ? '保存中…' : '保存修改' }}
               </button>
             </div>
           </div>
@@ -697,6 +792,47 @@ async function submit(): Promise<void> {
   background: var(--color-brand-subtle);
   color: var(--color-brand);
   font-weight: var(--font-weight-medium);
+}
+
+/* 课程颜色选择（8 色三值色卡） */
+.swatch-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.swatch-pick {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: var(--sw-bg);
+  color: var(--sw-text);
+  border: 1px solid var(--sw-line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: transform var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.swatch-pick:hover {
+  transform: scale(1.08);
+}
+
+.swatch-pick svg {
+  display: none;
+  width: 14px;
+  height: 14px;
+}
+
+.swatch-pick.selected {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 1px;
+}
+
+.swatch-pick.selected svg {
+  display: block;
 }
 
 .form-error {

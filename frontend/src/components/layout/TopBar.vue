@@ -5,7 +5,6 @@ import { useScheduleStore } from '@/stores/schedule'
 import AppSelect from '@/components/common/AppSelect.vue'
 import ImportWizard from '@/components/import/ImportWizard.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
-import { MOCK_HOMEWORK } from '@/data/mock'
 import { formatMonthDay } from '@/utils/week'
 
 const route = useRoute()
@@ -42,22 +41,40 @@ const semesterOptions = computed(() =>
   store.semesters.map((s) => ({ value: s.id, label: s.name })),
 )
 
-function setSemester(v: string | number): void {
+function setSemester(v: string | number | null): void {
+  if (v === null) return
   store.setSemester(Number(v))
 }
 
-/** 站内提醒：铃铛展开提醒下拉（不单独成页，见 UI 设计文档 1.2） */
+/** 站内提醒：铃铛展开提醒下拉（不单独成页，见 UI 设计文档 1.2 / PRD 5.6）
+ * 内容：未完成作业（作业截止提醒）+ 今日课程（上课提醒），数据来自真实接口 */
 const showReminderMenu = ref(false)
 const isSettings = computed(() => route.name === 'settings')
 
-const reminders = computed(() =>
-  MOCK_HOMEWORK.filter((h) => !h.done).map((h) => ({
-    id: h.id,
-    title: h.name,
-    meta: `${formatMonthDay(new Date(h.dueAt))} 截止`,
-    kind: '作业' as const,
-  })),
-)
+const reminders = computed(() => {
+  const list: { id: string; title: string; meta: string; kind: '课程' | '作业' }[] = []
+  // 今日上课课程
+  const wd = ((store.today.getDay() + 6) % 7 + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7
+  for (const c of store.coursesByWeekday[wd]) {
+    const p = store.periods[c.startPeriod - 1]
+    list.push({
+      id: `c${c.id}`,
+      title: c.name,
+      meta: p ? `${formatMonthDay(store.today)} ${p.startTime} 上课` : '今日上课',
+      kind: '课程',
+    })
+  }
+  // 未完成作业
+  for (const h of store.homework.filter((x) => !x.done)) {
+    list.push({
+      id: `h${h.id}`,
+      title: h.name,
+      meta: `${h.dueAt.slice(5, 10).replace('-', '月')}日截止`,
+      kind: '作业',
+    })
+  }
+  return list
+})
 </script>
 
 <template>

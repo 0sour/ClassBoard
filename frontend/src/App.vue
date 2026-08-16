@@ -1,10 +1,31 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted } from 'vue'
+import { useScheduleStore } from '@/stores/schedule'
 import TopBar from '@/components/layout/TopBar.vue'
 import BottomTabBar from '@/components/layout/BottomTabBar.vue'
+import ToastHost from '@/components/common/ToastHost.vue'
+import ConfirmHost from '@/components/common/ConfirmHost.vue'
+import AccessView from '@/views/AccessView.vue'
+import { startReminderEngine } from '@/utils/reminder'
+
+const store = useScheduleStore()
+
+let stopReminder: (() => void) | null = null
+
+onMounted(() => {
+  stopReminder = startReminderEngine()
+})
+
+onBeforeUnmount(() => {
+  stopReminder?.()
+})
 </script>
 
 <template>
-  <div class="app">
+  <!-- 访问口令已开启且未登录：先过口令页（规范 3.7） -->
+  <AccessView v-if="store.accessRequired" />
+
+  <div v-else class="app">
     <TopBar />
     <main class="app-main">
       <RouterView v-slot="{ Component }">
@@ -14,6 +35,8 @@ import BottomTabBar from '@/components/layout/BottomTabBar.vue'
       </RouterView>
     </main>
     <BottomTabBar />
+    <ToastHost />
+    <ConfirmHost />
   </div>
 </template>
 

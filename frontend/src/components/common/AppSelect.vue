@@ -8,7 +8,7 @@ export interface AppSelectOption {
 
 const props = withDefaults(
   defineProps<{
-    modelValue: string | number
+    modelValue: string | number | null
     options: AppSelectOption[]
     ariaLabel?: string
     placeholder?: string
@@ -18,7 +18,7 @@ const props = withDefaults(
   { ariaLabel: '下拉选择', placeholder: '请选择', size: 'sm' },
 )
 
-const emit = defineEmits<{ (e: 'update:modelValue', value: string | number): void }>()
+const emit = defineEmits<{ (e: 'update:modelValue', value: string | number | null): void }>()
 
 const open = ref(false)
 const rootRef = ref<HTMLElement | null>(null)
