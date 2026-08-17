@@ -96,7 +96,10 @@ const rowHeight = computed(() => {
         :key="'slot-' + p.id"
         class="slot"
         type="button"
-        :style="{ gridRow: `${p.index + 1} / ${p.index + 2}` }"
+        :style="{
+          gridRow: `${p.index + 1} / ${p.index + 2}`,
+          gridColumn: '1',
+        }"
         :aria-label="`新增课程：周${DAY_LABELS[idx]} 第${p.index}节`"
         @click="emit('create', { weekday: (idx + 1) as Weekday, period: p.index })"
       ></button>
@@ -107,10 +110,11 @@ const rowHeight = computed(() => {
         :style="{
           // 行轨道：第 1 行为 44px 表头，第 2 行起才是第 1 节，故整体 +1
           gridRow: `${item.course.startPeriod + 1} / ${item.course.endPeriod + 2}`,
-          // 显式锁定第 1 列：冲突课程允许重叠（配合 margin-left 错位），
-          // 否则 grid 自动布局会把冲突课程推到隐式列导致错乱
+          // 显式锁定第 1 列；冲突课程用 transform 错位（不改变盒模型，避免触发隐式列）
           gridColumn: '1',
-          marginLeft: item.offset ? '50%' : undefined,
+          ...(item.offset
+            ? { transform: 'translateX(50%)', width: '50%' }
+            : {}),
         }"
         :course="item.course"
         :conflict="item.conflict"
