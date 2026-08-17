@@ -95,7 +95,7 @@ async function exportPng(): Promise<void> {
         </div>
       </div>
 
-      <!-- 信息面板（桌面右侧 / 平板下方三列） -->
+      <!-- 信息面板（桌面右侧 / 平板下方两列） -->
       <SidePanel />
     </div>
 

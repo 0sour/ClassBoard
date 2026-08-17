@@ -250,9 +250,10 @@ const pendingHomework = computed(() => store.homework.filter((h) => !h.done))
 @media (min-width: 1280px) {
   .side-panel {
     position: sticky;
-    /* 与周导航内容行上边缘对齐（顶栏高 + 周导航内边距） */
-    top: calc(var(--topbar-h) + var(--spacing-md));
-    align-self: start;
+    /* 初始位置与周导航内容行（按钮行）上边缘对齐：顶栏高 + 周导航内边距；
+       容器余量不足时 sticky 退化为跟随滚动，对齐由 margin-top 保证 */
+    margin-top: var(--spacing-md);
+    top: var(--topbar-h);
   }
 }
 
