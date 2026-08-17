@@ -172,7 +172,8 @@ const pendingHomework = computed(() => store.homework.filter((h) => !h.done))
 @media (min-width: 1280px) {
   .side-panel {
     position: sticky;
-    top: 84px;
+    /* 与周导航内容行上边缘对齐（顶栏高 + 周导航内边距） */
+    top: calc(var(--topbar-h) + var(--spacing-md));
     align-self: start;
   }
 }
