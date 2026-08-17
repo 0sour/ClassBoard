@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import { MOCK_PRACTICE } from '@/data/mock'
 
 const store = useScheduleStore()
+
+// 组合卡：待交作业 / 实践与其他 分段切换（样式同顶栏视图切换 seg）
+const panelTab = ref<'hw' | 'practice'>('hw')
 
 // 今日课程数：按今天真实所在周统计，不随周视图切换变化
 const todayCourseCount = computed(() => {
@@ -35,33 +38,43 @@ const pendingHomework = computed(() => store.homework.filter((h) => !h.done))
       </div>
     </div>
 
-    <!-- 作业 -->
-    <div class="sp-card hw reveal" v-if="pendingHomework.length">
-      <div class="sp-head">
-        <span class="ic">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><path d="M10 9H8M16 13H8M16 17H8" /></svg>
-        </span>
-        <h3>待交作业</h3>
-      </div>
-      <div v-for="h in pendingHomework" :key="h.id" class="sp-item">
-        <div class="date-chip">{{ h.dueAt.slice(5, 10).replace('-', '月') }}日截止</div>
-        <div class="sp-item-title">{{ h.name }}</div>
-        <div class="sp-item-meta">未完成</div>
-      </div>
-    </div>
-
-    <!-- 实践与其他课程（PDF 第 2 页汇总行） -->
+    <!-- 组合卡：待交作业 / 实践与其他 -->
     <div class="sp-card reveal">
-      <div class="sp-head">
-        <span class="ic">
+      <div class="sp-tabs" role="tablist" aria-label="信息面板">
+        <button
+          class="sp-tab" :class="{ active: panelTab === 'hw' }" role="tab" type="button"
+          :aria-selected="panelTab === 'hw'" @click="panelTab = 'hw'"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><path d="M10 9H8M16 13H8M16 17H8" /></svg>
+          <span>待交作业</span>
+          <span class="sp-tab-count" v-if="pendingHomework.length">{{ pendingHomework.length }}</span>
+        </button>
+        <button
+          class="sp-tab" :class="{ active: panelTab === 'practice' }" role="tab" type="button"
+          :aria-selected="panelTab === 'practice'" @click="panelTab = 'practice'"
+        >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></svg>
-        </span>
-        <h3>实践与其他</h3>
+          <span>实践与其他</span>
+        </button>
       </div>
-      <div v-for="p in MOCK_PRACTICE" :key="p.name" class="sp-item">
-        <div class="sp-item-title">{{ p.name }}</div>
-        <div class="sp-item-meta">{{ p.teacher }} · {{ p.weeks }}</div>
-      </div>
+
+      <template v-if="panelTab === 'hw'">
+        <div v-if="pendingHomework.length">
+          <div v-for="h in pendingHomework" :key="h.id" class="sp-item">
+            <div class="date-chip">{{ h.dueAt.slice(5, 10).replace('-', '月') }}日截止</div>
+            <div class="sp-item-title">{{ h.name }}</div>
+            <div class="sp-item-meta">未完成</div>
+          </div>
+        </div>
+        <div v-else class="sp-empty">暂无待交作业，好好休息</div>
+      </template>
+
+      <template v-else>
+        <div v-for="p in MOCK_PRACTICE" :key="p.name" class="sp-item">
+          <div class="sp-item-title">{{ p.name }}</div>
+          <div class="sp-item-meta">{{ p.teacher }} · {{ p.weeks }}</div>
+        </div>
+      </template>
     </div>
   </aside>
 </template>
@@ -137,6 +150,63 @@ const pendingHomework = computed(() => store.homework.filter((h) => !h.done))
   color: var(--color-text-tertiary);
 }
 
+/* 组合卡分段切换（样式同顶栏视图切换 seg） */
+.sp-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  margin-bottom: var(--spacing-md);
+}
+
+.sp-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  transition: color var(--motion-duration-normal) var(--motion-easing-standard),
+    background-color var(--motion-duration-normal) var(--motion-easing-standard),
+    box-shadow var(--motion-duration-normal) var(--motion-easing-standard);
+}
+
+.sp-tab svg {
+  width: 14px;
+  height: 14px;
+}
+
+.sp-tab.active {
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  box-shadow: var(--shadow-card);
+}
+
+.sp-tab-count {
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background: var(--color-brand-subtle);
+  color: var(--color-brand);
+  font-size: 11px;
+  font-weight: var(--font-weight-bold);
+}
+
+.sp-tab.active .sp-tab-count {
+  background: var(--color-brand);
+  color: var(--color-text-inverse);
+}
+
 .sp-item {
   padding: var(--spacing-sm) 0;
   border-top: 1px solid var(--color-border-default);
@@ -170,6 +240,13 @@ const pendingHomework = computed(() => store.homework.filter((h) => !h.done))
   margin-top: 2px;
 }
 
+.sp-empty {
+  padding: var(--spacing-xl) 0;
+  text-align: center;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
 @media (min-width: 1280px) {
   .side-panel {
     position: sticky;
@@ -182,7 +259,7 @@ const pendingHomework = computed(() => store.homework.filter((h) => !h.done))
 @media (min-width: 768px) and (max-width: 1279px) {
   .side-panel {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>
