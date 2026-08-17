@@ -214,6 +214,11 @@ const rowHeight = computed(() => {
   border-bottom: 1px solid var(--color-border-default);
 }
 
+/* 日期列表头跨两列占满列宽（列内为两列网格，时间列 corner 仍单列） */
+.day-col .day-head {
+  grid-column: 1 / 3;
+}
+
 .day-col.today .day-head {
   background: var(--color-brand-subtle);
 }
