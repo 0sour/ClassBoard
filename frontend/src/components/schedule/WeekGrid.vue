@@ -98,7 +98,7 @@ const rowHeight = computed(() => {
         type="button"
         :style="{
           gridRow: `${p.index + 1} / ${p.index + 2}`,
-          gridColumn: '1',
+          gridColumn: '1 / 3',
         }"
         :aria-label="`新增课程：周${DAY_LABELS[idx]} 第${p.index}节`"
         @click="emit('create', { weekday: (idx + 1) as Weekday, period: p.index })"
@@ -110,11 +110,10 @@ const rowHeight = computed(() => {
         :style="{
           // 行轨道：第 1 行为 44px 表头，第 2 行起才是第 1 节，故整体 +1
           gridRow: `${item.course.startPeriod + 1} / ${item.course.endPeriod + 2}`,
-          // 显式锁定第 1 列；冲突课程用 transform 错位（不改变盒模型，避免触发隐式列）
-          gridColumn: '1',
-          ...(item.offset
-            ? { transform: 'translateX(50%)', width: '50%' }
-            : {}),
+          // 冲突课程各占一列，非冲突课程跨两列
+          gridColumn: item.conflict
+            ? item.offset ? '2' : '1'
+            : '1 / 3',
         }"
         :course="item.course"
         :conflict="item.conflict"
@@ -140,9 +139,8 @@ const rowHeight = computed(() => {
      未设置时回退设计 token；平板/移动端断点仍覆盖为 52/56px */
   --ph-row: var(--ph-row-dyn, var(--ph-desktop));
   display: grid;
-  /* 仅显式定义表头行；节次行由 grid-auto-rows 生成（行高跟随 --ph-row 断点）。
-     注意：不可用 v-bind 拼接 var(--ph-row) —— 该变量在根元素计算时未定义，
-     会导致自定义属性 invalid 而不继承，行模板整体失效。 */
+  /* 两列网格：冲突课程各占一列，非冲突课程跨两列 */
+  grid-template-columns: repeat(2, 1fr);
   grid-template-rows: 44px;
   grid-auto-rows: var(--ph-row);
   border-right: 1px solid var(--color-border-default);
