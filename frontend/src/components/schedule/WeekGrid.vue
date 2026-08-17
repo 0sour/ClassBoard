@@ -176,6 +176,7 @@ const rowHeight = computed(() => {
   position: sticky;
   left: 0;
   z-index: var(--z-index-grid-corner);
+  grid-template-columns: 1fr;
 }
 
 .time-cell {
