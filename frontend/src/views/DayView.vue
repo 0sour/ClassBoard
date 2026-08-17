@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import CourseModal from '@/components/schedule/CourseModal.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
@@ -16,12 +16,20 @@ const todayLabel = computed(() => {
   return `${d.getMonth() + 1}月${d.getDate()}日 周${'一二三四五六日'[(d.getDay() + 6) % 7]}`
 })
 
-const todayCourses = computed(() => store.coursesOf(today.value))
+// 今天的课程按今天真实所在周过滤，与周课表切换的展示周互不影响
+const todayCourses = computed(() => {
+  const wd = ((today.value.getDay() + 6) % 7 + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7
+  return store.todayCoursesByWeekday[wd]
+})
 
 const todayHomework = computed(() => {
   const wd = ((today.value.getDay() + 6) % 7 + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7
-  const ids = store.coursesByWeekday[wd].map((c) => c.id)
+  const ids = store.todayCoursesByWeekday[wd].map((c) => c.id)
   return store.homework.filter((h) => !h.done && (h.courseId === null || ids.includes(h.courseId)))
+})
+
+onMounted(() => {
+  void store.refreshToday()
 })
 
 function openCourse(course: Course): void {

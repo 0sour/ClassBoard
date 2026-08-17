@@ -5,9 +5,10 @@ import { MOCK_PRACTICE } from '@/data/mock'
 
 const store = useScheduleStore()
 
+// 今日课程数：按今天真实所在周统计，不随周视图切换变化
 const todayCourseCount = computed(() => {
   const wd = ((store.today.getDay() + 6) % 7 + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7
-  return store.coursesByWeekday[wd].length
+  return store.todayCoursesByWeekday[wd].length
 })
 
 const courseCount = computed(() => store.visibleCourses.length)

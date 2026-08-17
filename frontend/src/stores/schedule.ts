@@ -50,6 +50,8 @@ export const useScheduleStore = defineStore('schedule', () => {
   // 远端模式：API 连接成功即为 true；weekContext 为 /api/schedule 的周聚合数据
   const remote = ref(false)
   const weekContext = ref<ScheduleResponse | null>(null)
+  // 今天所在周的聚合数据：与周视图切换（weekOffset）解耦，日视图/「今日课程」据此显示
+  const todayContext = ref<ScheduleResponse | null>(null)
 
   // 加载标志（骨架屏用，UI 设计文档 4.4）
   const mattersLoading = ref(false)
@@ -112,6 +114,43 @@ export const useScheduleStore = defineStore('schedule', () => {
     return coursesByWeekday.value[wd]
   }
 
+  /** 今天真实日期所在周的周号（remote 以服务端为准） */
+  const todayWeekNumber = computed(() => {
+    if (remote.value && todayContext.value) return todayContext.value.week.weekNumber
+    return currentSemester.value ? calcWeekNumber(toMonday(today.value), currentSemester.value) : null
+  })
+
+  /** 今天所在周的可见课程：不随周视图切换（weekOffset）变化，日视图/「今日课程」据此显示 */
+  const todayCourses = computed<Course[]>(() => {
+    if (remote.value && todayContext.value) return todayContext.value.courses
+    return courses.value.filter((c) => {
+      if (c.semesterId !== currentSemesterId.value) return false
+      if (!showOddEvenFilter.value) return true
+      return isVisibleInWeek(c.weekType, c.weekList, todayWeekNumber.value)
+    })
+  })
+
+  /** 今天所在周按星期分组 */
+  const todayCoursesByWeekday = computed<Record<Weekday, Course[]>>(() => {
+    const map = {
+      1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
+    } as Record<Weekday, Course[]>
+    for (const c of todayCourses.value) {
+      map[c.weekday].push(c)
+    }
+    return map
+  })
+
+  /** 拉取今天所在周的聚合数据（与 refreshSchedule 的展示周相互独立） */
+  async function refreshToday(): Promise<void> {
+    if (!remote.value) return
+    try {
+      todayContext.value = await api.getSchedule(formatDate(toMonday(today.value)))
+    } catch {
+      // 拉取失败保留旧数据
+    }
+  }
+
   /** 远端周数据（考试/作业，供后续页面接入） */
   const weekExams = computed(() => weekContext.value?.exams ?? [])
   const weekHomework = computed(() => weekContext.value?.homework ?? [])
@@ -137,6 +176,7 @@ export const useScheduleStore = defineStore('schedule', () => {
       settings.value = ctx.settings
       remote.value = true
       await refreshSchedule()
+      await refreshToday()
       await loadMatters()
     } catch {
       remote.value = false
@@ -531,6 +571,10 @@ export const useScheduleStore = defineStore('schedule', () => {
     visibleCourses,
     coursesByWeekday,
     coursesOf,
+    todayWeekNumber,
+    todayCourses,
+    todayCoursesByWeekday,
+    refreshToday,
     weekExams,
     weekHomework,
     weekInfoOf,
