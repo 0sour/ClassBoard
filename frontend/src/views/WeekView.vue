@@ -1,18 +1,25 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useScheduleStore } from '@/stores/schedule'
 import WeekNav from '@/components/schedule/WeekNav.vue'
 import WeekGrid from '@/components/schedule/WeekGrid.vue'
 import SidePanel from '@/components/schedule/SidePanel.vue'
 import CourseModal from '@/components/schedule/CourseModal.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
+import Skeleton from '@/components/common/Skeleton.vue'
 import { exportElementAsPng } from '@/utils/exportPng'
 import { toast } from '@/utils/ui'
-import type { Course } from '@/types'
+import type { Course, Weekday } from '@/types'
+
+const store = useScheduleStore()
 
 const selected = ref<Course | null>(null)
 const editing = ref<Course | null>(null)
 const showEditor = ref(false)
 const exporting = ref(false)
+
+/** 空白格快捷新增：预填星期与节次 */
+const createSlot = ref<{ weekday: Weekday; period: number } | null>(null)
 
 function openCourse(course: Course): void {
   selected.value = course
@@ -25,6 +32,13 @@ function closeModal(): void {
 function editCourse(course: Course): void {
   selected.value = null
   editing.value = course
+  showEditor.value = true
+}
+
+function createFromSlot(slot: { weekday: Weekday; period: number }): void {
+  selected.value = null
+  editing.value = null
+  createSlot.value = slot
   showEditor.value = true
 }
 
@@ -60,7 +74,9 @@ async function exportPng(): Promise<void> {
 
         <section class="schedule-card reveal">
           <div class="sched-scroll">
-            <WeekGrid @open="openCourse" />
+            <!-- 周数据拉取中显示网格骨架（UI 4.4） -->
+            <Skeleton v-if="store.remote && !store.weekContext" variant="grid" />
+            <WeekGrid v-else @open="openCourse" @create="createFromSlot" />
           </div>
         </section>
 
@@ -87,8 +103,10 @@ async function exportPng(): Promise<void> {
     <CourseEditor
       :open="showEditor"
       :course="editing"
-      @close="showEditor = false"
-      @done="showEditor = false"
+      :preset-weekday="createSlot?.weekday"
+      :preset-period="createSlot?.period"
+      @close="showEditor = false; createSlot = null"
+      @done="showEditor = false; createSlot = null"
     />
   </div>
 </template>

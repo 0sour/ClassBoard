@@ -11,6 +11,10 @@ const props = defineProps<{
   course?: Course | null
   /** 新增模式下预选课程类型（如事项页「新增实验课」） */
   presetType?: CourseType
+  /** 新增模式下预填星期（如周视图空白格快捷新增） */
+  presetWeekday?: Weekday
+  /** 新增模式下预填起始节次（同上） */
+  presetPeriod?: number
 }>()
 
 const emit = defineEmits<{ (e: 'close'): void; (e: 'done', name: string): void }>()
@@ -130,6 +134,12 @@ watch(
       activeTab.value = 'fixed'
     } else {
       Object.assign(form, blankForm())
+      // 空白格快捷新增：预填星期与起始节次（结束节次默认 +1）
+      if (props.presetWeekday) form.weekday = props.presetWeekday
+      if (props.presetPeriod) {
+        form.startPeriod = props.presetPeriod
+        form.endPeriod = Math.min(props.presetPeriod + 1, store.periods.length || props.presetPeriod + 1)
+      }
       sessions.value = [blankSession()]
       activeTab.value = 'fixed'
     }

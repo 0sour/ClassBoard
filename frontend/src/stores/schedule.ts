@@ -51,6 +51,9 @@ export const useScheduleStore = defineStore('schedule', () => {
   const remote = ref(false)
   const weekContext = ref<ScheduleResponse | null>(null)
 
+  // 加载标志（骨架屏用，UI 设计文档 4.4）
+  const mattersLoading = ref(false)
+
   const currentSemester = computed(
     () => semesters.value.find((s) => s.id === currentSemesterId.value) ?? null,
   )
@@ -143,6 +146,7 @@ export const useScheduleStore = defineStore('schedule', () => {
   /** 拉取当前学期考试与作业（事项页 / 信息面板 / 铃铛共用） */
   async function loadMatters(): Promise<void> {
     if (!remote.value) return
+    mattersLoading.value = true
     try {
       const semId = currentSemesterId.value
       const [examList, hwList] = await Promise.all([
@@ -153,6 +157,8 @@ export const useScheduleStore = defineStore('schedule', () => {
       homework.value = hwList
     } catch {
       // 拉取失败保留旧数据
+    } finally {
+      mattersLoading.value = false
     }
   }
 
@@ -514,6 +520,8 @@ export const useScheduleStore = defineStore('schedule', () => {
     settings,
     accessRequired,
     remote,
+    mattersLoading,
+    weekContext,
     today,
     anchorMonday,
     weekDays,

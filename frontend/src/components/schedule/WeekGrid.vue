@@ -7,7 +7,10 @@ import type { Course, Weekday } from '@/types'
 
 const store = useScheduleStore()
 
-const emit = defineEmits<{ (e: 'open', course: Course): void }>()
+const emit = defineEmits<{
+  (e: 'open', course: Course): void
+  (e: 'create', slot: { weekday: Weekday; period: number }): void
+}>()
 
 const DAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] as const
 
@@ -87,6 +90,17 @@ const rowHeight = computed(() => {
         <div class="dt num">{{ store.weekDays[idx].getMonth() + 1 }}/{{ store.weekDays[idx].getDate() }}</div>
       </div>
 
+      <!-- 空白槽：点击快捷新增课程（预填星期与节次，PRD 5.2 / UI 3.1） -->
+      <button
+        v-for="p in store.periods"
+        :key="'slot-' + p.id"
+        class="slot"
+        type="button"
+        :style="{ gridRow: `${p.index + 1} / ${p.index + 2}` }"
+        :aria-label="`新增课程：周${DAY_LABELS[idx]} 第${p.index}节`"
+        @click="emit('create', { weekday: (idx + 1) as Weekday, period: p.index })"
+      ></button>
+
       <CourseBlock
         v-for="item in col"
         :key="item.course.id"
@@ -133,6 +147,25 @@ const rowHeight = computed(() => {
 
 .col:last-child {
   border-right: none;
+}
+
+/* 空白槽：占位可点击，hover 提示；课程块渲染在其上（DOM 顺序在后） */
+.slot {
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.slot:hover {
+  background: var(--color-bg-subtle);
+}
+
+.slot:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: -1px;
 }
 
 /* 时间列 */

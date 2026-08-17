@@ -11,6 +11,17 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'edit', course: Course): void
 const store = useScheduleStore()
 const deleting = ref(false)
 
+/** 考试/作业 Tab（PRD 5.7：课程详情聚合该课程的记录） */
+const tab = ref<'exam' | 'homework'>('exam')
+
+const examsOf = computed(() =>
+  props.course ? store.exams.filter((e) => e.courseId === props.course!.id) : [],
+)
+
+const homeworkOf = computed(() =>
+  props.course ? store.homework.filter((h) => h.courseId === props.course!.id) : [],
+)
+
 const style = computed(() => ({
   '--cbg': props.course ? `var(--${props.course.color}-bg)` : 'transparent',
   '--cline': props.course ? `var(--${props.course.color}-line)` : 'transparent',
@@ -132,6 +143,53 @@ async function onDelete(): Promise<void> {
               </span>
               <span class="v note">{{ course.remark }}</span>
             </div>
+          </div>
+
+          <!-- 考试/作业 Tab（PRD 5.7：聚合该课程的记录） -->
+          <div class="rel-tabs" role="tablist" aria-label="关联记录">
+            <button
+              class="rel-tab"
+              :class="{ active: tab === 'exam' }"
+              type="button"
+              role="tab"
+              :aria-selected="tab === 'exam'"
+              @click="tab = 'exam'"
+            >
+              考试{{ examsOf.length ? `（${examsOf.length}）` : '' }}
+            </button>
+            <button
+              class="rel-tab"
+              :class="{ active: tab === 'homework' }"
+              type="button"
+              role="tab"
+              :aria-selected="tab === 'homework'"
+              @click="tab = 'homework'"
+            >
+              作业{{ homeworkOf.length ? `（${homeworkOf.length}）` : '' }}
+            </button>
+          </div>
+
+          <div class="rel-list">
+            <template v-if="tab === 'exam'">
+              <div v-for="e in examsOf" :key="e.id" class="rel-item">
+                <span class="rel-tag rel-tag--exam">考试</span>
+                <span class="rel-main">
+                  <span class="rel-name">{{ e.name }}</span>
+                  <span class="rel-meta num">{{ e.datetime.slice(0, 10) }} {{ e.datetime.slice(11, 16) }}</span>
+                </span>
+              </div>
+              <p v-if="examsOf.length === 0" class="rel-empty">该课程暂无考试记录</p>
+            </template>
+            <template v-else>
+              <div v-for="h in homeworkOf" :key="h.id" class="rel-item">
+                <span class="rel-tag rel-tag--hw">作业</span>
+                <span class="rel-main">
+                  <span class="rel-name" :class="{ done: h.done }">{{ h.name }}</span>
+                  <span class="rel-meta num">{{ h.dueAt.slice(0, 10) }} 截止{{ h.done ? ' · 已完成' : '' }}</span>
+                </span>
+              </div>
+              <p v-if="homeworkOf.length === 0" class="rel-empty">该课程暂无作业记录</p>
+            </template>
           </div>
 
           <!-- 操作栏：编辑 / 删除（删除需二次确认） -->
@@ -267,6 +325,104 @@ async function onDelete(): Promise<void> {
   padding: var(--spacing-sm) var(--spacing-md);
   font-weight: var(--font-weight-regular);
   color: var(--color-text-secondary);
+}
+
+/* 关联考试/作业 Tab */
+.rel-tabs {
+  display: flex;
+  gap: var(--spacing-xs);
+  margin-top: var(--spacing-lg);
+  padding-bottom: var(--spacing-sm);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.rel-tab {
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard),
+    background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.rel-tab:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-body);
+}
+
+.rel-tab.active {
+  background: var(--color-brand-subtle);
+  color: var(--color-brand);
+  font-weight: var(--font-weight-medium);
+}
+
+.rel-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.rel-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  background: var(--color-bg-page);
+  border-radius: var(--radius-sm);
+}
+
+.rel-tag {
+  flex: none;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  border-radius: var(--radius-full);
+  padding: 1px 8px;
+}
+
+.rel-tag--exam {
+  color: var(--color-feedback-warning);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.rel-tag--hw {
+  color: var(--color-feedback-info);
+  background: rgba(6, 182, 212, 0.12);
+}
+
+.rel-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rel-name {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rel-name.done {
+  text-decoration: line-through;
+  color: var(--color-text-tertiary);
+}
+
+.rel-meta {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.rel-empty {
+  padding: var(--spacing-md) 0;
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
 }
 
 .modal-foot {
