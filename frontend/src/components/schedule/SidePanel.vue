@@ -29,7 +29,7 @@ const pendingHomework = computed(() => store.homework.filter((h) => !h.done))
         <h3>本周摘要</h3>
       </div>
       <div class="summary-nums">
-        <div class="num-item"><b class="num">{{ courseCount }}</b><span>门课程</span></div>
+        <div class="num-item"><b class="num">{{ courseCount }}</b><span>节课</span></div>
         <div class="num-item"><b class="num">{{ labCount }}</b><span>实验课</span></div>
         <div class="num-item"><b class="num">{{ todayCourseCount }}</b><span>今日课程</span></div>
       </div>
