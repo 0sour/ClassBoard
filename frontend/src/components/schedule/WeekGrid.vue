@@ -376,7 +376,14 @@ async function applyDrag(course: Course, target: { weekday: Weekday; startPeriod
       return
     }
     // 单周例外：原课保留「除本周外」的周在原位置；新增本周新位置副本
-    await store.updateCourse(course.id, { ...base, weekType: 'custom', weekList: rest })
+    await store.updateCourse(course.id, {
+      ...base,
+      weekday: course.weekday,
+      startPeriod: course.startPeriod,
+      endPeriod: course.endPeriod,
+      weekType: 'custom',
+      weekList: rest,
+    })
     await store.addCourse({
       type: course.type,
       name: course.name,
