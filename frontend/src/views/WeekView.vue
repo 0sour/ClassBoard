@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import WeekNav from '@/components/schedule/WeekNav.vue'
 import WeekGrid from '@/components/schedule/WeekGrid.vue'
@@ -12,6 +13,7 @@ import { toast } from '@/utils/ui'
 import type { Course, Weekday } from '@/types'
 
 const store = useScheduleStore()
+const router = useRouter()
 
 const selected = ref<Course | null>(null)
 const editing = ref<Course | null>(null)
@@ -23,6 +25,11 @@ const createSlot = ref<{ weekday: Weekday; period: number } | null>(null)
 
 function openCourse(course: Course): void {
   selected.value = course
+}
+
+/** 打开事项页并导航到对应作业 tab */
+function openHomework(h: { id: number; name: string; courseId?: number | null }): void {
+  router.push({ name: 'matters', query: { tab: 'homework', hwId: h.id } })
 }
 
 function closeModal(): void {
@@ -96,7 +103,7 @@ async function exportPng(): Promise<void> {
       </div>
 
       <!-- 信息面板（桌面右侧 / 平板下方两列） -->
-      <SidePanel />
+      <SidePanel @open-course="openCourse" @open-homework="openHomework" />
     </div>
 
     <CourseModal :course="selected" @close="closeModal" @edit="editCourse" />

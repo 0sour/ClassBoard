@@ -1,9 +1,17 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import { MOCK_PRACTICE } from '@/data/mock'
+import type { Course } from '@/types'
 
+const router = useRouter()
 const store = useScheduleStore()
+
+const emit = defineEmits<{
+  (e: 'openCourse', course: Course): void
+  (e: 'openHomework', homework: { id: number; name: string; courseId?: number | null }): void
+}>()
 
 // 组合卡：待交作业 / 实践与其他 分段切换（样式同顶栏视图切换 seg）
 const panelTab = ref<'hw' | 'practice'>('hw')
@@ -19,6 +27,36 @@ const labCount = computed(() => store.visibleCourses.filter((c) => c.type === 'l
 
 /** 待交作业：当前学期未完成（真实接口 /api/homework） */
 const pendingHomework = computed(() => store.homework.filter((h) => !h.done))
+
+/** 点击统计项跳转 */
+function goToPage(name: string): void {
+  router.push({ name })
+}
+
+/** 点击作业条目：emit 事件给父组件打开编辑弹窗 */
+function openHomeworkItem(h: { id: number; name: string; courseId?: number | null }): void {
+  emit('openHomework', h)
+}
+
+/** 点击实践课程条目：emit 事件给父组件打开课程详情（mock 数据转为 Course 格式） */
+function openPracticeItem(p: { name: string; teacher: string; weeks: string }): void {
+  const mockCourse = {
+    id: 0,
+    semesterId: 0,
+    type: 'course' as const,
+    name: p.name,
+    teacher: p.teacher,
+    location: '',
+    color: 'course-1',
+    weekType: 'all' as const,
+    weekList: null,
+    weekday: 1,
+    startPeriod: 1,
+    endPeriod: 1,
+    remark: p.weeks,
+  } as Course
+  emit('openCourse', mockCourse)
+}
 </script>
 
 <template>
@@ -32,9 +70,9 @@ const pendingHomework = computed(() => store.homework.filter((h) => !h.done))
         <h3>本周摘要</h3>
       </div>
       <div class="summary-nums">
-        <div class="num-item"><b class="num">{{ courseCount }}</b><span>节课</span></div>
-        <div class="num-item"><b class="num">{{ labCount }}</b><span>实验课</span></div>
-        <div class="num-item"><b class="num">{{ todayCourseCount }}</b><span>今日课程</span></div>
+        <div class="num-item clickable" @click="goToPage('week')"><b class="num">{{ courseCount }}</b><span>节课</span></div>
+        <div class="num-item clickable" @click="goToPage('matters')"><b class="num">{{ labCount }}</b><span>实验课</span></div>
+        <div class="num-item clickable" @click="goToPage('day')"><b class="num">{{ todayCourseCount }}</b><span>今日课程</span></div>
       </div>
     </div>
 
@@ -59,18 +97,18 @@ const pendingHomework = computed(() => store.homework.filter((h) => !h.done))
       </div>
 
       <template v-if="panelTab === 'hw'">
-        <div v-if="pendingHomework.length">
-          <div v-for="h in pendingHomework" :key="h.id" class="sp-item">
-            <div class="date-chip">{{ h.dueAt.slice(5, 10).replace('-', '月') }}日截止</div>
-            <div class="sp-item-title">{{ h.name }}</div>
-            <div class="sp-item-meta">未完成</div>
+          <div v-if="pendingHomework.length">
+            <div v-for="h in pendingHomework" :key="h.id" class="sp-item clickable" @click="openHomeworkItem(h)">
+              <div class="date-chip">{{ h.dueAt.slice(5, 10).replace('-', '月') }}日截止</div>
+              <div class="sp-item-title">{{ h.name }}</div>
+              <div class="sp-item-meta">未完成</div>
+            </div>
           </div>
-        </div>
         <div v-else class="sp-empty">暂无待交作业，好好休息</div>
       </template>
 
       <template v-else>
-        <div v-for="p in MOCK_PRACTICE" :key="p.name" class="sp-item">
+        <div v-for="p in MOCK_PRACTICE" :key="p.name" class="sp-item clickable" @click="openPracticeItem(p)">
           <div class="sp-item-title">{{ p.name }}</div>
           <div class="sp-item-meta">{{ p.teacher }} · {{ p.weeks }}</div>
         </div>
@@ -136,6 +174,17 @@ const pendingHomework = computed(() => store.homework.filter((h) => !h.done))
   flex-direction: column;
   align-items: center;
   gap: 2px;
+}
+
+.num-item.clickable {
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--motion-duration-normal) var(--motion-easing-standard);
+}
+
+.num-item.clickable:hover {
+  background-color: var(--color-bg-hover);
 }
 
 .num-item b {
@@ -210,6 +259,18 @@ const pendingHomework = computed(() => store.homework.filter((h) => !h.done))
 .sp-item {
   padding: var(--spacing-sm) 0;
   border-top: 1px solid var(--color-border-default);
+}
+
+.sp-item.clickable {
+  cursor: pointer;
+  padding: var(--spacing-sm) var(--spacing-sm);
+  margin: 0 calc(-1 * var(--spacing-sm));
+  border-radius: var(--radius-sm);
+  transition: background-color var(--motion-duration-normal) var(--motion-easing-standard);
+}
+
+.sp-item.clickable:hover {
+  background-color: var(--color-bg-hover);
 }
 
 .sp-item:first-of-type {
