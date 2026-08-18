@@ -7,6 +7,8 @@ const props = defineProps<{
   conflict?: boolean
   /** 折叠态（冲突分栏 1/3）：只显示名称；未传为 false，非冲突课程不受影响 */
   collapsed?: boolean
+  /** 拖拽进行中：缩小高亮并为长按创建预留层 */
+  dragging?: boolean
 }>()
 
 const emit = defineEmits<{ (e: 'open', course: Course): void }>()
@@ -24,7 +26,7 @@ const style = computed(() => ({
     class="course"
     type="button"
     :style="style"
-    :class="{ lab: course.type === 'lab', conflict, collapsed }"
+    :class="{ lab: course.type === 'lab', conflict, collapsed, dragging }"
     :aria-label="`${course.name}，${course.location}`"
     @click="emit('open', course)"
   >
@@ -52,6 +54,17 @@ const style = computed(() => ({
   min-width: 0;
   transition: box-shadow var(--motion-duration-normal) var(--motion-easing-standard),
     transform var(--motion-duration-normal) var(--motion-easing-standard);
+}
+
+/* 拖拽进行中：原卡半透明占位（幽灵卡独立跟随），长按阶段允许抬起触摸 */
+.course.dragging {
+  opacity: 0.4;
+  transform: scale(0.97);
+  box-shadow: none;
+}
+
+.course:active.dragging {
+  transform: scale(0.97);
 }
 
 /* 冲突分栏折叠态（1/3）：名称居中，地点隐藏 */

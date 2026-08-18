@@ -146,7 +146,193 @@ onMounted(() => window.addEventListener('resize', onResize))
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
   cancelAnimationFrame(animRaf)
+  window.removeEventListener('pointermove', onWindowPointerMove)
+  window.removeEventListener('pointerup', onWindowPointerUp)
+  window.removeEventListener('keydown', onWindowKeyDown)
+  if (longPressTimer !== null) window.clearTimeout(longPressTimer)
 })
+
+// ============================================================
+// 长按拖拽调课：按下 ~400ms 不移动进入拖动模式，松手落格
+// 保持原跨节宽度，允许与已有课程重叠（沿用冲突分栏约定）
+// ============================================================
+const gridEl = ref<HTMLElement | null>(null)
+const draggingCourse = ref<Course | null>(null)
+const dragSource = ref<{ startPeriod: number; endPeriod: number } | null>(null)
+const dragPos = ref<{ x: number; y: number } | null>(null)
+const dragTarget = ref<{ weekday: Weekday; startPeriod: number; endPeriod: number } | null>(null)
+const suppressClickUntil = ref(0)
+
+/** 目标格在 grid 内的绝对定位框（高亮预览） */
+const targetBox = computed(() => {
+  const t = dragTarget.value
+  const grid = gridEl.value
+  if (!t || !grid) return null
+  const dayCols = Array.from(grid.querySelectorAll('.day-col'))
+  const col = dayCols[t.weekday - 1]
+  if (!col) return null
+  const gridRect = grid.getBoundingClientRect()
+  const colRect = col.getBoundingClientRect()
+  const rowH = getRowHeight()
+  const span = t.endPeriod - t.startPeriod + 1
+  return {
+    left: colRect.left - gridRect.left + 3,
+    width: colRect.width - 6,
+    top: HEADER_H + (t.startPeriod - 1) * rowH,
+    height: span * rowH,
+  }
+})
+
+let longPressTimer: number | null = null
+let dragAnchor = { x: 0, y: 0, active: false }
+let dragMoved = false
+
+const LONG_PRESS_MS = 400
+const MOVE_THRESHOLD_PX = 8
+const HEADER_H = 44 // day-head 高度（网格首行）
+
+/** 课程卡 pointerdown：启动长按计时，进入潜在拖拽 */
+function onCoursePointerDown(course: Course, e: PointerEvent): void {
+  if (course.unscheduled) return
+  dragAnchor = { x: e.clientX, y: e.clientY, active: true }
+  suppressClickUntil.value = 0
+  if (longPressTimer !== null) window.clearTimeout(longPressTimer)
+  longPressTimer = window.setTimeout(() => beginDrag(course), LONG_PRESS_MS)
+  window.addEventListener('pointermove', onWindowPointerMove)
+  window.addEventListener('pointerup', onWindowPointerUp)
+  window.addEventListener('keydown', onWindowKeyDown)
+}
+
+/** 长按达成：进入拖拽模式（原卡半透明占位 + 幽灵卡跟随） */
+function beginDrag(course: Course): void {
+  if (!dragAnchor.active) return
+  draggingCourse.value = course
+  dragSource.value = { startPeriod: course.startPeriod, endPeriod: course.endPeriod }
+  dragPos.value = { x: dragAnchor.x, y: dragAnchor.y }
+  dragTarget.value = {
+    weekday: course.weekday,
+    startPeriod: course.startPeriod,
+    endPeriod: course.endPeriod,
+  }
+  dragMoved = false
+  suppressClickUntil.value = Date.now() + 300
+}
+
+function onWindowPointerMove(e: PointerEvent): void {
+  if (!dragAnchor.active) return
+  const dx = e.clientX - dragAnchor.x
+  const dy = e.clientY - dragAnchor.y
+  // 未进入长按前移动超阈值：取消长按（视为点击/滚动）
+  if (!draggingCourse.value && longPressTimer !== null && Math.hypot(dx, dy) > MOVE_THRESHOLD_PX) {
+    window.clearTimeout(longPressTimer)
+    longPressTimer = null
+    dragAnchor.active = false
+    cleanupDrag()
+    return
+  }
+  if (!draggingCourse.value) return
+  dragMoved = true
+  dragPos.value = { x: e.clientX, y: e.clientY }
+  dragTarget.value = findTargetCell(e.clientX, e.clientY)
+}
+
+function onWindowPointerUp(): void {
+  const course = draggingCourse.value
+  const target = dragTarget.value
+  // 长按后原地松手（无移动）视为误触，不落库
+  const didMove = dragMoved
+  cleanupDrag()
+  if (course && target && didMove) {
+    void applyDrag(course, target)
+  }
+}
+
+function onWindowKeyDown(e: KeyboardEvent): void {
+  if (e.key === 'Escape') cleanupDrag()
+}
+
+/** 结束拖拽：清 ghost/目标，恢复原卡 */
+function cleanupDrag(): void {
+  draggingCourse.value = null
+  dragSource.value = null
+  dragPos.value = null
+  dragTarget.value = null
+  dragAnchor.active = false
+  if (longPressTimer !== null) {
+    window.clearTimeout(longPressTimer)
+    longPressTimer = null
+  }
+  window.removeEventListener('pointermove', onWindowPointerMove)
+  window.removeEventListener('pointerup', onWindowPointerUp)
+  window.removeEventListener('keydown', onWindowKeyDown)
+}
+
+/** 指针坐标 → 目标格子（保持跨节宽度，clamp 1..12） */
+function findTargetCell(clientX: number, clientY: number): { weekday: Weekday; startPeriod: number; endPeriod: number } | null {
+  const grid = gridEl.value
+  if (!grid) return null
+  const dayCols = Array.from(grid.querySelectorAll('.day-col'))
+  let weekday: Weekday | null = null
+  for (let i = 0; i < dayCols.length; i++) {
+    const r = dayCols[i].getBoundingClientRect()
+    if (clientX >= r.left && clientX < r.right) {
+      weekday = (i + 1) as Weekday
+      break
+    }
+  }
+  if (weekday === null || !dragSource.value) return null
+  const gridRect = grid.getBoundingClientRect()
+  const relY = clientY - gridRect.top
+  const rowH = getRowHeight()
+  const startPeriod = Math.min(12, Math.max(1, Math.floor((relY - HEADER_H) / rowH) + 1))
+  const span = dragSource.value.endPeriod - dragSource.value.startPeriod + 1
+  let end = startPeriod + span - 1
+  let start = startPeriod
+  if (end > 12) {
+    start = 12 - span + 1
+    end = 12
+  }
+  return { weekday, startPeriod: start, endPeriod: end }
+}
+
+/** 实测行高（像素），回退 52 */
+function getRowHeight(): number {
+  const cell = gridEl.value?.querySelector('.time-cell')
+  if (cell) {
+    const h = cell.getBoundingClientRect().height
+    if (h > 0) return h
+  }
+  return 52
+}
+
+/** 点击课程：拖拽刚落格后 300ms 内抑制 click（避免误开详情） */
+function handleOpen(course: Course): void {
+  if (Date.now() < suppressClickUntil.value) return
+  emit('open', course)
+}
+
+/** 落库：透传未变字段，仅更新 weekday/startPeriod/endPeriod */
+async function applyDrag(course: Course, target: { weekday: Weekday; startPeriod: number; endPeriod: number }): Promise<void> {
+  try {
+    await store.updateCourse(course.id, {
+      type: course.type,
+      name: course.name,
+      teacher: course.teacher,
+      location: course.location,
+      color: course.color,
+      weekType: course.weekType,
+      weekList: course.weekList,
+      weekday: target.weekday,
+      startPeriod: target.startPeriod,
+      endPeriod: target.endPeriod,
+      remark: course.remark,
+    })
+    const slot = target.endPeriod > target.startPeriod ? `第 ${target.startPeriod}–${target.endPeriod} 节` : `第 ${target.startPeriod} 节`
+    void import('@/utils/ui').then(({ toast }) => toast(`已调整至 ${DAY_LABELS[target.weekday - 1]} ${slot}`, 'success'))
+  } catch {
+    void import('@/utils/ui').then(({ toast }) => toast('调整失败，请重试', 'error'))
+  }
+}
 
 // ============================================================
 // 桌面端动态行高：让 12 节课表在常见分辨率（1280×720 / 1920×1080）下
@@ -168,7 +354,7 @@ const rowHeight = computed(() => {
 </script>
 
 <template>
-  <div class="weekgrid" :style="rowHeight ? { '--ph-row-dyn': rowHeight + 'px' } : undefined">
+  <div ref="gridEl" class="weekgrid" :class="{ 'is-dragging': draggingCourse }" :style="rowHeight ? { '--ph-row-dyn': rowHeight + 'px' } : undefined">
     <!-- 时间列 -->
     <div class="col time-col" aria-hidden="true">
       <div class="day-head corner"></div>
@@ -216,7 +402,9 @@ const rowHeight = computed(() => {
           gridColumn: '1',
         }"
         :course="item.course"
-        @open="(c) => emit('open', c)"
+        :dragging="draggingCourse?.id === item.course.id"
+        @pointerdown="(e: PointerEvent) => onCoursePointerDown(item.course, e)"
+        @open="handleOpen"
       />
 
       <!-- 冲突课程组：flex 分栏，hover 展开 2/3（1/3 只显示名称） -->
@@ -236,11 +424,35 @@ const rowHeight = computed(() => {
           :style="{ flexGrow: getGrow(item.course.id), flexBasis: '0%' }"
           :collapsed="getGrow(item.course.id) < Math.max(...group.map((c) => getGrow(c.course.id))) - 0.01"
           :course="item.course"
+          :dragging="draggingCourse?.id === item.course.id"
+          @pointerdown="(e: PointerEvent) => onCoursePointerDown(item.course, e)"
           @mouseenter="handleHoverEnter(item.course.id)"
-          @open="(c) => emit('open', c)"
+          @open="handleOpen"
         />
       </div>
     </div>
+
+    <!-- 拖拽目标格高亮框（weekday/节次换算后绝对定位） -->
+    <div
+      v-if="targetBox"
+      class="drag-target-overlay"
+      :style="{ left: targetBox.left + 'px', top: targetBox.top + 'px', width: targetBox.width + 'px', height: targetBox.height + 'px' }"
+    ></div>
+
+    <!-- 拖拽幽灵卡（body 顶层，跟手半透明） -->
+    <Teleport to="body">
+      <div
+        v-if="draggingCourse && dragPos"
+        class="course-ghost"
+        :style="{ left: dragPos.x + 'px', top: dragPos.y + 'px' }"
+      >
+        <span class="ghost-name">{{ draggingCourse.name }}</span>
+        <span class="ghost-slot" v-if="dragTarget">
+          {{ DAY_LABELS[dragTarget.weekday - 1] }} ·
+          {{ dragTarget.endPeriod > dragTarget.startPeriod ? `第 ${dragTarget.startPeriod}–${dragTarget.endPeriod} 节` : `第 ${dragTarget.startPeriod} 节` }}
+        </span>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -253,6 +465,60 @@ const rowHeight = computed(() => {
   border-radius: var(--radius-lg);
   overflow: hidden;
   box-shadow: var(--shadow-card);
+  position: relative;
+}
+
+/* 拖拽目标格高亮（绝对定位覆盖预览） */
+.drag-target-overlay {
+  position: absolute;
+  border: 2px dashed var(--color-brand);
+  border-radius: var(--radius-sm);
+  background: var(--color-brand-subtle);
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: var(--z-index-sticky);
+}
+
+/* 拖拽幽灵卡（body 顶层，不随滚动位移的问题由 fixed 定位规避） */
+.course-ghost {
+  position: fixed;
+  transform: translate(-50%, -100%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 180px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  opacity: 0.92;
+  pointer-events: none;
+  z-index: var(--z-index-modal);
+}
+
+.ghost-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ghost-slot {
+  font-size: var(--font-size-xs);
+  color: var(--color-brand);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+}
+
+/* 拖动进行中：宿主网格滚动条期间保持滚动可用，卡片 hover 阴影收敛 */
+.weekgrid.is-dragging .course,
+.weekgrid.is-dragging .slot {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .col {
