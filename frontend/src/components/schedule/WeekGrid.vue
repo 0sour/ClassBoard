@@ -22,8 +22,73 @@ const isCurrentWeek = computed(() => store.weekOffset === 0)
 /** 今天列高亮（仅当前周生效） */
 const highlightedWeekday = computed<Weekday | null>(() => (isCurrentWeek.value ? todayWeekday.value : null))
 
-/** hover 展开的冲突课程 id（1/3 分栏交互） */
+/** 最后停留的冲突课程 id（不随 mouseleave 清空）；null = 从未 hover 过（均分） */
 const hovered = ref<number | null>(null)
+
+/** 动画后的 flex-grow 实时值，驱动模板 style 绑定 */
+const growValues = ref<Record<number, number>>({})
+let animRaf = 0
+
+/** 缓动函数：easeOutCubic */
+function ease(t: number): number {
+  return t < 1 ? 1 - (1 - t) * (1 - t) * (1 - t) : 1
+}
+
+/** 对当前所有冲突课程执行 rAF 补间动画 */
+function animateGrow(targetGrow: Record<number, number>, duration = 200): void {
+  cancelAnimationFrame(animRaf)
+  const from: Record<number, number> = {}
+  for (const id of Object.keys(targetGrow)) {
+    from[Number(id)] = growValues.value[Number(id)] ?? 1
+  }
+  const t0 = performance.now()
+  const tick = (now: number): void => {
+    const p = Math.min(1, (now - t0) / duration)
+    const e = ease(p)
+    for (const id of Object.keys(targetGrow)) {
+      const nid = Number(id)
+      const f = from[nid] ?? 1
+      const t = targetGrow[nid]
+      growValues.value[nid] = f + (t - f) * e
+    }
+    if (p < 1) animRaf = requestAnimationFrame(tick)
+  }
+  animRaf = requestAnimationFrame(tick)
+}
+
+function handleHoverEnter(id: number): void {
+  hovered.value = id
+  // 计算该组所有课程的目标 grow：hover 的 2/3，其余 1/3
+  const targets: Record<number, number> = {}
+  for (const g of allConflictGroupsFlat.value) {
+    targets[g.id] = g.id === id ? 2 : 1
+  }
+  animateGrow(targets)
+}
+
+function handleHoverLeave(): void {
+  // 不清空 hovered——保留最后停留的课程为 2/3
+}
+
+/** 所有冲突课程 id 列表（供动画目标计算用） */
+const allConflictGroupsFlat = computed(() => {
+  const result: { id: number }[] = []
+  const seen = new Set<number>()
+  for (const col of columns.value) {
+    for (const item of col) {
+      if (item.conflict && !seen.has(item.course.id)) {
+        result.push({ id: item.course.id })
+        seen.add(item.course.id)
+      }
+    }
+  }
+  return result
+})
+
+/** 获取某课程的 flex-grow 值（动画补间驱动） */
+function getGrow(id: number): number {
+  return growValues.value[id] ?? 1
+}
 
 type ColItem = { course: Course; offset: boolean; conflict: boolean }
 
@@ -77,22 +142,12 @@ function conflictGroupsOf(idx: number): { course: Course }[][] {
   return groups
 }
 
-/** flex 分栏：hover 到的课程 2/3，其余 1/3；无 hover 时第一门 2/3 */
-function growWeight(id: number, index: number): number {
-  return hovered.value === id || (hovered.value === null && index === 0) ? 2 : 1
-}
-
-/** 展开态：显示完整信息（名称 + 地点） */
-function isExpanded(id: number, index: number): boolean {
-  return hovered.value === id || (hovered.value === null && index === 0)
-}
+onMounted(() => window.addEventListener('resize', onResize))
+onBeforeUnmount(() => window.removeEventListener('resize', onResize))
 
 // ============================================================
 // 桌面端动态行高：让 12 节课表在常见分辨率（1280×720 / 1920×1080）下
 // 一屏完整显示、无需滚动页面。
-// 公式：行高 = (视口高 − 页面上部固定开销 200px − 表头 44px) / 12 节，
-// 上限 64px（设计 token），下限 36px（保证课程块可读）。
-// 平板/移动端仍用断点 token（52/56px）。
 // ============================================================
 const isDesktop = ref(window.innerWidth >= 1280)
 const viewportH = ref(window.innerHeight)
@@ -101,9 +156,6 @@ function onResize(): void {
   isDesktop.value = window.innerWidth >= 1280
   viewportH.value = window.innerHeight
 }
-
-onMounted(() => window.addEventListener('resize', onResize))
-onBeforeUnmount(() => window.removeEventListener('resize', onResize))
 
 const rowHeight = computed(() => {
   if (!isDesktop.value) return null
@@ -173,15 +225,15 @@ const rowHeight = computed(() => {
           gridRow: `${group[0].course.startPeriod + 1} / ${group[0].course.endPeriod + 2}`,
           gridColumn: '1',
         }"
-        @mouseleave="hovered = null"
+        @mouseleave="handleHoverLeave"
       >
         <CourseBlock
-          v-for="(item, ci) in group"
+          v-for="item in group"
           :key="'g-' + item.course.id"
-          :style="{ flexGrow: growWeight(item.course.id, ci), flexBasis: '0%' }"
-          :collapsed="!isExpanded(item.course.id, ci)"
+          :style="{ flexGrow: getGrow(item.course.id), flexBasis: '0%' }"
+          :collapsed="getGrow(item.course.id) < Math.max(...group.map((c) => getGrow(c.course.id))) - 0.01"
           :course="item.course"
-          @mouseenter="hovered = item.course.id"
+          @mouseenter="handleHoverEnter(item.course.id)"
           @open="(c) => emit('open', c)"
         />
       </div>
