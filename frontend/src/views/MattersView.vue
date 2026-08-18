@@ -3,6 +3,7 @@
 // 考试：时间倒序 + 橙色标签；实验：实验课课程列表；作业：勾选完成 + 蓝色标签
 // 桌面端（≥1280px）双栏：左侧列表 + 右侧详情面板（UI 3.5）
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import CourseModal from '@/components/schedule/CourseModal.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
@@ -16,7 +17,12 @@ type Tab = 'exam' | 'lab' | 'homework'
 type HwFilter = 'all' | 'open' | 'done'
 
 const store = useScheduleStore()
-const tab = ref<Tab>('exam')
+const route = useRoute()
+const router = useRouter()
+
+// 从 URL query 初始化（侧栏/其他入口跳转：?tab=homework&hwId=xxx）
+const initialTab = (route.query.tab as Tab) ?? 'exam'
+const tab = ref<Tab>(['exam', 'lab', 'homework'].includes(initialTab) ? initialTab : 'exam')
 const hwFilter = ref<HwFilter>('all')
 
 /** 桌面双栏：右侧详情面板选中项 */
@@ -29,7 +35,18 @@ function onResize(): void {
   isDesktop.value = window.innerWidth >= 1280
 }
 
-onMounted(() => window.addEventListener('resize', onResize))
+onMounted(() => {
+  window.addEventListener('resize', onResize)
+  // 侧栏作业条目跳转：?tab=homework&hwId=xxx → 高亮该作业并清掉 query
+  const hwId = Number(route.query.hwId)
+  if (tab.value === 'homework' && Number.isInteger(hwId)) {
+    const hw = store.homework.find((h) => h.id === hwId)
+    if (hw) selectedHomework.value = hw
+  }
+  if (route.query.tab || route.query.hwId) {
+    router.replace({ query: {} })
+  }
+})
 onBeforeUnmount(() => window.removeEventListener('resize', onResize))
 
 // ---- 考试 ----
