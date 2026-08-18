@@ -5,6 +5,8 @@ import type { Course } from '@/types'
 const props = defineProps<{
   course: Course
   conflict?: boolean
+  /** 折叠态（冲突分栏 1/3）：只显示名称；未传为 false，非冲突课程不受影响 */
+  collapsed?: boolean
 }>()
 
 const emit = defineEmits<{ (e: 'open', course: Course): void }>()
@@ -22,14 +24,14 @@ const style = computed(() => ({
     class="course"
     type="button"
     :style="style"
-    :class="{ lab: course.type === 'lab', conflict }"
+    :class="{ lab: course.type === 'lab', conflict, collapsed }"
     :aria-label="`${course.name}，${course.location}`"
     @click="emit('open', course)"
   >
     <span v-if="course.type === 'lab'" class="lab-tag">实验</span>
     <span v-if="conflict" class="conflict-dot" aria-hidden="true"></span>
     <span class="c-name">{{ course.name }}</span>
-    <span class="c-loc">{{ course.location }}</span>
+    <span v-if="!collapsed" class="c-loc">{{ course.location }}</span>
   </button>
 </template>
 
@@ -38,6 +40,7 @@ const style = computed(() => ({
   position: relative;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 2px;
   margin: var(--spacing-2xs);
   padding: var(--spacing-sm) var(--spacing-sm);
@@ -46,8 +49,15 @@ const style = computed(() => ({
   border-radius: var(--radius-sm);
   text-align: left;
   overflow: hidden;
+  min-width: 0;
   transition: box-shadow var(--motion-duration-normal) var(--motion-easing-standard),
     transform var(--motion-duration-normal) var(--motion-easing-standard);
+}
+
+/* 冲突分栏折叠态（1/3）：名称居中，地点隐藏 */
+.course.collapsed .c-name {
+  font-size: var(--font-size-xs);
+  word-break: break-all;
 }
 
 .course:hover {
