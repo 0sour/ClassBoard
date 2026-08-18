@@ -144,6 +144,7 @@ function conflictGroupsOf(idx: number): { course: Course }[][] {
 
 onMounted(() => window.addEventListener('resize', onResize))
 onBeforeUnmount(() => window.removeEventListener('resize', onResize))
+cancelAnimationFrame(animRaf)
 
 // ============================================================
 // 桌面端动态行高：让 12 节课表在常见分辨率（1280×720 / 1920×1080）下

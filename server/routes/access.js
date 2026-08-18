@@ -7,16 +7,25 @@ import { disable, enable, logout, rateLimit, requireSession, verify, SESSION_COO
 
 export const accessRouter = Router()
 
+/** 判断是否为安全连接（用于 Cookie secure 标志） */
+function isSecureConnection(req) {
+  if (req.secure) return true
+  const forwardedProto = req.headers['x-forwarded-proto']
+  return typeof forwardedProto === 'string' && forwardedProto.toLowerCase() === 'https'
+}
+
 accessRouter.post(
   '/verify',
   rateLimit,
   wrap(async (req, res) => {
     const { passphrase } = req.body ?? {}
     const token = verify(passphrase)
+    const isSecure = isSecureConnection(req)
     res.cookie(SESSION_COOKIE, token, {
       httpOnly: true,
       sameSite: 'lax',
       path: '/',
+      secure: isSecure,
       maxAge: 7 * 24 * 3600 * 1000,
     })
     res.json({ ok: true })
@@ -24,7 +33,7 @@ accessRouter.post(
 )
 
 accessRouter.post('/logout', (req, res) => {
-  logout()
+  logout(req.cookies?.[SESSION_COOKIE])
   res.clearCookie(SESSION_COOKIE, { path: '/' })
   res.status(204).end()
 })

@@ -59,8 +59,8 @@ export function disable(passphrase) {
   sessions.clear()
 }
 
-export function logout() {
-  sessions.clear()
+export function logout(token) {
+  if (token && sessions.has(token)) sessions.delete(token)
 }
 
 function isValidToken(token) {

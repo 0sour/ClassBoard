@@ -68,7 +68,7 @@ function check(store: ReturnType<typeof useScheduleStore>): void {
   // 作业截止提醒：截止前 advanceDays 天内每天提示一次
   const hw = store.settings.homeworkReminder
   if (hw.enabled) {
-    const todayMs = today.setHours(0, 0, 0, 0)
+    const todayMs = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()
     for (const h of store.homework) {
       if (h.done) continue
       const due = new Date(h.dueAt.replace('T', ' ')).getTime()
@@ -86,6 +86,13 @@ function check(store: ReturnType<typeof useScheduleStore>): void {
 
 /** 启动提醒引擎（App 挂载时调用一次；页面生命周期内每 30s 检查） */
 export function startReminderEngine(): () => void {
+  // C-6: 清理旧 timer 避免并发，清空 fired 允许重新触发
+  if (timer !== null) {
+    window.clearInterval(timer)
+    timer = null
+  }
+  fired.clear()
+
   const store = useScheduleStore()
   check(store)
   timer = window.setInterval(() => check(store), 30000)

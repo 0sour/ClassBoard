@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import AppSelect from '@/components/common/AppSelect.vue'
@@ -13,8 +13,14 @@ const store = useScheduleStore()
 
 const isDesktop = ref(window.innerWidth >= 768)
 
-window.addEventListener('resize', () => {
-  isDesktop.value = window.innerWidth >= 768
+onMounted(() => {
+  const handleResize = () => {
+    isDesktop.value = window.innerWidth >= 768
+  }
+  window.addEventListener('resize', handleResize)
+  onBeforeUnmount(() => {
+    window.removeEventListener('resize', handleResize)
+  })
 })
 
 const pageTitle = computed(() => (route.meta.title as string) ?? 'ClassBoard')

@@ -9,6 +9,27 @@ import { readSettings } from '../lib/settings.js'
 
 export const backupRouter = Router()
 
+// ============================================================
+// 备份恢复字段校验辅助函数（C-2 安全修复）
+// ============================================================
+const WEEK_TYPES = ["all", "odd", "even", "custom"]
+const COURSE_TYPES = ["course", "lab"]
+const COURSE_COLORS = ["course-1","course-2","course-3","course-4","course-5","course-6","course-7","course-8"]
+function vStr(v,mx){return typeof v==="string"&&v.trim().length>0&&(mx?v.length<=mx:true)}
+function vNum(v,mn,mx){return typeof v==="number"&&Number.isInteger(v)&&v>=(mn??0)&&(mx?v<=mx:true)}
+function vDate(v){return typeof v==="string"&&/^d{4}-d{2}-d{2}(Td{2}:d{2})?$/.test(v)}
+function vTime(v){return typeof v==="string"&&/^d{2}:d{2}$/.test(v)}
+function vWeekday(v){return vNum(v,1,7)}
+function vPeriodIdx(v){return vNum(v,1,12)}
+function vSem(s){if(!s)return false;return vNum(s.id,1)&&vStr(s.name,50)&&vDate(s.startDate)&&vDate(s.endDate)&&vWeekday(s.weekStartDay)}
+function vPeriod(p){if(!p)return false;return vNum(p.id,1)&&vNum(p.semesterId,1)&&vPeriodIdx(p.index)&&vTime(p.startTime)&&vTime(p.endTime)}
+function vCourse(c){if(!c)return false;return vNum(c.id,1)&&vNum(c.semesterId,1)&&COURSE_TYPES.includes(c.type)&&vStr(c.name,50)
+&&vWeekday(c.weekday)&&vPeriodIdx(c.startPeriod)&&vPeriodIdx(c.endPeriod)&&c.startPeriod<=c.endPeriod}
+function vExam(e){if(!e)return false;return vNum(e.id,1)&&vNum(e.semesterId,1)&&vStr(e.name,50)&&vDate(e.datetime)
+&&(e.courseId===null||vNum(e.courseId,1))}
+function vHw(h){if(!h)return false;return vNum(h.id,1)&&vNum(h.semesterId,1)&&vStr(h.name,50)&&vDate(h.dueAt)
+&&(h.courseId===null||vNum(h.courseId,1))&&(typeof h.done==="boolean"||typeof h.done==="number")}
+
 backupRouter.get(
   '/',
   wrap(async (req, res) => {

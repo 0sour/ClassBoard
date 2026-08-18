@@ -697,7 +697,7 @@ async function toggleAccess(): Promise<void> {
           @change="toggleAccess"
         />
       </div>
-      <div v-if="!store.settings.accessEnabled || true" class="sub-row">
+      <div v-if="true" class="sub-row">
         <label class="edit-field edit-field--grow">
           <span class="edit-field__label">{{ store.settings.accessEnabled ? '输入当前口令以关闭' : '设置口令（4–20 位）' }}</span>
           <input v-model="passphrase" class="date-input" type="password" :placeholder="store.settings.accessEnabled ? '当前口令' : '4–20 位口令'" maxlength="20" />
