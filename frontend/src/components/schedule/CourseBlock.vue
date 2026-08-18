@@ -94,13 +94,15 @@ const style = computed(() => ({
   position: absolute;
   top: 4px;
   right: 4px;
-  font-size: 10px;
-  line-height: 1;
-  color: var(--course-3-text);
+  /* 随课程色板：文字与描边用 --ctext/--cline（已在组件 style 计算中注入），白底分层 */
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  line-height: 1.6;
+  color: var(--ctext);
   background: var(--color-white);
-  border: 1px solid var(--course-3-line);
-  border-radius: 4px;
-  padding: 1px 4px;
+  border: 1px solid var(--cline);
+  border-radius: var(--radius-full);
+  padding: 0 6px;
 }
 
 /* 冲突角标 */
@@ -112,6 +114,12 @@ const style = computed(() => ({
   height: 8px;
   border-radius: var(--radius-full);
   background: var(--color-feedback-warning);
+}
+
+/* lab + conflict 并存时，冲突圆点移到左上避免与标签重叠 */
+.course.lab.conflict .conflict-dot {
+  left: 4px;
+  right: auto;
 }
 
 .course.conflict .c-name {

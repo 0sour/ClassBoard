@@ -1049,14 +1049,17 @@ svg { display: block; }
   width: 8px; height: 8px; border-radius: var(--radius-full);
   background: var(--color-feedback-warning);
 }
-/* 实验课标签：course-3 紫（04 文档 3.1 D 区） */
+/* 实验课标签：随课程色板（--ctext/--cline），白底分层，全胶囊（04 文档 3.1 D 区） */
 .course-block__lab {
   position: absolute; top: 4px; right: 4px;
   font-size: var(--font-size-xs); font-weight: var(--font-weight-bold);
-  color: var(--course-3-text); background: var(--color-white);
-  border: 1px solid var(--course-3-line); border-radius: var(--radius-full);
+  color: var(--ctext); background: var(--color-white);
+  border: 1px solid var(--cline); border-radius: var(--radius-full);
   padding: 0 6px; line-height: 1.6;
 }
+
+/* lab + conflict 并存时冲突圆点移左上（v2.8 会话 28） */
+.course.lab.conflict .conflict-dot { left: 4px; right: auto; }
 
 /* 信息面板 SidePanel（04 文档 3.1 E 区）：桌面右侧 296px 栏 */
 .side-demo { display: flex; flex-direction: column; gap: var(--spacing-lg); max-width: var(--side-panel-w); }
