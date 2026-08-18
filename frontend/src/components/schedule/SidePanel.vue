@@ -54,6 +54,8 @@ function openPracticeItem(p: { name: string; teacher: string; weeks: string }): 
     startPeriod: 1,
     endPeriod: 1,
     remark: p.weeks,
+    // 实践课程无固定时间：详情显示「无固定时间」，不进入课表网格/冲突检测
+    unscheduled: true,
   } as Course
   emit('openCourse', mockCourse)
 }

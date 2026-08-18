@@ -35,6 +35,8 @@ export interface Course {
   startPeriod: number
   endPeriod: number
   remark: string
+  /** 无固定时间课程（实践类等）：详情显示「无固定时间」，不参与网格与冲突 */
+  unscheduled?: boolean
 }
 
 /** 学期 */

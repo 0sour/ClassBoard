@@ -30,11 +30,13 @@ const style = computed(() => ({
 
 const weekdayLabel = computed(() => {
   if (!props.course) return ''
+  if (props.course.unscheduled) return '无固定时间'
   return `周${'一二三四五六日'[props.course.weekday - 1]}`
 })
 
 const periodLabel = computed(() => {
   if (!props.course) return ''
+  if (props.course.unscheduled) return ''
   const start = store.periods[props.course.startPeriod - 1]
   const end = store.periods[props.course.endPeriod - 1]
   const s = start ? start.startTime : ''
@@ -127,7 +129,8 @@ async function onDelete(): Promise<void> {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" /></svg>
                 时间
               </span>
-              <span class="v">{{ weekdayLabel }} · {{ periodLabel }}</span>
+              <span class="v" v-if="course.unscheduled">无固定时间</span>
+              <span class="v" v-else>{{ weekdayLabel }} · {{ periodLabel }}</span>
             </div>
             <div class="m-row">
               <span class="k">
