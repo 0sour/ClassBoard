@@ -311,24 +311,85 @@ function handleOpen(course: Course): void {
   emit('open', course)
 }
 
-/** 落库：透传未变字段，仅更新 weekday/startPeriod/endPeriod */
+/** 学期总周数（节次模板编辑器同款逻辑） */
+const maxWeeks = computed(() => {
+  const sem = store.currentSemester
+  if (!sem) return 16
+  return calcWeekNumber(parseDate(sem.endDate), sem) ?? 16
+})
+
+/** 生成「除某周外的保留周」：按原课周规则决定哪些周保留原位置 */
+function restWeeksOf(course: Course, exclude: number): number[] {
+  const total = maxWeeks.value
+  const isOdd = (w: number): boolean => w % 2 === 1
+  const all = Array.from({ length: total }, (_, i) => i + 1)
+  switch (course.weekType) {
+    case 'all':
+      return all.filter((w) => w !== exclude)
+    case 'odd':
+      return all.filter((w) => w !== exclude && isOdd(w))
+    case 'even':
+      return all.filter((w) => w !== exclude && !isOdd(w))
+    case 'custom':
+      return (course.weekList ?? []).filter((w) => w !== exclude)
+  }
+}
+
+/** 落库：仅调整当周（单周例外）——原课缩小周范围保持原位置，新增本周新位置副本 */
 async function applyDrag(course: Course, target: { weekday: Weekday; startPeriod: number; endPeriod: number }): Promise<void> {
+  const weekNo = store.weekNumber
+  const slot = target.endPeriod > target.startPeriod ? `第 ${target.startPeriod}–${target.endPeriod} 节` : `第 ${target.startPeriod} 节`
+  const base = {
+    type: course.type,
+    name: course.name,
+    teacher: course.teacher,
+    location: course.location,
+    color: course.color,
+    weekType: course.weekType,
+    weekList: course.weekList,
+    remark: course.remark,
+  }
   try {
-    await store.updateCourse(course.id, {
+    // 无周号（假期等）时退回全局调整
+    if (weekNo === null) {
+      await store.updateCourse(course.id, {
+        ...base,
+        weekday: target.weekday,
+        startPeriod: target.startPeriod,
+        endPeriod: target.endPeriod,
+      })
+      void import('@/utils/ui').then(({ toast }) => toast(`已调整至 ${DAY_LABELS[target.weekday - 1]} ${slot}`, 'success'))
+      return
+    }
+    const rest = restWeeksOf(course, weekNo)
+    // 课程仅出现在本周：直接改时间（原位置被覆盖）
+    if (rest.length === 0) {
+      await store.updateCourse(course.id, {
+        ...base,
+        weekType: 'custom',
+        weekList: [weekNo],
+        weekday: target.weekday,
+        startPeriod: target.startPeriod,
+        endPeriod: target.endPeriod,
+      })
+      void import('@/utils/ui').then(({ toast }) => toast(`已调整至 ${DAY_LABELS[target.weekday - 1]} ${slot}`, 'success'))
+      return
+    }
+    // 单周例外：原课保留「除本周外」的周在原位置；新增本周新位置副本
+    await store.updateCourse(course.id, { ...base, weekType: 'custom', weekList: rest })
+    await store.addCourse({
       type: course.type,
       name: course.name,
       teacher: course.teacher,
       location: course.location,
-      color: course.color,
-      weekType: course.weekType,
-      weekList: course.weekList,
+      weekType: 'custom',
+      weekList: [weekNo],
       weekday: target.weekday,
       startPeriod: target.startPeriod,
       endPeriod: target.endPeriod,
       remark: course.remark,
     })
-    const slot = target.endPeriod > target.startPeriod ? `第 ${target.startPeriod}–${target.endPeriod} 节` : `第 ${target.startPeriod} 节`
-    void import('@/utils/ui').then(({ toast }) => toast(`已调整至 ${DAY_LABELS[target.weekday - 1]} ${slot}`, 'success'))
+    void import('@/utils/ui').then(({ toast }) => toast(`本周已调整至 ${DAY_LABELS[target.weekday - 1]} ${slot}，其余周不变`, 'success'))
   } catch {
     void import('@/utils/ui').then(({ toast }) => toast('调整失败，请重试', 'error'))
   }
