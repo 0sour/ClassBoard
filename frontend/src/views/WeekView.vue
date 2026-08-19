@@ -135,8 +135,9 @@ async function exportPng(): Promise<void> {
           <div class="sched-scroll">
             <!-- 周数据拉取中显示网格骨架（UI 4.4） -->
             <Skeleton v-if="store.remote && !store.weekContext" variant="grid" />
-            <!-- 移动端双日视图：按滑动方向水平滑入/滑出（左滑→新内容从右滑入，右滑→从左滑入） -->
-            <Transition v-else-if="isMobile" :name="slideDir === 'next' ? 'slide-next' : 'slide-prev'" mode="out-in">
+            <!-- 移动端双日视图：推入式滑动——默认 mode 新旧同时动画，
+                 enter 元素绝对定位覆盖在旧页上方滑入，旧页原位滑出，视觉连续无闪烁 -->
+            <Transition v-else-if="isMobile" :name="slideDir === 'next' ? 'slide-next' : 'slide-prev'">
               <WeekGrid
                 :key="dayOffset"
                 :days="mobileDays"
@@ -233,33 +234,44 @@ async function exportPng(): Promise<void> {
   background: var(--color-bg-hover);
 }
 
-/* 双日视图滑动切换动画：左滑（next）新内容从右滑入，右滑（prev）新内容从左滑入 */
+/* 双日视图推入式滑动动画（默认 mode：新旧同时动画）：
+   enter 元素绝对定位覆盖在旧页上方，从侧边 100% 滑入；
+   leave 元素原位向左/右 100% 滑出。视觉连续无闪烁。
+   左滑（next）：新页从右滑入、旧页向左滑出；
+   右滑（prev）：新页从左滑入、旧页向右滑出。 */
 .slide-next-enter-active,
 .slide-next-leave-active,
 .slide-prev-enter-active,
 .slide-prev-leave-active {
-  transition: transform var(--motion-duration-slow) var(--motion-easing-standard),
-    opacity var(--motion-duration-slow) var(--motion-easing-standard);
+  transition: transform var(--motion-duration-slow) var(--motion-easing-standard);
+}
+
+.slide-next-enter-active {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
 }
 
 .slide-next-enter-from {
-  transform: translateX(24px);
-  opacity: 0;
+  transform: translateX(100%);
 }
 
 .slide-next-leave-to {
-  transform: translateX(-24px);
-  opacity: 0;
+  transform: translateX(-100%);
+}
+
+.slide-prev-enter-active {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
 }
 
 .slide-prev-enter-from {
-  transform: translateX(-24px);
-  opacity: 0;
+  transform: translateX(-100%);
 }
 
 .slide-prev-leave-to {
-  transform: translateX(24px);
-  opacity: 0;
+  transform: translateX(100%);
 }
 
 /* 打印 / 导出操作条（文档 4.7：操作对象仅限课表网格） */
