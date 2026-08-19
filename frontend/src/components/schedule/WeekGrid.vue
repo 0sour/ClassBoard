@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import CourseBlock from './CourseBlock.vue'
 import { computeOverlapGroups, isOverlap } from '@/utils/course'
+import { calcWeekNumber, parseDate } from '@/utils/week'
 import type { Course, Weekday } from '@/types'
 
 const store = useScheduleStore()
@@ -349,9 +350,14 @@ async function applyDrag(course: Course, target: { weekday: Weekday; startPeriod
     weekList: course.weekList,
     remark: course.remark,
   }
+  let step = '准备调整'
   try {
+    if (!Number.isInteger(target.weekday) || !Number.isInteger(target.startPeriod) || !Number.isInteger(target.endPeriod)) {
+      throw new Error('目标节次无效，请重新拖到课表格内')
+    }
     // 无周号（假期等）时退回全局调整
     if (weekNo === null) {
+      step = '更新课程'
       await store.updateCourse(course.id, {
         ...base,
         weekday: target.weekday,
@@ -364,6 +370,7 @@ async function applyDrag(course: Course, target: { weekday: Weekday; startPeriod
     const rest = restWeeksOf(course, weekNo)
     // 课程仅出现在本周：直接改时间（原位置被覆盖）
     if (rest.length === 0) {
+      step = '更新本周课程'
       await store.updateCourse(course.id, {
         ...base,
         weekType: 'custom',
@@ -376,6 +383,7 @@ async function applyDrag(course: Course, target: { weekday: Weekday; startPeriod
       return
     }
     // 单周例外：原课保留「除本周外」的周在原位置；新增本周新位置副本
+    step = '保留其他周课程'
     await store.updateCourse(course.id, {
       ...base,
       weekday: course.weekday,
@@ -384,6 +392,7 @@ async function applyDrag(course: Course, target: { weekday: Weekday; startPeriod
       weekType: 'custom',
       weekList: rest,
     })
+    step = '创建本周课程'
     await store.addCourse({
       type: course.type,
       name: course.name,
@@ -397,8 +406,10 @@ async function applyDrag(course: Course, target: { weekday: Weekday; startPeriod
       remark: course.remark,
     })
     void import('@/utils/ui').then(({ toast }) => toast(`本周已调整至 ${DAY_LABELS[target.weekday - 1]} ${slot}，其余周不变`, 'success'))
-  } catch {
-    void import('@/utils/ui').then(({ toast }) => toast('调整失败，请重试', 'error'))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    console.error('[WeekGrid] 调整课程失败', { step, courseId: course.id, target, error })
+    void import('@/utils/ui').then(({ toast }) => toast(`${step}失败：${message}`, 'error'))
   }
 }
 
