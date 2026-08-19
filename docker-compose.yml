@@ -1,0 +1,19 @@
+# ClassBoard 部署编排（技术设计文档 7.2）
+# 用法：CLASSBOARD_PORT=8080 docker compose up -d --build
+services:
+  classboard:
+    image: classboard:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # 构建阶段复用宿主网络栈：Dockerfile 内 npm/node-gyp 经 127.0.0.1:7890 代理拉取
+      network: host
+    ports:
+      - "${CLASSBOARD_PORT:-3000}:3000"
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      # 数据库落盘目录（server/lib/db.js 支持环境变量覆盖；与下方数据卷对应）
+      - CLASSBOARD_DATA_DIR=/app/data
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

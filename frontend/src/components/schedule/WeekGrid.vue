@@ -448,7 +448,7 @@ const rowHeight = computed(() => {
 
     <!-- 7 天列 -->
     <div
-      v-for="(col, idx) in columns"
+      v-for="(_, idx) in columns"
       :key="idx"
       class="col day-col"
       :class="{ today: idx + 1 === highlightedWeekday }"

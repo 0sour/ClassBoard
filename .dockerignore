@@ -1,0 +1,15 @@
+# 构建上下文裁剪：仅前后端源码与构建所需文件进入镜像上下文
+.git
+.zcode
+.aionrs
+.freebuff
+docs
+examples
+data
+*.log
+**/node_modules
+frontend/dist
+frontend/public/sample.pdf
+frontend/scripts
+*.db
+*.db-*
