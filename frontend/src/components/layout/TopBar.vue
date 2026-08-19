@@ -136,25 +136,27 @@ const reminders = computed(() => {
     </div>
 
     <div class="top-actions">
-      <!-- 学期切换（自研 AppSelect，面板风格与 UI 一致） -->
+      <!-- 学期切换（自研 AppSelect，面板风格与 UI 一致；移动端限宽省略） -->
       <AppSelect
+        class="semester-select"
         :model-value="store.currentSemesterId"
         :options="semesterOptions"
         aria-label="切换学期"
         @update:model-value="setSemester"
       />
 
-      <!-- 导入课程下拉 -->
+      <!-- 导入课程下拉（移动端仅图标，文字隐藏） -->
       <div class="import-wrap">
         <button
           class="btn-import"
           type="button"
+          aria-label="导入课程"
           aria-haspopup="menu"
           :aria-expanded="showImportDropdown"
           @click="showImportDropdown = !showImportDropdown"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M12 5v14" /></svg>
-          <span>导入课程</span>
+          <span class="btn-import__label">导入课程</span>
         </button>
         <div class="import-menu" v-if="showImportDropdown" role="menu">
           <button type="button" role="menuitem" @click="onImport('pdf')">从 PDF 导入</button>
@@ -331,6 +333,34 @@ const reminders = computed(() => {
 .btn-import svg {
   width: 15px;
   height: 15px;
+}
+
+/* 移动端：导入按钮仅图标（文字隐藏），学期选择限宽省略 */
+.btn-import__label {
+  display: inline;
+}
+
+@media (max-width: 767px) {
+  .btn-import {
+    width: 34px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .btn-import__label {
+    display: none;
+  }
+
+  .semester-select {
+    max-width: 110px;
+  }
+}
+
+/* 更窄机型（≤360pt，如 iPhone SE 1 代）：学期选择进一步收窄，保证顶栏不溢出 */
+@media (max-width: 360px) {
+  .semester-select {
+    max-width: 76px;
+  }
 }
 
 .import-menu {
