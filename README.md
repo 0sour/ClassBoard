@@ -21,9 +21,9 @@
 
 ## 技术栈概览（详见技术设计文档）
 
-- 后端：Node.js（node:20-alpine）+ Express + better-sqlite3（SQLite WAL）
+- 后端：Node.js（node:22-alpine）+ Express + better-sqlite3（SQLite WAL）
 - 前端：Vue 3 + Vite，构建产物由同一容器静态托管，同源 `/api`
-- 部署：单容器 Docker，数据持久化到挂载卷 `/app/data`，支持 x86 与 ARM
+- 部署：单容器 Docker，数据持久化到挂载卷 `/app/data`，支持 x86 与 ARM；已部署至 NAS 192.168.10.110:3005（`CLASSBOARD_PORT` 可配，3000/3001 被占用时改端口）
 
 ## 视觉选型
 

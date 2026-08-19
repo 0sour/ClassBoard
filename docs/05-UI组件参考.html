@@ -7,10 +7,10 @@
 <title>ClassBoard · UI 组件参考</title>
 <style>
 /* ==========================================================================
-   ClassBoard 设计系统组件参考页 · v2.2 · 清新浅色极简
+   ClassBoard 设计系统组件参考页 · v2.8 · 清新浅色极简
    样式基座：原样嵌入《03-设计语言文档》v2.1 第 10 节（:root Token，唯一权威来源）。
    页面组件样式一律引用上述 token 变量。v2.x 明确本期不做暗色模式。
-   组件规范对齐《04-UI设计文档》v2.2（组件清单、三态、交互与无障碍）。
+   组件规范对齐《04-UI设计文档》v2.8（组件清单、三态、交互与无障碍）。
    ========================================================================== */
 
 /* ===== 第 10 节：Token 输出（CSS 自定义属性）— 原样嵌入，唯一权威来源 ===== */
@@ -1007,7 +1007,7 @@ svg { display: block; }
 .token-row__val { color: var(--color-text-body); }
 .token-row__use { color: var(--color-text-tertiary); margin-left: auto; text-align: right; }
 
-/* ===== 06 课表组件扩展：周导航 / 三子 Tab / 冲突错位 / 实验课标签（v2.2 补全） ===== */
+/* ===== 06 课表组件扩展：周导航 / 三子 Tab / 冲突分栏 / 实验课标签（v2.8 更新） ===== */
 /* 周导航条 WeekNav：上一周 | 标题（日期 + 第N周 + 单双周/未开学/假期徽标） | 下一周 + 回到本周 */
 .wnav {
   position: relative;
@@ -1042,8 +1042,10 @@ svg { display: block; }
 }
 .seg__btn.is-active { background: var(--color-bg-surface); color: var(--color-text-primary); font-weight: var(--font-weight-medium); box-shadow: var(--shadow-card); }
 
-/* 冲突错位课程块：后导入者右移半格 + 右上角 warning 圆点（04 文档 4.5） */
-.course-block.is-conflict { margin-left: 50%; }
+/* 冲突课程分栏（04 文档 4.5，v2.7 起）：重叠课程渲染为 flex 分栏容器，
+   初始均分 1:1，hover 展开最后停留的课程为 2/3（折叠态仅显示课程名），
+   rAF 补间动画驱动 flex-grow；右上角 warning 圆点标记冲突 */
+.course-block.is-conflict { margin-left: 0; }
 .course-block__flag {
   position: absolute; top: 4px; right: 4px;
   width: 8px; height: 8px; border-radius: var(--radius-full);
@@ -1218,7 +1220,7 @@ svg { display: block; }
         <span class="app-brand__name">ClassBoard</span>
         <span class="app-brand__sub">UI 组件参考</span>
       </div>
-      <span class="app-header__meta">清新浅色极简 · v2.2</span>
+      <span class="app-header__meta">清新浅色极简 · v2.8</span>
     </div>
     <nav class="section-nav" aria-label="区块导航">
       <a class="section-nav__link" href="#sec-tokens">设计 Token</a>
@@ -1237,12 +1239,12 @@ svg { display: block; }
 <main class="container">
   <div class="page-intro reveal">
     <h1>ClassBoard 设计系统组件参考</h1>
-    <p>本页为课程表 Web 应用的组件落地规范：所有样式直接引用《03-设计语言文档》v2.1 第 10 节中的 CSS 自定义属性（唯一权威 token 来源），组件与交互对齐《04-UI设计文档》v2.2，视觉观感与选定的「清新浅色极简」风格（预览 01）保持一致。请在浏览器直接打开预览，各组件均可交互。</p>
+    <p>本页为课程表 Web 应用的组件落地规范：所有样式直接引用《03-设计语言文档》v2.1 第 10 节中的 CSS 自定义属性（唯一权威 token 来源），组件与交互对齐《04-UI设计文档》v2.8，视觉观感与选定的「清新浅色极简」风格（预览 01）保持一致。请在浏览器直接打开预览，各组件均可交互。</p>
     <div class="page-intro__meta">
-      <span class="meta-chip">文档版本 v2.2</span>
+      <span class="meta-chip">文档版本 v2.8</span>
       <span class="meta-chip">风格：清新浅色极简（预览 01）</span>
       <span class="meta-chip">token 来源：设计语言文档 第 10 节（v2.1）</span>
-      <span class="meta-chip">组件规范：UI 设计文档 v2.2</span>
+      <span class="meta-chip">组件规范：UI 设计文档 v2.8</span>
       <span class="meta-chip">本期不做暗色模式</span>
       <span class="meta-chip">单文件自包含 · 离线可用</span>
     </div>
@@ -2513,7 +2515,7 @@ svg { display: block; }
     { day: 2, start: 1, span: 2, name: '数据结构', loc: '信工 A502', teacher: '赵明', weeks: '第 1–16 周', color: 'course-2', note: '上机课需自备笔记本电脑，安装好课程要求的开发环境。' },
     { day: 2, start: 7, span: 2, name: '体育', loc: '操场东区', teacher: '陈教练', weeks: '第 1–16 周', color: 'course-5', note: '请穿运动装与运动鞋；如遇雨天，改至室内体育馆集合。' },
     { day: 3, start: 1, span: 2, name: '大学物理', loc: '实验楼 202', teacher: '周航', weeks: '第 1–16 周', color: 'course-4', note: '实验报告需提交至课程平台，截止时间为次周周一 23:59。' },
-    { day: 3, start: 1, span: 2, name: '科技英语（选修）', loc: '教3-110', teacher: '郑宇', weeks: '第 1–16 周', color: 'course-8', conflict: true, note: '与大学物理时间重叠（示例演示冲突错位显示，见文档 4.5）：后导入者右移半格并排，右上角 warning 圆点标记。' },
+    { day: 3, start: 1, span: 2, name: '科技英语（选修）', loc: '教3-110', teacher: '郑宇', weeks: '第 1–16 周', color: 'course-8', conflict: true, note: '与大学物理时间重叠（示例演示冲突分栏显示，见文档 4.5）：重叠课程按 1/3⇄2/3 动态 flex 分栏，右上角 warning 圆点标记。' },
     { day: 3, start: 3, span: 2, name: '操作系统', loc: '信工 B301', teacher: '孙倩', weeks: '第 1–16 周', color: 'course-6', note: '随堂小测计入平时成绩，请携带教材与笔记本。' },
     { day: 4, start: 1, span: 2, name: '线性代数', loc: '教2-105', teacher: '李博', weeks: '第 1–16 周', color: 'course-7', note: '随堂小测计入平时成绩，请携带教材与计算器。' },
     { day: 4, start: 9, span: 2, name: '模拟集成电路设计实验', loc: '实验楼 305', teacher: '陈立', weeks: '第 1–16 周', color: 'course-3', lab: true, note: '实验课：需自备实验讲义，实验前完成预习报告，实验后一周内提交报告。' },
