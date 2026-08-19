@@ -13,6 +13,7 @@ import {
   calcWeekNumber,
   formatDate,
   formatMonthDay,
+  getWeekday,
   isOddWeek,
   isVisibleInWeek,
   parseDate,
@@ -112,6 +113,20 @@ export const useScheduleStore = defineStore('schedule', () => {
   function coursesOf(date: Date): Course[] {
     const wd = ((date.getDay() + 6) % 7 + 1) as Weekday
     return coursesByWeekday.value[wd]
+  }
+
+  /** 任意日期的课程（双日视图用）：按该日所在周独立过滤，跨周（周六+周日、滑入下周）正确。
+   * remote 模式 courses 为当前学期全量（loadCourses 已拉取），不依赖单周 weekContext。 */
+  function coursesOfDate(date: Date): Course[] {
+    const wd = getWeekday(date)
+    const info = weekInfoOf(date)
+    if (info.weekNumber === null) return []
+    return courses.value.filter((c) => {
+      if (c.semesterId !== currentSemesterId.value) return false
+      if (c.weekday !== wd) return false
+      if (!showOddEvenFilter.value) return true
+      return isVisibleInWeek(c.weekType, c.weekList, info.weekNumber)
+    })
   }
 
   /** 今天真实日期所在周的周号（remote 以服务端为准） */
@@ -591,6 +606,7 @@ export const useScheduleStore = defineStore('schedule', () => {
     visibleCourses,
     coursesByWeekday,
     coursesOf,
+    coursesOfDate,
     todayWeekNumber,
     todayCourses,
     todayCoursesByWeekday,

@@ -8,9 +8,19 @@ import type { Course, Weekday } from '@/types'
 
 const store = useScheduleStore()
 
+const props = withDefaults(
+  defineProps<{
+    /** 双日视图（移动端）：传入要显示的日期列表（1-2 天）；缺省为桌面 7 天模式 */
+    days?: Date[]
+  }>(),
+  { days: undefined },
+)
+
 const emit = defineEmits<{
   (e: 'open', course: Course): void
   (e: 'create', slot: { weekday: Weekday; period: number }): void
+  /** 移动端滑动切日：next=左滑（更晚一天），prev=右滑（更早一天） */
+  (e: 'swipe', dir: 'next' | 'prev'): void
 }>()
 
 const DAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] as const
@@ -112,10 +122,47 @@ const columns = computed(() => {
 /** 非冲突课程（单独渲染，跨全列） */
 const soloItems = (idx: number): ColItem[] => columns.value[idx].filter((i) => !i.conflict)
 
+/** 双日视图列（移动端）：按传入日期逐日过滤课程（跨周正确），冲突标注与桌面一致 */
+const mobileColumns = computed<ColItem[][]>(() => {
+  const days = props.days ?? []
+  return days.map((date) => {
+    const list = store.coursesOfDate(date)
+    const groups = computeOverlapGroups(list)
+    return list.map((c) => {
+      const conflicts = groups.get(c.id) ?? []
+      return { course: c, offset: conflicts.some((o) => o.id > c.id), conflict: conflicts.length > 0 }
+    })
+  })
+})
+
+/** 实际渲染的列：双日视图用 mobileColumns，桌面用 7 天 columns */
+const displayColumns = computed(() => (props.days ? mobileColumns.value : columns.value))
+
+/** 第 idx 列对应的日期（双日视图用传入日期，桌面用周内日期） */
+function dayOf(idx: number): Date {
+  return props.days ? props.days[idx] : store.weekDays[idx]
+}
+
+/** 第 idx 列对应的星期（1=周一 … 7=周日） */
+function weekdayOf(idx: number): Weekday {
+  const d = dayOf(idx)
+  return ((d.getDay() + 6) % 7 + 1) as Weekday
+}
+
+/** 第 idx 列是否为今天（双日视图按日期判断；桌面沿用周内高亮） */
+function isTodayCol(idx: number): boolean {
+  if (props.days) {
+    const d = dayOf(idx)
+    const t = store.today
+    return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate()
+  }
+  return idx + 1 === highlightedWeekday.value
+}
+
 /** 冲突课程按重叠关系分组成连通分量：每组渲染为一个 flex 分栏容器
  * computed 缓存：仅随 columns 变化重算，避免模板每次渲染重复计算 */
 const conflictGroups = computed(() => {
-  return columns.value.map((col) => {
+  return displayColumns.value.map((col) => {
     const used = new Set<number>()
     const groups: { course: Course }[][] = []
     for (const item of col) {
@@ -145,9 +192,15 @@ const conflictGroups = computed(() => {
   })
 })
 
-onMounted(() => window.addEventListener('resize', onResize))
+onMounted(() => {
+  window.addEventListener('resize', onResize)
+  window.addEventListener('pointerup', onSwipePointerUp)
+  window.addEventListener('pointercancel', onSwipePointerCancel)
+})
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
+  window.removeEventListener('pointerup', onSwipePointerUp)
+  window.removeEventListener('pointercancel', onSwipePointerCancel)
   cancelAnimationFrame(animRaf)
   window.removeEventListener('pointermove', onWindowPointerMove)
   window.removeEventListener('pointerup', onWindowPointerUp)
@@ -194,9 +247,10 @@ const LONG_PRESS_MS = 400
 const MOVE_THRESHOLD_PX = 8
 const HEADER_H = 44 // day-head 高度（网格首行）
 
-/** 课程卡 pointerdown：启动长按计时，进入潜在拖拽 */
+/** 课程卡 pointerdown：启动长按计时，进入潜在拖拽（双日视图禁用拖拽，避免与滑动冲突） */
 function onCoursePointerDown(course: Course, e: PointerEvent): void {
   if (course.unscheduled) return
+  if (props.days) return
   dragAnchor = { x: e.clientX, y: e.clientY, active: true }
   suppressClickUntil.value = 0
   if (longPressTimer !== null) window.clearTimeout(longPressTimer)
@@ -268,6 +322,33 @@ function cleanupDrag(): void {
   window.removeEventListener('pointermove', onWindowPointerMove)
   window.removeEventListener('pointerup', onWindowPointerUp)
   window.removeEventListener('keydown', onWindowKeyDown)
+}
+
+// ============================================================
+// 移动端滑动切日（双日视图）：水平位移 > 50px 且 |dx| > |dy| 判定滑动
+// 用 pointer 事件（同时覆盖触摸与鼠标）；垂直滚动不干扰；
+// 仅双日视图（props.days）启用，且与长按拖拽互斥（拖拽已禁用）
+// ============================================================
+const SWIPE_THRESHOLD_PX = 50
+let swipeStart: { x: number; y: number } | null = null
+
+function onSwipePointerDown(e: PointerEvent): void {
+  if (!props.days) return
+  swipeStart = { x: e.clientX, y: e.clientY }
+}
+
+/** pointerup 挂 window：pointer capture 或滑动中断（pointercancel）也能正确收尾 */
+function onSwipePointerUp(e: PointerEvent): void {
+  if (!props.days || !swipeStart) return
+  const dx = e.clientX - swipeStart.x
+  const dy = e.clientY - swipeStart.y
+  swipeStart = null
+  if (Math.abs(dx) < SWIPE_THRESHOLD_PX || Math.abs(dx) <= Math.abs(dy)) return
+  emit('swipe', dx < 0 ? 'next' : 'prev')
+}
+
+function onSwipePointerCancel(): void {
+  swipeStart = null
 }
 
 /** 指针坐标 → 目标格子（保持跨节宽度，clamp 1..12） */
@@ -436,7 +517,7 @@ const rowHeight = computed(() => {
 </script>
 
 <template>
-  <div ref="gridEl" class="weekgrid" :class="{ 'is-dragging': draggingCourse }" :style="rowHeight ? { '--ph-row-dyn': rowHeight + 'px' } : undefined">
+  <div ref="gridEl" class="weekgrid" :class="{ 'is-dragging': draggingCourse, 'is-days': props.days }" :style="rowHeight ? { '--ph-row-dyn': rowHeight + 'px' } : undefined" @pointerdown="onSwipePointerDown">
     <!-- 时间列 -->
     <div class="col time-col" aria-hidden="true">
       <div class="day-head corner"></div>
@@ -446,19 +527,19 @@ const rowHeight = computed(() => {
       </div>
     </div>
 
-    <!-- 7 天列 -->
+    <!-- 日期列（桌面 7 天 / 移动端双日） -->
     <div
-      v-for="(_, idx) in columns"
+      v-for="(_, idx) in displayColumns"
       :key="idx"
       class="col day-col"
-      :class="{ today: idx + 1 === highlightedWeekday }"
+      :class="{ today: isTodayCol(idx) }"
     >
       <div class="day-head">
         <div class="wd">
-          {{ DAY_LABELS[idx] }}
-          <span v-if="idx + 1 === highlightedWeekday" class="pill">今天</span>
+          {{ DAY_LABELS[dayOf(idx).getDay() === 0 ? 6 : dayOf(idx).getDay() - 1] }}
+          <span v-if="isTodayCol(idx)" class="pill">今天</span>
         </div>
-        <div class="dt num">{{ store.weekDays[idx].getMonth() + 1 }}/{{ store.weekDays[idx].getDate() }}</div>
+        <div class="dt num">{{ dayOf(idx).getMonth() + 1 }}/{{ dayOf(idx).getDate() }}</div>
       </div>
 
       <!-- 空白槽：点击快捷新增课程（预填星期与节次，PRD 5.2 / UI 3.1） -->
@@ -471,8 +552,8 @@ const rowHeight = computed(() => {
           gridRow: `${p.index + 1} / ${p.index + 2}`,
           gridColumn: '1',
         }"
-        :aria-label="`新增课程：周${DAY_LABELS[idx]} 第${p.index}节`"
-        @click="emit('create', { weekday: (idx + 1) as Weekday, period: p.index })"
+        :aria-label="`新增课程：周${DAY_LABELS[dayOf(idx).getDay() === 0 ? 6 : dayOf(idx).getDay() - 1]} 第${p.index}节`"
+        @click="emit('create', { weekday: weekdayOf(idx), period: p.index })"
       ></button>
 
       <!-- 非冲突课程：跨全列 -->
@@ -763,6 +844,14 @@ const rowHeight = computed(() => {
 
   .col {
     --ph-row: var(--ph-mobile);
+  }
+
+  /* 双日视图（移动端）：两列均分剩余宽度，不再横向滚动；
+     touch-action: pan-y 让浏览器只接管纵向滚动，水平滑动留给应用（滑动切日） */
+  .weekgrid.is-days {
+    grid-template-columns: var(--tc-w) repeat(2, minmax(0, 1fr));
+    min-width: 0;
+    touch-action: pan-y;
   }
 }
 </style>

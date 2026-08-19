@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import WeekNav from '@/components/schedule/WeekNav.vue'
@@ -22,6 +22,46 @@ const exporting = ref(false)
 
 /** 空白格快捷新增：预填星期与节次 */
 const createSlot = ref<{ weekday: Weekday; period: number } | null>(null)
+
+// ============================================================
+// 移动端双日视图：dayOffset = 相对今天的天数偏移（0=今天）
+// 默认显示今天+明天；周日只显示当天（「此周最后一天除外」）
+// ============================================================
+const dayOffset = ref(0)
+
+const DAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] as const
+
+/** 移动端判定（<768px 与全局断点一致） */
+const isMobile = ref(window.innerWidth < 768)
+
+function onResize(): void {
+  isMobile.value = window.innerWidth < 768
+}
+
+window.addEventListener('resize', onResize)
+/** 双日视图日期列表（仅移动端使用） */
+const mobileDays = computed<Date[]>(() => {
+  const base = new Date(store.today)
+  base.setDate(base.getDate() + dayOffset.value)
+  const next = new Date(base)
+  next.setDate(next.getDate() + 1)
+  // 周日只显示当天（跨周时明天属于下一周，不显示）
+  if (base.getDay() === 0) return [base]
+  return [base, next]
+})
+
+/** 双日标题：「周三 8/19 · 周四 8/20」 */
+const mobileTitle = computed(() =>
+  mobileDays.value.map((d) => `${DAY_LABELS[d.getDay() === 0 ? 6 : d.getDay() - 1]} ${d.getMonth() + 1}/${d.getDate()}`).join(' · '),
+)
+
+function onSwipe(dir: 'next' | 'prev'): void {
+  dayOffset.value += dir === 'next' ? 1 : -1
+}
+
+function goToday(): void {
+  dayOffset.value = 0
+}
 
 function openCourse(course: Course): void {
   selected.value = course
@@ -77,13 +117,24 @@ async function exportPng(): Promise<void> {
     <div class="week-layout">
       <!-- 主区：周导航与课表同宽对齐 -->
       <div class="week-main">
-        <WeekNav class="reveal" />
+        <!-- 桌面/平板：周导航；移动端：双日标题条（滑动切日） -->
+        <WeekNav v-if="!isMobile" class="reveal" />
+        <div v-else class="days-head reveal">
+          <span class="days-title num">{{ mobileTitle }}</span>
+          <button class="days-today" type="button" @click="goToday">今天</button>
+        </div>
 
         <section class="schedule-card reveal">
           <div class="sched-scroll">
             <!-- 周数据拉取中显示网格骨架（UI 4.4） -->
             <Skeleton v-if="store.remote && !store.weekContext" variant="grid" />
-            <WeekGrid v-else @open="openCourse" @create="createFromSlot" />
+            <WeekGrid
+              v-else
+              :days="isMobile ? mobileDays : undefined"
+              @open="openCourse"
+              @create="createFromSlot"
+              @swipe="onSwipe"
+            />
           </div>
         </section>
 
@@ -131,6 +182,38 @@ async function exportPng(): Promise<void> {
 
 .week-main {
   min-width: 0;
+}
+
+/* 移动端双日视图标题条：日期标题 + 今天按钮（替代周导航） */
+.days-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.days-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.days-today {
+  height: 30px;
+  padding: 0 var(--spacing-md);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-surface);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard),
+    background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.days-today:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-hover);
 }
 
 /* 打印 / 导出操作条（文档 4.7：操作对象仅限课表网格） */
