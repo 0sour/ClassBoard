@@ -55,10 +55,20 @@ const mobileTitle = computed(() =>
   mobileDays.value.map((d) => `${DAY_LABELS[d.getDay() === 0 ? 6 : d.getDay() - 1]} ${d.getMonth() + 1}/${d.getDate()}`).join(' · '),
 )
 
+/** 滑动方向（驱动双日视图切换动画） */
+const slideDir = ref<'next' | 'prev'>('next')
+/** 动画锁：切换动画进行中忽略新滑动，避免连续滑动动画叠加导致闪现 */
+const sliding = ref(false)
+
 function onSwipe(dir: 'next' | 'prev'): void {
+  if (sliding.value) return
   // 记录滑动方向，驱动 Transition 水平滑入/滑出动画
   slideDir.value = dir
   dayOffset.value += dir === 'next' ? 1 : -1
+  sliding.value = true
+  window.setTimeout(() => {
+    sliding.value = false
+  }, 260)
 }
 
 function goToday(): void {
@@ -66,9 +76,6 @@ function goToday(): void {
   slideDir.value = dayOffset.value > 0 ? 'next' : 'prev'
   dayOffset.value = 0
 }
-
-/** 滑动方向（驱动双日视图切换动画） */
-const slideDir = ref<'next' | 'prev'>('next')
 
 function openCourse(course: Course): void {
   selected.value = course
@@ -249,6 +256,7 @@ async function exportPng(): Promise<void> {
 .slide-next-enter-active {
   position: absolute;
   inset: 0;
+  width: 100%;
   z-index: 1;
 }
 
@@ -263,6 +271,7 @@ async function exportPng(): Promise<void> {
 .slide-prev-enter-active {
   position: absolute;
   inset: 0;
+  width: 100%;
   z-index: 1;
 }
 
@@ -362,6 +371,9 @@ async function exportPng(): Promise<void> {
 }
 
 .sched-scroll {
+  /* position: relative：滑动动画 enter 元素（absolute inset:0）以此为定位包含块，
+     否则相对视口定位导致布局错乱（只显示左半边/缩放感） */
+  position: relative;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);
