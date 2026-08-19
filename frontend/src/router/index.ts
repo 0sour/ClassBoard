@@ -33,6 +33,8 @@ const router = createRouter({
       component: () => import('@/views/SettingsView.vue'),
       meta: { title: '设置', tab: 'settings' },
     },
+    // 兜底：未知路径重定向到周课表（UI 1.1：周课表为默认首页）
+    { path: '/:pathMatch(.*)*', redirect: '/week' },
   ],
 })
 

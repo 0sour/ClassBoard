@@ -112,36 +112,38 @@ const columns = computed(() => {
 /** 非冲突课程（单独渲染，跨全列） */
 const soloItems = (idx: number): ColItem[] => columns.value[idx].filter((i) => !i.conflict)
 
-/** 冲突课程按重叠关系分组成连通分量：每组渲染为一个 flex 分栏容器 */
-function conflictGroupsOf(idx: number): { course: Course }[][] {
-  const col = columns.value[idx]
-  const used = new Set<number>()
-  const groups: { course: Course }[][] = []
-  for (const item of col) {
-    if (!item.conflict || used.has(item.course.id)) continue
-    const group: { course: Course }[] = []
-    let frontier: ColItem[] = [item]
-    used.add(item.course.id)
-    while (frontier.length) {
-      const next: ColItem[] = []
-      for (const cur of frontier) {
-        group.push(cur)
-        for (const other of col) {
-          if (!other.conflict || used.has(other.course.id)) continue
-          if (isOverlap(cur.course, other.course)) {
-            next.push(other)
-            used.add(other.course.id)
+/** 冲突课程按重叠关系分组成连通分量：每组渲染为一个 flex 分栏容器
+ * computed 缓存：仅随 columns 变化重算，避免模板每次渲染重复计算 */
+const conflictGroups = computed(() => {
+  return columns.value.map((col) => {
+    const used = new Set<number>()
+    const groups: { course: Course }[][] = []
+    for (const item of col) {
+      if (!item.conflict || used.has(item.course.id)) continue
+      const group: { course: Course }[] = []
+      let frontier: ColItem[] = [item]
+      used.add(item.course.id)
+      while (frontier.length) {
+        const next: ColItem[] = []
+        for (const cur of frontier) {
+          group.push(cur)
+          for (const other of col) {
+            if (!other.conflict || used.has(other.course.id)) continue
+            if (isOverlap(cur.course, other.course)) {
+              next.push(other)
+              used.add(other.course.id)
+            }
           }
         }
+        frontier = next
       }
-      frontier = next
+      // 无 hover 时第一门展开为 2/3，按节次与 id 排序保证稳定
+      group.sort((a, b) => a.course.startPeriod - b.course.startPeriod || a.course.id - b.course.id)
+      groups.push(group)
     }
-    // 无 hover 时第一门展开为 2/3，按节次与 id 排序保证稳定
-    group.sort((a, b) => a.course.startPeriod - b.course.startPeriod || a.course.id - b.course.id)
-    groups.push(group)
-  }
-  return groups
-}
+    return groups
+  })
+})
 
 onMounted(() => window.addEventListener('resize', onResize))
 onBeforeUnmount(() => {
@@ -312,11 +314,12 @@ function handleOpen(course: Course): void {
   emit('open', course)
 }
 
-/** 学期总周数（节次模板编辑器同款逻辑） */
+/** 学期总周数（节次模板编辑器同款逻辑；上限 30 与服务端校验一致） */
+const MAX_WEEKS = 30
 const maxWeeks = computed(() => {
   const sem = store.currentSemester
   if (!sem) return 16
-  return calcWeekNumber(parseDate(sem.endDate), sem) ?? 16
+  return Math.min(calcWeekNumber(parseDate(sem.endDate), sem) ?? 16, MAX_WEEKS)
 })
 
 /** 生成「除某周外的保留周」：按原课周规则决定哪些周保留原位置 */
@@ -488,7 +491,7 @@ const rowHeight = computed(() => {
 
       <!-- 冲突课程组：flex 分栏，hover 展开 2/3（1/3 只显示名称） -->
       <div
-        v-for="(group, gi) in conflictGroupsOf(idx)"
+        v-for="(group, gi) in conflictGroups[idx]"
         :key="'grp-' + gi"
         class="overlap"
         :style="{

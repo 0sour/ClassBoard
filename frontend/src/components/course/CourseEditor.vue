@@ -82,11 +82,12 @@ function toggleSessionWeek(s: SessionRow, w: number): void {
   else s.weekList.push(w)
 }
 
-/** 学期总周数（自定义周次可选范围） */
+/** 学期总周数（自定义周次可选范围；上限与服务端校验 MAX_WEEKS=30 一致） */
+const MAX_WEEKS = 30
 const maxWeeks = computed(() => {
   const sem = store.currentSemester
   if (!sem) return 16
-  return calcWeekNumber(parseDate(sem.endDate), sem) ?? 16
+  return Math.min(calcWeekNumber(parseDate(sem.endDate), sem) ?? 16, MAX_WEEKS)
 })
 
 const periodOptions = computed(() =>

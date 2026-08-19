@@ -36,6 +36,16 @@ const showImportDropdown = ref(false)
 const showImportWizard = ref(false)
 const showCourseEditor = ref(false)
 
+/** 点击外部关闭导入下拉（与提醒菜单一致：文档级 mousedown 监听，无遮罩，见 UI 4.9 约定） */
+function onDocMouseDown(e: MouseEvent): void {
+  const target = e.target as HTMLElement | null
+  if (target?.closest('.import-wrap')) return
+  showImportDropdown.value = false
+}
+
+onMounted(() => document.addEventListener('mousedown', onDocMouseDown))
+onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
+
 function onImport(mode: 'pdf' | 'manual'): void {
   showImportDropdown.value = false
   if (mode === 'pdf') showImportWizard.value = true

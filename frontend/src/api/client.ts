@@ -107,6 +107,9 @@ export const api = {
     request<void>(`/periods/${id}`, { method: 'DELETE' }),
 
   // ---- 课程 ----
+  listCourses: (semesterId?: number) =>
+    request<Course[]>(`/courses${semesterId ? `?semesterId=${semesterId}` : ''}`),
+
   createCourse: (body: CoursePayload) =>
     request<Course>('/courses', { method: 'POST', body: JSON.stringify(body) }),
 

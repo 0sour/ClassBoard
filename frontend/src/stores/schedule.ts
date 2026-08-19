@@ -175,11 +175,23 @@ export const useScheduleStore = defineStore('schedule', () => {
       showOddEvenFilter.value = ctx.settings.showOddEvenFilter
       settings.value = ctx.settings
       remote.value = true
+      await loadCourses()
       await refreshSchedule()
       await refreshToday()
       await loadMatters()
     } catch {
       remote.value = false
+    }
+  }
+
+  /** 拉取当前学期课程全量（颜色轮询/统计以真实数据为基准；远端拉取失败保留本地） */
+  async function loadCourses(): Promise<void> {
+    if (!remote.value) return
+    try {
+      const list = await api.listCourses(currentSemesterId.value ?? undefined)
+      if (list.length) courses.value = list
+    } catch {
+      // 拉取失败保留本地数据
     }
   }
 
@@ -242,6 +254,7 @@ export const useScheduleStore = defineStore('schedule', () => {
       await api.setCurrentSemester(id)
       const ctx = await api.getContext()
       periods.value = ctx.periods
+      await loadCourses()
       await refreshSchedule()
       await loadMatters()
     } catch {
@@ -529,12 +542,19 @@ export const useScheduleStore = defineStore('schedule', () => {
     await api.logoutAccess()
   }
 
-  /** 供日视图/聚合使用：某日期所在周信息 */
+  /** 供日视图/聚合使用：某日期所在周信息
+   * remote 模式下仅当日期属于当前展示周时直接使用服务端周号，
+   * 其余日期按本地学期起止计算（与周视图切换解耦，不随 weekOffset 漂移） */
   function weekInfoOf(date: Date) {
     const mon = toMonday(date)
-    const weekNo = remote.value && weekContext.value ? weekContext.value.week.weekNumber : currentSemester.value
-      ? calcWeekNumber(mon, currentSemester.value)
-      : null
+    const inDisplayedWeek =
+      remote.value && weekContext.value &&
+      weekContext.value.week.startDate === formatDate(mon)
+    const weekNo = inDisplayedWeek && weekContext.value
+      ? weekContext.value.week.weekNumber
+      : currentSemester.value
+        ? calcWeekNumber(mon, currentSemester.value)
+        : null
     return {
       dateStr: formatDate(date),
       weekday: ((date.getDay() + 6) % 7 + 1) as Weekday,

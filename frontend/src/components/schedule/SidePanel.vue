@@ -38,8 +38,15 @@ function openHomeworkItem(h: { id: number; name: string; courseId?: number | nul
   emit('openHomework', h)
 }
 
+/** 实践课程条目（无固定时间语义，见 types.Course.unscheduled） */
+interface PracticeItem {
+  name: string
+  teacher: string
+  weeks: string
+}
+
 /** 点击实践课程条目：emit 事件给父组件打开课程详情（mock 数据转为 Course 格式） */
-function openPracticeItem(p: { name: string; teacher: string; weeks: string }): void {
+function openPracticeItem(p: PracticeItem): void {
   const mockCourse = {
     id: 0,
     semesterId: 0,
