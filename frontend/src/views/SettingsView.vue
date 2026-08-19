@@ -502,10 +502,10 @@ async function toggleAccess(): Promise<void> {
               <div class="p-card-head">
                 <span class="p-idx">第 {{ p.index }} 节</span>
                 <div class="p-tools">
-                  <button class="p-tool" type="button" aria-label="编辑第 {{ p.index }} 节" @click="startPeriodEdit(p)">
+                  <button class="p-tool" type="button" :aria-label="`编辑第 ${p.index} 节`" @click="startPeriodEdit(p)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
                   </button>
-                  <button class="p-tool p-tool--danger" type="button" aria-label="删除第 {{ p.index }} 节" @click="removePeriod(p.index)">
+                  <button class="p-tool p-tool--danger" type="button" :aria-label="`删除第 ${p.index} 节`" @click="removePeriod(p.index)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
                   </button>
                 </div>

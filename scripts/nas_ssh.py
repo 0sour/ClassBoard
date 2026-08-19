@@ -13,7 +13,7 @@ import paramiko
 
 HOST = os.environ.get('NAS_HOST', '192.168.10.110')
 USER = os.environ.get('NAS_USER', 'sour')
-PASSWORD = os.environ.get('NAS_PASSWORD', '') or getpass('NAS 密码: ')
+PASSWORD = os.environ.get('NAS_PASSWORD', '') or getpass.getpass('NAS 密码: ')
 PORT = 22
 
 _client = None

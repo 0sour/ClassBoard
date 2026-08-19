@@ -25,6 +25,8 @@ const emit = defineEmits<{ (e: 'update:modelValue', value: string): void }>()
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)
 const trigger = ref<HTMLElement | null>(null)
+/** 面板（Teleport 到 body，需与 root 一并视为内部区域，避免点击面板内被误关） */
+const panel = ref<HTMLElement | null>(null)
 
 const panelX = ref(0)
 const panelY = ref(0)
@@ -133,7 +135,9 @@ function pick(d: number): void {
 }
 
 function onDocMouseDown(e: MouseEvent): void {
-  if (root.value && !root.value.contains(e.target as Node)) open.value = false
+  const t = e.target as Node
+  if (root.value?.contains(t) || panel.value?.contains(t)) return
+  open.value = false
 }
 
 function onKeydown(e: KeyboardEvent): void {
@@ -188,7 +192,7 @@ watch(() => props.modelValue, () => {
   <!-- 日历面板渲染到 body：fixed 定位跟随触发器，规避层叠/裁剪遮挡 -->
   <Teleport to="body">
     <Transition name="dp-pop">
-      <div v-if="open" class="dp-panel" :style="panelStyle()" role="dialog" :aria-label="`选择日期 ${ariaLabel ?? ''}`">
+      <div v-if="open" ref="panel" class="dp-panel" :style="panelStyle()" role="dialog" :aria-label="`选择日期 ${ariaLabel ?? ''}`">
         <div class="dp-head">
           <button class="dp-nav" type="button" aria-label="上个月" @click="prevMonth">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>

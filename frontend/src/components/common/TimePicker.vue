@@ -23,6 +23,8 @@ const emit = defineEmits<{ (e: 'update:modelValue', value: string): void }>()
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)
 const trigger = ref<HTMLElement | null>(null)
+/** 面板（Teleport 到 body，需与 root 一并视为内部区域，避免点击面板内被误关） */
+const panel = ref<HTMLElement | null>(null)
 
 // 面板 fixed 定位（相对视口）
 const panelX = ref(0)
@@ -71,7 +73,9 @@ function pickMinute(m: string): void {
 }
 
 function onDocMouseDown(e: MouseEvent): void {
-  if (root.value && !root.value.contains(e.target as Node)) open.value = false
+  const t = e.target as Node
+  if (root.value?.contains(t) || panel.value?.contains(t)) return
+  open.value = false
 }
 
 function onKeydown(e: KeyboardEvent): void {
@@ -136,6 +140,7 @@ watch(() => props.modelValue, () => {
     <Transition name="tp-pop">
       <div
         v-if="open"
+        ref="panel"
         class="tp-panel"
         :style="panelStyle"
         role="dialog"
