@@ -56,12 +56,19 @@ const mobileTitle = computed(() =>
 )
 
 function onSwipe(dir: 'next' | 'prev'): void {
+  // 记录滑动方向，驱动 Transition 水平滑入/滑出动画
+  slideDir.value = dir
   dayOffset.value += dir === 'next' ? 1 : -1
 }
 
 function goToday(): void {
+  if (dayOffset.value === 0) return
+  slideDir.value = dayOffset.value > 0 ? 'next' : 'prev'
   dayOffset.value = 0
 }
+
+/** 滑动方向（驱动双日视图切换动画） */
+const slideDir = ref<'next' | 'prev'>('next')
 
 function openCourse(course: Course): void {
   selected.value = course
@@ -128,9 +135,19 @@ async function exportPng(): Promise<void> {
           <div class="sched-scroll">
             <!-- 周数据拉取中显示网格骨架（UI 4.4） -->
             <Skeleton v-if="store.remote && !store.weekContext" variant="grid" />
+            <!-- 移动端双日视图：按滑动方向水平滑入/滑出（左滑→新内容从右滑入，右滑→从左滑入） -->
+            <Transition v-else-if="isMobile" :name="slideDir === 'next' ? 'slide-next' : 'slide-prev'" mode="out-in">
+              <WeekGrid
+                :key="dayOffset"
+                :days="mobileDays"
+                @open="openCourse"
+                @create="createFromSlot"
+                @swipe="onSwipe"
+              />
+            </Transition>
             <WeekGrid
               v-else
-              :days="isMobile ? mobileDays : undefined"
+              :days="undefined"
               @open="openCourse"
               @create="createFromSlot"
               @swipe="onSwipe"
@@ -214,6 +231,35 @@ async function exportPng(): Promise<void> {
 .days-today:hover {
   border-color: var(--color-border-strong);
   background: var(--color-bg-hover);
+}
+
+/* 双日视图滑动切换动画：左滑（next）新内容从右滑入，右滑（prev）新内容从左滑入 */
+.slide-next-enter-active,
+.slide-next-leave-active,
+.slide-prev-enter-active,
+.slide-prev-leave-active {
+  transition: transform var(--motion-duration-slow) var(--motion-easing-standard),
+    opacity var(--motion-duration-slow) var(--motion-easing-standard);
+}
+
+.slide-next-enter-from {
+  transform: translateX(24px);
+  opacity: 0;
+}
+
+.slide-next-leave-to {
+  transform: translateX(-24px);
+  opacity: 0;
+}
+
+.slide-prev-enter-from {
+  transform: translateX(-24px);
+  opacity: 0;
+}
+
+.slide-prev-leave-to {
+  transform: translateX(24px);
+  opacity: 0;
 }
 
 /* 打印 / 导出操作条（文档 4.7：操作对象仅限课表网格） */
