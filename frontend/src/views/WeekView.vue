@@ -134,7 +134,10 @@ async function exportPng(): Promise<void> {
         <!-- 桌面/平板：周导航；移动端：双日标题条（滑动切日） -->
         <WeekNav v-if="!isMobile" class="reveal" />
         <div v-else class="days-head reveal">
-          <span class="days-title num">{{ mobileTitle }}</span>
+          <span class="days-title num">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" /></svg>
+            {{ mobileTitle }}
+          </span>
           <button class="days-today" type="button" @click="goToday">今天</button>
         </div>
 
@@ -215,30 +218,43 @@ async function exportPng(): Promise<void> {
   align-items: center;
   justify-content: space-between;
   gap: var(--spacing-sm);
-  margin-bottom: var(--spacing-md);
+  margin: var(--spacing-lg) 0;
 }
 
 .days-title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-bold);
   color: var(--color-text-primary);
 }
 
+.days-title svg {
+  width: 18px;
+  height: 18px;
+  color: var(--color-brand);
+  flex: none;
+}
+
 .days-today {
-  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
   padding: 0 var(--spacing-md);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-surface);
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--color-brand);
   font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard),
-    background var(--motion-duration-fast) var(--motion-easing-standard);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-inverse);
+  box-shadow: var(--shadow-btn);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .days-today:hover {
-  border-color: var(--color-border-strong);
-  background: var(--color-bg-hover);
+  background: var(--color-brand-hover);
 }
 
 /* 双日视图推入式滑动动画（默认 mode：新旧同时动画）：
