@@ -30,6 +30,9 @@ const createSlot = ref<{ weekday: Weekday; period: number } | null>(null)
 // dayOffset = 相对今天的天数偏移（0=今天）
 // ============================================================
 const dayOffset = ref(0)
+/** 列表动画方向（next=向右滑入 / prev=向左滑入）与上一个日期 */
+const wheelDir = ref<'next' | 'prev'>('next')
+let dayOffsetPrev = 0
 
 const DAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] as const
 const WEEKDAY_NUM = ['一', '二', '三', '四', '五', '六', '日'] as const
@@ -138,13 +141,20 @@ function centerIdxOf(offset: number): number {
   return Math.min(WHEEL_HALF * 2, Math.max(0, raw))
 }
 
-/** 提交某格为展示日（数据切换） */
+/** 提交某格为展示日（数据切换；记录方向供列表动画使用） */
 function commitWheelIdx(idx: number): void {
   const item = wheelDates.value[idx]
   if (!item) return
   const off = Math.round((item.date.getTime() - toMonday(store.today).getTime()) / 86400000)
-  if (off !== dayOffset.value) dayOffset.value = off
+  if (off !== dayOffset.value) {
+    wheelDir.value = off > dayOffsetPrev ? 'next' : 'prev'
+    dayOffsetPrev = off
+    dayOffset.value = off
+  }
 }
+
+/** 拖动中不播放列表动画（高频切换会打架），吸附完成后再播 */
+const wheelDragging = ref(false)
 
 /** rAF 缓动动画到目标 offset（easeOutCubic，~240ms） */
 function animateToOffset(target: number, duration = 240): void {
@@ -176,6 +186,7 @@ function onWheelDown(e: PointerEvent): void {
   if (e.pointerType === 'mouse' && e.button !== 0) return
   cancelAnimationFrame(wheelAnim)
   wheelDrag = { startX: e.clientX, baseOffset: wheelOffset.value, moved: false }
+  wheelDragging.value = true
   const view = wheelRef.value
   view?.setPointerCapture?.(e.pointerId)
 }
@@ -197,6 +208,10 @@ function onWheelUp(e: PointerEvent): void {
   if (!wheelDrag) return
   const wasDrag = wheelDrag.moved
   wheelDrag = null
+  // 吸附动画结束后恢复列表过渡（动画期间 wheelDragging=true 抑制过渡）
+  window.setTimeout(() => {
+    wheelDragging.value = false
+  }, 280)
   if (!wasDrag) {
     // 点击：以指针位置命中格子，动画滑到中央
     const view = wheelRef.value
@@ -217,6 +232,7 @@ function onWheelUp(e: PointerEvent): void {
 
 function onWheelCancel(): void {
   wheelDrag = null
+  wheelDragging.value = false
 }
 
 /** 点击格子（无障碍/键盘场景）：动画滑到中央 */
@@ -337,26 +353,34 @@ async function exportPng(): Promise<void> {
             </div>
           </div>
 
-          <!-- 单日课程列表（全宽卡片，无截断） -->
+          <!-- 单日课程列表（全宽卡片；切日时按方向滑入/滑出动画，拖动中不播） -->
           <div class="dv-list reveal">
-            <button
-              v-for="c in dayCourses"
-              :key="c.id"
-              class="dv-card"
-              type="button"
-              @click="openCourse(c)"
+            <Transition
+              :name="wheelDir === 'next' ? 'dv-next' : 'dv-prev'"
+              mode="out-in"
+              :duration="200"
             >
-              <span class="dv-dot-color" :style="{ background: `var(--${c.color}-text)` }"></span>
-              <span class="dv-time num">{{ periodTime(c.startPeriod).split('–')[0] }}<small>–{{ periodTime(c.endPeriod).split('–')[1] }}</small></span>
-              <span class="dv-main">
-                <span class="dv-name">{{ c.name }}</span>
-                <span class="dv-loc">{{ c.location }} · {{ c.teacher }}</span>
-              </span>
-              <span class="dv-slot num">第 {{ c.startPeriod }}{{ c.endPeriod > c.startPeriod ? `–${c.endPeriod}` : '' }} 节</span>
-            </button>
-            <div v-if="dayCourses.length === 0" class="dv-empty">
-              这一天没有排课
-            </div>
+              <div :key="currentDay.getTime()" class="dv-list__inner">
+                <button
+                  v-for="c in dayCourses"
+                  :key="c.id"
+                  class="dv-card"
+                  type="button"
+                  @click="openCourse(c)"
+                >
+                  <span class="dv-dot-color" :style="{ background: `var(--${c.color}-text)` }"></span>
+                  <span class="dv-time num">{{ periodTime(c.startPeriod).split('–')[0] }}<small>–{{ periodTime(c.endPeriod).split('–')[1] }}</small></span>
+                  <span class="dv-main">
+                    <span class="dv-name">{{ c.name }}</span>
+                    <span class="dv-loc">{{ c.location }} · {{ c.teacher }}</span>
+                  </span>
+                  <span class="dv-slot num">第 {{ c.startPeriod }}{{ c.endPeriod > c.startPeriod ? `–${c.endPeriod}` : '' }} 节</span>
+                </button>
+                <div v-if="dayCourses.length === 0" class="dv-empty">
+                  这一天没有排课
+                </div>
+              </div>
+            </Transition>
           </div>
         </div>
 
@@ -577,6 +601,42 @@ async function exportPng(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-md);
+}
+
+/* 切日动画：旧列表淡出+位移，新列表按方向滑入（200ms，ease-out） */
+.dv-list__inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.dv-next-enter-active,
+.dv-next-leave-active,
+.dv-prev-enter-active,
+.dv-prev-leave-active {
+  transition: opacity 200ms ease-out, transform 200ms ease-out;
+}
+
+/* 左滑（下一日）：新列表从右滑入 */
+.dv-next-enter-from {
+  opacity: 0;
+  transform: translateX(28px);
+}
+
+.dv-next-leave-to {
+  opacity: 0;
+  transform: translateX(-28px);
+}
+
+/* 右滑（上一日）：新列表从左滑入 */
+.dv-prev-enter-from {
+  opacity: 0;
+  transform: translateX(-28px);
+}
+
+.dv-prev-leave-to {
+  opacity: 0;
+  transform: translateX(28px);
 }
 
 .dv-card {
