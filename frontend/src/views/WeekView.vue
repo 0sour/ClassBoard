@@ -64,7 +64,7 @@ const wheelShift = ref(0)
 const wheelDragging = ref(false)
 /** 拖动松手后抑制随后的 click */
 let suppressWheelClickUntil = 0
-let wheelDrag: { startX: number; dxDate: Date; lastStep: number } | null = null
+let wheelDrag: { startX: number; dxDate: Date; lastStep: number; moved: boolean } | null = null
 let wheelShiftAnim = 0
 
 /** 归零时分秒，避免日期比较误判 */
@@ -152,7 +152,7 @@ function animateShiftTo(target: number, duration = 220): void {
 function onWheelDown(e: PointerEvent): void {
   if (e.pointerType === 'mouse' && e.button !== 0) return
   cancelAnimationFrame(wheelShiftAnim)
-  wheelDrag = { startX: e.clientX, dxDate: new Date(wheelCenter.value), lastStep: 0 }
+  wheelDrag = { startX: e.clientX, dxDate: new Date(wheelCenter.value), lastStep: 0, moved: false }
   wheelDragging.value = true
   const view = wheelRef.value
   view?.setPointerCapture?.(e.pointerId)
@@ -162,6 +162,7 @@ function onWheelDown(e: PointerEvent): void {
 function onWheelMove(e: PointerEvent): void {
   if (!wheelDrag) return
   const dx = e.clientX - wheelDrag.startX
+  if (Math.abs(dx) > 4) wheelDrag.moved = true
   wheelShift.value = dx
   const step = -Math.round(dx / WHEEL_ITEM_W)
   if (step !== wheelDrag.lastStep) {
@@ -172,37 +173,33 @@ function onWheelMove(e: PointerEvent): void {
   }
 }
 
-/** 指针松开：吸附最近整格，位移动画归零 */
+/** 指针松开：拖动只归零位移吸附（日期已由 move 实时更新，不用 up 坐标重算——避免坐标回弹覆盖）；
+    未拖动视为点击命中格 */
 function onWheelUp(e: PointerEvent): void {
   if (!wheelDrag) return
-  const startX = wheelDrag.startX
-  const startDate = wheelDrag.dxDate
+  const wasMoved = wheelDrag.moved
   wheelDrag = null
   window.setTimeout(() => {
     wheelDragging.value = false
   }, 120)
   suppressWheelClickUntil = Date.now() + 350
-  const dx = e.clientX - startX
-  const step = -Math.round(dx / WHEEL_ITEM_W)
-  if (Math.abs(dx) > 4) {
-    // 拖动：最终中心 = 起点 + 整格步数；位移归零（吸附）
-    const final = new Date(startDate)
-    final.setDate(final.getDate() + step)
-    setWheelCenter(final)
-  } else {
-    // 点击：命中格 → 该格日期成为新中心
-    const view = wheelRef.value
-    const rect = view?.getBoundingClientRect()
-    const track = wheelTrackRef.value
-    if (rect && track) {
-      const clickLocal = e.clientX - rect.left
-      let hit = -1
-      Array.from(track.children).forEach((el, i) => {
-        const r = (el as HTMLElement).getBoundingClientRect()
-        if (clickLocal >= r.left - rect.left && clickLocal <= r.right - rect.left) hit = i
-      })
-      if (hit >= 0) setWheelCenter(wheelDates.value[hit].date)
-    }
+  if (wasMoved) {
+    // 拖动过：日期已在 move 中提交，松手仅吸附归零
+    animateShiftTo(0)
+    return
+  }
+  // 点击：命中格 → 该格日期成为新中心
+  const view = wheelRef.value
+  const rect = view?.getBoundingClientRect()
+  const track = wheelTrackRef.value
+  if (rect && track) {
+    const clickLocal = e.clientX - rect.left
+    let hit = -1
+    Array.from(track.children).forEach((el, i) => {
+      const r = (el as HTMLElement).getBoundingClientRect()
+      if (clickLocal >= r.left - rect.left && clickLocal <= r.right - rect.left) hit = i
+    })
+    if (hit >= 0) setWheelCenter(wheelDates.value[hit].date)
   }
   animateShiftTo(0)
 }
