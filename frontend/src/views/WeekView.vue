@@ -39,11 +39,11 @@ const isMobile = ref(window.innerWidth < 768)
 
 function onResize(): void {
   isMobile.value = window.innerWidth < 768
-  // 移动端轮盘：窗口尺寸变化后重算 padding，保持选中日居中
+  // 移动端轮盘：窗口尺寸变化后重算居中偏移，保持当前展示日居中
   if (isMobile.value) {
     syncWheelPad()
-    const view = wheelRef.value
-    if (view) view.scrollLeft = WHEEL_HALF * WHEEL_ITEM_W - wheelPad.value
+    const idx = centerIdxOf(wheelOffset.value)
+    wheelOffset.value = idx * WHEEL_ITEM_W - wheelPad.value
   }
 }
 
@@ -77,7 +77,9 @@ function periodTime(period: number): string {
 function goToday(): void {
   dayOffset.value = 0
   // 轮盘滑回今天（中心格）
-  void scrollWheelToIndex(WHEEL_HALF)
+  cancelAnimationFrame(wheelAnim)
+  wheelCenter.value = new Date(store.today)
+  void animateToOffset(WHEEL_HALF * WHEEL_ITEM_W - wheelPad.value)
 }
 
 /** 两个日期是否为同一天 */
@@ -86,17 +88,22 @@ function isSameDate(a: Date, b: Date): boolean {
 }
 
 // ============================================================
-// 轮盘式日期选择：选中日恒居中，左右滑动切日，中间常驻指示器
-// 实现要点：格宽固定常量（与 CSS 一致），scrollLeft 全用数学计算，
-// 拖动实时切日、scrollend 松手吸附居中，程序化滚动期间忽略 scroll 事件
+// 轮盘式日期选择（重写：transform 驱动，不依赖浏览器 scroll）
+// 结构：窗口（overflow hidden）内一条 track（translateX 平移）
+// 指针拖拽手写：pointerdown/move/up 更新平移量并实时切日，
+// 松手 rAF 缓动吸附最近整格；点击格子 rAF 动画滑到中央。
+// 边缘 7 格内重建序列，保持无限滚动。
 // ============================================================
 const WHEEL_HALF = 21 // 单侧天数
 const WHEEL_ITEM_W = 56 // 与 .dv-wheel__day width 一致（CSS 固定）
 const wheelRef = ref<HTMLElement | null>(null)
 const wheelCenter = ref(new Date(store.today))
-const wheelPad = ref(0)
+const wheelOffset = ref(0) // track translateX（px）
+const wheelPad = ref(0) // 视口居中偏移 = (winW - 56) / 2
+let wheelAnim = 0 // rAF 动画 id
+let wheelDrag: { startX: number; baseOffset: number; moved: boolean } | null = null
 
-/** 轮盘日期序列（含左右哨兵） */
+/** 轮盘日期序列（±WHEEL_HALF，索引 0 在轨道最左） */
 const wheelDates = computed(() => {
   const list: { date: Date; wd: string }[] = []
   for (let i = -WHEEL_HALF; i <= WHEEL_HALF; i++) {
@@ -107,35 +114,24 @@ const wheelDates = computed(() => {
   return list
 })
 
-/** 视口 padding：让首尾格也能滚到正中心（与 56px 格宽数学对齐） */
+/** 视口 padding：中心格在正中央 */
 function syncWheelPad(): void {
   const view = wheelRef.value
   if (!view) return
   wheelPad.value = Math.max(0, (view.clientWidth - WHEEL_ITEM_W) / 2)
 }
 
-/** 当前滚动位置对应的中心格索引 */
-function wheelCenterIdx(): number {
-  const view = wheelRef.value
-  if (!view) return WHEEL_HALF
-  return Math.round((view.scrollLeft + wheelPad.value) / WHEEL_ITEM_W)
-}
-
-/** 使第 idx 格居中所需的 scrollLeft */
-function wheelLeftOf(idx: number): number {
-  return idx * WHEEL_ITEM_W - wheelPad.value
-}
-
-/** 初始定位到中心格（无动画） */
-function initWheelScroll(): void {
-  const view = wheelRef.value
-  if (!view) return
+/** 初始：中心格（WHEEL_HALF）居中 */
+function initWheel(): void {
   syncWheelPad()
-  view.scrollLeft = wheelLeftOf(WHEEL_HALF)
+  wheelOffset.value = WHEEL_HALF * WHEEL_ITEM_W - wheelPad.value
 }
 
-/** 程序化滚动中标志（点击/吸附/回今天）：期间忽略 scroll 事件，避免回跳 */
-let wheelAnimating = false
+/** 由 offset 反推中心格索引（clamp） */
+function centerIdxOf(offset: number): number {
+  const raw = Math.round((offset + wheelPad.value) / WHEEL_ITEM_W)
+  return Math.min(WHEEL_HALF * 2, Math.max(0, raw))
+}
 
 /** 提交某格为展示日（数据切换） */
 function commitWheelIdx(idx: number): void {
@@ -145,60 +141,95 @@ function commitWheelIdx(idx: number): void {
   if (off !== dayOffset.value) dayOffset.value = off
 }
 
-/** 滚动中：拖动实时切日 + 边缘重建 */
-function onWheelScroll(): void {
-  if (wheelAnimating) return
-  const idx = wheelCenterIdx()
-  commitWheelIdx(idx)
-  // 滑到边缘：以当前日为中心重建（保持中心连续）
-  if (idx <= 6 || idx >= wheelDates.value.length - 7) {
-    const item = wheelDates.value[idx]
-    if (item) {
-      wheelCenter.value = new Date(item.date)
-      initWheelScroll()
-    }
+/** rAF 缓动动画到目标 offset（easeOutCubic，~240ms） */
+function animateToOffset(target: number, duration = 240): void {
+  cancelAnimationFrame(wheelAnim)
+  const from = wheelOffset.value
+  const t0 = performance.now()
+  const tick = (now: number): void => {
+    const p = Math.min(1, (now - t0) / duration)
+    const e = 1 - (1 - p) * (1 - p) * (1 - p)
+    wheelOffset.value = from + (target - from) * e
+    if (p < 1) wheelAnim = requestAnimationFrame(tick)
   }
+  wheelAnim = requestAnimationFrame(tick)
 }
 
-/** 滚动结束：吸附到最近整格并提交（scrollend 事件 + pointerup 兜底） */
-function onWheelEnd(): void {
-  if (wheelAnimating) return
+/** 以当前中心日重建序列（滑到边缘时调用，offset 保持不变） */
+function rebuildWheel(): void {
+  const idx = centerIdxOf(wheelOffset.value)
+  const item = wheelDates.value[idx]
+  if (!item) return
+  wheelCenter.value = new Date(item.date)
+  wheelOffset.value = WHEEL_HALF * WHEEL_ITEM_W - wheelPad.value
+  syncWheelPad()
+  commitWheelIdx(WHEEL_HALF)
+}
+
+/** 指针按下：记录起点，开始拖拽 */
+function onWheelDown(e: PointerEvent): void {
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  cancelAnimationFrame(wheelAnim)
+  wheelDrag = { startX: e.clientX, baseOffset: wheelOffset.value, moved: false }
   const view = wheelRef.value
-  if (!view) return
-  const idx = wheelCenterIdx()
-  const left = wheelLeftOf(idx)
-  if (Math.abs(view.scrollLeft - left) > 2) {
-    // 平滑吸附到整格
-    wheelAnimating = true
-    view.scrollTo({ left, behavior: 'smooth' })
-    window.setTimeout(() => {
-      wheelAnimating = false
-    }, 260)
+  view?.setPointerCapture?.(e.pointerId)
+}
+
+/** 指针移动：跟随拖动并实时切日 */
+function onWheelMove(e: PointerEvent): void {
+  if (!wheelDrag) return
+  const dx = e.clientX - wheelDrag.startX
+  if (Math.abs(dx) > 3) wheelDrag.moved = true
+  wheelOffset.value = wheelDrag.baseOffset + dx
+  commitWheelIdx(centerIdxOf(wheelOffset.value))
+  // 滑到边缘：重建序列
+  const idx = centerIdxOf(wheelOffset.value)
+  if (idx <= 7 || idx >= wheelDates.value.length - 8) rebuildWheel()
+}
+
+/** 指针松开：吸附到最近整格；未拖动视为点击 */
+function onWheelUp(e: PointerEvent): void {
+  if (!wheelDrag) return
+  const wasDrag = wheelDrag.moved
+  wheelDrag = null
+  if (!wasDrag) {
+    // 点击：以指针位置命中格子，动画滑到中央
+    const view = wheelRef.value
+    if (!view) return
+    const rect = view.getBoundingClientRect()
+    const clickLocal = e.clientX - rect.left
+    const idx = Math.round((clickLocal + wheelOffset.value) / WHEEL_ITEM_W)
+    animateToOffset(idx * WHEEL_ITEM_W - wheelPad.value)
+    commitWheelIdx(idx)
+    return
   }
+  // 拖动结束：吸附最近整格
+  const idx = centerIdxOf(wheelOffset.value)
+  animateToOffset(idx * WHEEL_ITEM_W - wheelPad.value)
   commitWheelIdx(idx)
 }
 
-/** 点击某格：提交该日并平滑滚到中央 */
-function scrollWheelToIndex(i: number): void {
-  const view = wheelRef.value
-  if (!view) return
-  wheelAnimating = true
+function onWheelCancel(): void {
+  wheelDrag = null
+}
+
+/** 点击格子（无障碍/键盘场景）：动画滑到中央 */
+function onWheelPick(i: number): void {
+  cancelAnimationFrame(wheelAnim)
   commitWheelIdx(i)
-  view.scrollTo({ left: wheelLeftOf(i), behavior: 'smooth' })
-  window.setTimeout(() => {
-    wheelAnimating = false
-  }, 260)
+  animateToOffset(i * WHEEL_ITEM_W - wheelPad.value)
 }
 
 /** 移动端轮盘初始化（桌面无轮盘，仅移动端执行） */
 onMounted(() => {
   if (!isMobile.value) return
   void nextTick(() => {
-    initWheelScroll()
+    initWheel()
   })
 })
 
 onBeforeUnmount(() => {
+  cancelAnimationFrame(wheelAnim)
   window.removeEventListener('resize', onResize)
 })
 
@@ -271,30 +302,33 @@ async function exportPng(): Promise<void> {
             <button class="dv-today" type="button" @click="goToday">今天</button>
           </div>
 
-          <!-- 轮盘式日期选择：选中日居中，左右滑动切日，中间常驻指示器 -->
+          <!-- 轮盘式日期选择：transform 轨道，指针拖拽，中间常驻指示器 -->
           <div class="dv-wheel-wrap reveal">
             <div
               ref="wheelRef"
               class="dv-wheel"
-              :style="{ '--wheel-pad': wheelPad + 'px' }"
-              @scroll.passive="onWheelScroll"
-              @scrollend.passive="onWheelEnd"
-              @pointerup.passive="onWheelEnd"
+              :class="{ 'is-dragging': wheelDrag !== null }"
+              @pointerdown="onWheelDown"
+              @pointermove="onWheelMove"
+              @pointerup="onWheelUp"
+              @pointercancel="onWheelCancel"
             >
-              <button
-                v-for="(d, i) in wheelDates"
-                :key="d.date.getTime()"
-                class="dv-wheel__day"
-                :class="{ active: isSameDate(d.date, currentDay), today: isSameDate(d.date, store.today) }"
-                type="button"
-                @click="scrollWheelToIndex(i)"
-              >
-                <span>{{ d.wd }}</span>
-                <b>{{ d.date.getDate() }}</b>
-              </button>
+              <div class="dv-wheel__track" :style="{ transform: `translateX(${wheelOffset}px)` }">
+                <button
+                  v-for="(d, i) in wheelDates"
+                  :key="d.date.getTime()"
+                  class="dv-wheel__day"
+                  :class="{ active: isSameDate(d.date, currentDay), today: isSameDate(d.date, store.today) }"
+                  type="button"
+                  @click="onWheelPick(i)"
+                >
+                  <span>{{ d.wd }}</span>
+                  <b>{{ d.date.getDate() }}</b>
+                </button>
+              </div>
+              <!-- 常驻选中指示器 -->
+              <div class="dv-wheel__indicator"></div>
             </div>
-            <!-- 常驻选中指示器 -->
-            <div class="dv-wheel__indicator"></div>
           </div>
 
           <!-- 单日课程列表（全宽卡片，无截断） -->
@@ -447,18 +481,29 @@ async function exportPng(): Promise<void> {
   padding: 4px 0;
 }
 
-/* 滚动容器：左右 padding 让首尾格也能居中；自由拖动（不用 scroll-snap，避免拖动被抢走） */
+/* 窗口：overflow hidden，不产生浏览器滚动；轨道用 transform 平移 */
 .dv-wheel {
-  display: flex;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-  padding: 0 var(--wheel-pad);
-  touch-action: pan-x;
+  position: relative;
+  overflow: hidden;
+  height: 52px;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-.dv-wheel::-webkit-scrollbar {
-  display: none;
+.dv-wheel.is-dragging {
+  cursor: grabbing;
+}
+
+/* 轨道：flex 一行排开，translateX 由 JS 驱动（含左右居中 padding） */
+.dv-wheel__track {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  padding: 0 var(--wheel-pad);
+  will-change: transform;
 }
 
 .dv-wheel__day {
