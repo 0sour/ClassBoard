@@ -265,7 +265,7 @@ async function exportPng(): Promise<void> {
             <button class="dv-today" type="button" @click="goToday">今天</button>
           </div>
 
-          <!-- 轮盘式日期选择：静态 7 格，中间格即选中格（无像素定位） -->
+          <!-- 轮盘式日期选择：静态 7 格，中间格即选中格（切日按方向滑入动画） -->
           <div class="dv-wheel-wrap reveal">
             <div
               ref="wheelRef"
@@ -276,22 +276,29 @@ async function exportPng(): Promise<void> {
               @pointerup="onWheelUp"
               @pointercancel="onWheelCancel"
             >
-              <div ref="wheelTrackRef" class="dv-wheel__track">
-                <button
-                  v-for="(d, i) in wheelDates"
-                  :key="d.date.getTime()"
-                  class="dv-wheel__day"
-                  :class="{
-                    active: i === WHEEL_SPAN,
-                    today: isSameDate(d.date, store.today),
-                  }"
-                  type="button"
-                  @click="onWheelPick(i)"
-                >
-                  <span>{{ d.wd }}</span>
-                  <b>{{ d.date.getDate() }}</b>
-                </button>
-              </div>
+              <Transition
+                :name="wheelDir === 'next' ? 'dv-wheel-next' : 'dv-wheel-prev'"
+                :css="!wheelDragging"
+                mode="out-in"
+                :duration="150"
+              >
+                <div ref="wheelTrackRef" :key="wheelCenter.getTime()" class="dv-wheel__track">
+                  <button
+                    v-for="(d, i) in wheelDates"
+                    :key="d.date.getTime()"
+                    class="dv-wheel__day"
+                    :class="{
+                      active: i === WHEEL_SPAN,
+                      today: isSameDate(d.date, store.today),
+                    }"
+                    type="button"
+                    @click="onWheelPick(i)"
+                  >
+                    <span>{{ d.wd }}</span>
+                    <b>{{ d.date.getDate() }}</b>
+                  </button>
+                </div>
+              </Transition>
             </div>
           </div>
 
@@ -518,6 +525,36 @@ async function exportPng(): Promise<void> {
 .dv-wheel__day.active span {
   color: var(--color-brand);
   font-weight: var(--font-weight-bold);
+}
+
+/* 轮盘切日动画：整体按方向滑入/滑出（150ms，与列表动画同节奏） */
+.dv-wheel-next-enter-active,
+.dv-wheel-next-leave-active,
+.dv-wheel-prev-enter-active,
+.dv-wheel-prev-leave-active {
+  transition: opacity 150ms ease-out, transform 150ms ease-out;
+}
+
+/* 左滑（下一日）：新轨道从右滑入 */
+.dv-wheel-next-enter-from {
+  opacity: 0;
+  transform: translateX(20px);
+}
+
+.dv-wheel-next-leave-to {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
+/* 右滑（上一日）：新轨道从左滑入 */
+.dv-wheel-prev-enter-from {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
+.dv-wheel-prev-leave-to {
+  opacity: 0;
+  transform: translateX(20px);
 }
 
 /* 单日课程列表：全宽卡片 */
