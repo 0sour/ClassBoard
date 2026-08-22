@@ -330,19 +330,22 @@ const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周�
         </button>
       </div>
       <div class="list">
-        <div v-for="h in filteredHomework" :key="h.id" class="list-item" :class="{ selected: isDesktop && selectedHomework?.id === h.id }">
-          <label class="check" :aria-label="h.done ? '标记为未完成' : '标记为已完成'">
-            <input type="checkbox" :checked="h.done" @change="toggleHomework(h)" />
-            <span class="box"></span>
-          </label>
-          <span class="item-main" :class="{ done: h.done }" @click="selectHomework(h)">
-            <span class="item-name">{{ h.name }}</span>
-            <span class="item-meta">{{ h.dueAt.slice(0, 10) }} 截止</span>
-          </span>
-          <button class="btn-mini" type="button" aria-label="删除作业" @click.stop="removeHomework(h)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
-          </button>
-        </div>
+        <!-- 作业列表：勾选完成/取消完成后，条目以折叠+淡出动画消失（TransitionGroup） -->
+        <TransitionGroup name="hw" tag="div">
+          <div v-for="h in filteredHomework" :key="h.id" class="list-item" :class="{ selected: isDesktop && selectedHomework?.id === h.id }">
+            <label class="check" :aria-label="h.done ? '标记为未完成' : '标记为已完成'">
+              <input type="checkbox" :checked="h.done" @change="toggleHomework(h)" />
+              <span class="box"></span>
+            </label>
+            <span class="item-main" :class="{ done: h.done }" @click="selectHomework(h)">
+              <span class="item-name">{{ h.name }}</span>
+              <span class="item-meta">{{ h.dueAt.slice(0, 10) }} 截止</span>
+            </span>
+            <button class="btn-mini" type="button" aria-label="删除作业" @click.stop="removeHomework(h)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
+            </button>
+          </div>
+        </TransitionGroup>
         <div v-if="filteredHomework.length === 0" class="empty">
           <p class="empty__title">{{ hwFilter === 'all' ? '还没有作业' : hwFilter === 'open' ? '没有未完成的作业' : '还没有已完成的作业' }}</p>
           <button class="btn-empty" type="button" @click="openNewHomework">新增作业</button>
@@ -495,6 +498,24 @@ const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周�
   display: flex;
   flex-direction: column;
   gap: var(--spacing-md);
+}
+
+/* 作业列表消失动画：勾选完成后条目淡出 + 右移 + 其余条目平滑重排 */
+.hw-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.hw-leave-active,
+.hw-move-active {
+  transition: opacity var(--motion-duration-slow) var(--motion-easing-standard),
+    transform var(--motion-duration-slow) var(--motion-easing-standard);
+}
+
+.hw-leave-to {
+  opacity: 0;
+  transform: translateX(24px);
 }
 
 .list-item {
