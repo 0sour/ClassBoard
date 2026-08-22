@@ -126,12 +126,12 @@ function onWheelDown(e: PointerEvent): void {
   view?.setPointerCapture?.(e.pointerId)
 }
 
-/** 指针移动：按滑过的格数切换中心（每格 56px 一格） */
+/** 指针移动：按滑过的格数切换中心（每格 56px 一格；右拖=向过去，左拖=向未来） */
 function onWheelMove(e: PointerEvent): void {
   if (!wheelDrag) return
   const dx = e.clientX - wheelDrag.startX
   if (Math.abs(dx) > 4) wheelDrag.moved = true
-  const step = Math.round(dx / 56)
+  const step = -Math.round(dx / 56)
   if (step !== wheelDrag.lastStep) {
     wheelDrag.lastStep = step
     const base = new Date(wheelDrag.dxDate)
@@ -153,7 +153,7 @@ function onWheelUp(e: PointerEvent): void {
   if (wasDrag) {
     // 拖动结束：以起点日期 + 整格位移为最终中心；抑制随后的 click
     suppressWheelClickUntil = Date.now() + 350
-    const step = Math.round((e.clientX - startX) / 56)
+    const step = -Math.round((e.clientX - startX) / 56)
     const final = new Date(startDate)
     final.setDate(final.getDate() + step)
     setWheelCenter(final)
