@@ -306,6 +306,7 @@ async function toggleOddEven(v: boolean): Promise<void> {
 
 // ================= 天气（和风天气） =================
 const weatherBusy = ref(false)
+const showWeatherKey = ref(false)
 
 async function saveWeatherSettings(): Promise<void> {
   weatherBusy.value = true
@@ -702,13 +703,24 @@ async function toggleAccess(): Promise<void> {
         </label>
         <label class="edit-field">
           <span class="edit-field__label">和风天气 API Key</span>
-          <input
-            class="text-input"
-            type="password"
-            placeholder="免费版即可（devapi.qweather.com）"
-            aria-label="和风天气 API Key"
-            v-model="store.settings.weather.apiKey"
-          />
+          <span class="key-input-wrap">
+            <input
+              class="text-input key-input"
+              :type="showWeatherKey ? 'text' : 'password'"
+              placeholder="免费版即可（devapi.qweather.com）"
+              aria-label="和风天气 API Key"
+              v-model="store.settings.weather.apiKey"
+            />
+            <button
+              class="key-eye"
+              type="button"
+              :aria-label="showWeatherKey ? '隐藏 API Key' : '显示 API Key'"
+              @click="showWeatherKey = !showWeatherKey"
+            >
+              <svg v-if="!showWeatherKey" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></svg>
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" /><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" /><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61" /><path d="M2 2l20 20" /></svg>
+            </button>
+          </span>
         </label>
         <p class="weather-hint">数据经本机服务端代理获取（隐藏 Key），30 分钟缓存；免费版包含实时天气、3 天预报、空气与预警。申请地址：https://dev.qweather.com</p>
       </div>
@@ -965,6 +977,46 @@ async function toggleAccess(): Promise<void> {
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
   line-height: 1.6;
+}
+
+/* API Key 输入：眼睛按钮切换明文/密文 */
+.key-input-wrap {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+
+.key-input {
+  padding-right: 34px;
+}
+
+.key-eye {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard),
+    background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.key-eye:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-body);
+}
+
+.key-eye svg {
+  width: 16px;
+  height: 16px;
 }
 
 .date-input {
