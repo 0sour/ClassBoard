@@ -141,7 +141,8 @@ export const useScheduleStore = defineStore('schedule', () => {
   function coursesOfDate(date: Date): Course[] {
     const wd = getWeekday(date)
     const info = weekInfoOf(date)
-    if (info.weekNumber === null) return []
+    // 未开学（周号 0）或假期（null）：该日无课，与桌面 /api/schedule 的 isHoliday 行为一致
+    if (info.weekNumber === null || info.weekNumber === 0) return []
     return courses.value.filter((c) => {
       if (c.semesterId !== currentSemesterId.value) return false
       if (c.weekday !== wd) return false
