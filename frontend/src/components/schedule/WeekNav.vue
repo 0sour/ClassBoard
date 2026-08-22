@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { useScheduleStore } from '@/stores/schedule'
+import WeekPicker from './WeekPicker.vue'
 
 const store = useScheduleStore()
+
+/** 跳转到指定周 */
+function goToWeek(n: number): void {
+  store.goToWeek(n)
+}
 </script>
 
 <template>
@@ -11,16 +17,21 @@ const store = useScheduleStore()
       <span>上一周</span>
     </button>
 
-    <div class="wn-title">
-      <span class="wn-dates">{{ store.weekTitle }}</span>
-      <span class="wn-week" v-if="store.weekNumber !== null">
-        第 {{ store.weekNumber }} 周
-      </span>
-      <span class="wn-odd" v-if="store.weekNumber !== null">
-        {{ store.isOdd ? '单周' : '双周' }}
-      </span>
-      <span class="wn-holiday" v-if="store.weekNumber === 0">未开学</span>
-      <span class="wn-holiday" v-else-if="store.weekNumber === null">假期</span>
+    <!-- 点击标题弹出周选择器（快速跳任意周） -->
+    <div class="wn-picker-wrap">
+      <WeekPicker :current-week="store.weekNumber" @select="goToWeek">
+        <div class="wn-title">
+          <span class="wn-dates">{{ store.weekTitle }}</span>
+          <span class="wn-week" v-if="store.weekNumber !== null">
+            第 {{ store.weekNumber }} 周
+          </span>
+          <span class="wn-odd" v-if="store.weekNumber !== null">
+            {{ store.isOdd ? '单周' : '双周' }}
+          </span>
+          <span class="wn-holiday" v-if="store.weekNumber === 0">未开学</span>
+          <span class="wn-holiday" v-else-if="store.weekNumber === null">假期</span>
+        </div>
+      </WeekPicker>
     </div>
 
     <div class="wn-right">
@@ -58,8 +69,9 @@ const store = useScheduleStore()
   font-size: var(--font-size-md);
   color: var(--color-text-body);
   white-space: nowrap;
+  cursor: pointer;
   transition: border-color var(--motion-duration-fast) var(--motion-easing-standard),
-    background var(--motion-duration-fast) var(--motion-easing-standard);
+    background-color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .wn-btn:hover {
@@ -68,40 +80,54 @@ const store = useScheduleStore()
 }
 
 .wn-btn svg {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
 }
 
-.wn-title {
+/* 标题容器：绝对居中，包住周选择触发器 */
+.wn-picker-wrap {
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
+  min-width: 9.5em; /* 桌面占位宽，防止左右按钮跳动（原 .wn-title 同款） */
+}
+
+.wn-title {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: var(--spacing-sm);
+  height: 34px;
+  padding: 0 var(--spacing-md);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   color: var(--color-text-primary);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-bold);
-  white-space: nowrap;
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    border-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+/* 悬停提示可点击 */
+.wn-title:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-default);
+  cursor: pointer;
 }
 
 .wn-dates {
-  /* 固定占位，避免日期文本长度不同时推动右侧周数/单双周指示 */
-  min-width: 9.5em;
-  text-align: center;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
 }
 
 .wn-week {
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-bold);
-  color: var(--color-text-inverse);
-  background: var(--color-brand);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-subtle);
   border-radius: var(--radius-full);
-  padding: 2px 10px;
-  /* 固定占位，让「第 2 周」与「第 12 周」同宽 */
-  min-width: 5.4em;
-  text-align: center;
+  padding: 2px 8px;
+  white-space: nowrap;
 }
 
 .wn-odd {
@@ -111,15 +137,13 @@ const store = useScheduleStore()
   background: var(--color-brand-subtle);
   border-radius: var(--radius-full);
   padding: 2px 8px;
+  white-space: nowrap;
 }
 
 .wn-holiday {
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
+  color: var(--color-feedback-warning);
   font-weight: var(--font-weight-medium);
-  color: var(--color-text-tertiary);
-  background: var(--color-bg-subtle);
-  border-radius: var(--radius-full);
-  padding: 2px 8px;
 }
 
 .wn-right {
@@ -134,11 +158,15 @@ const store = useScheduleStore()
     gap: var(--spacing-sm);
   }
 
-  .wn-title {
+  .wn-picker-wrap {
     position: static;
     transform: none;
     order: -1;
     width: 100%;
+    justify-content: center;
+  }
+
+  .wn-title {
     justify-content: center;
   }
 

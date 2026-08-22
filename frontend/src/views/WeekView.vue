@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import WeekNav from '@/components/schedule/WeekNav.vue'
 import WeekGrid from '@/components/schedule/WeekGrid.vue'
+import WeekPicker from '@/components/schedule/WeekPicker.vue'
 import SidePanel from '@/components/schedule/SidePanel.vue'
 import CourseModal from '@/components/schedule/CourseModal.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
@@ -158,10 +159,14 @@ async function exportPng(): Promise<void> {
         <WeekNav v-if="!isMobile" class="reveal" />
         <div v-else class="day-view-m">
           <div class="dv-head reveal">
-            <span class="dv-title num">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" /></svg>
-              {{ dayTitle }}
-            </span>
+            <!-- 周标题：点击弹出周选择器 + 单双周徽章 -->
+            <WeekPicker :current-week="store.weekNumber" @select="store.goToWeek">
+              <span class="dv-title num">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" /></svg>
+                {{ dayTitle }}
+                <span v-if="store.weekNumber !== null" class="dv-week-badge num">{{ store.weekNumber }}周·{{ store.isOdd ? '单' : '双' }}</span>
+              </span>
+            </WeekPicker>
             <button class="dv-today" type="button" @click="goToday">今天</button>
           </div>
 
@@ -294,6 +299,17 @@ async function exportPng(): Promise<void> {
   height: 18px;
   color: var(--color-brand);
   flex: none;
+}
+
+/* 移动端周徽章：「第 N 周 · 单/双」 */
+.dv-week-badge {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-brand);
+  background: var(--color-brand-subtle);
+  border-radius: var(--radius-full);
+  padding: 2px 8px;
+  white-space: nowrap;
 }
 
 .dv-today {

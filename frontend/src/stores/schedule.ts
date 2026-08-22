@@ -283,6 +283,14 @@ export const useScheduleStore = defineStore('schedule', () => {
     void refreshSchedule()
   }
 
+  /** 跳转到指定周（相对今天所在周的天数偏移） */
+  function goToWeek(week: number): void {
+    const base = todayWeekNumber.value
+    if (base === null) return
+    weekOffset.value = week - base
+    void refreshSchedule()
+  }
+
   async function setSemester(id: number): Promise<void> {
     currentSemesterId.value = id
     weekOffset.value = 0
@@ -643,6 +651,7 @@ export const useScheduleStore = defineStore('schedule', () => {
     nextWeek,
     prevWeek,
     goNow,
+    goToWeek,
     setSemester,
     createSemester,
     deleteSemester,
