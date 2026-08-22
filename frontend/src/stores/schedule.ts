@@ -215,6 +215,7 @@ export const useScheduleStore = defineStore('schedule', () => {
       await refreshSchedule()
       await refreshToday()
       await loadMatters()
+      await refreshWeather()
     } catch {
       remote.value = false
     }
