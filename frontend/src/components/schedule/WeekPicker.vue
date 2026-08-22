@@ -9,9 +9,13 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import { calcWeekNumber, formatMonthDay, isOddWeek, parseDate } from '@/utils/week'
 
-const props = withDefaults(defineProps<{ currentWeek?: number | null }>(), {
-  currentWeek: null,
-})
+const props = withDefaults(
+  defineProps<{
+    /** 当前展示周号（null=不在学期内，如假期/未开学） */
+    currentWeek?: number | null
+  }>(),
+  { currentWeek: null },
+)
 
 const emit = defineEmits<{ (e: 'select', week: number): void }>()
 
@@ -88,6 +92,12 @@ function range(w: { monday: Date; sunday: Date }): string {
               <button class="wp-close" type="button" aria-label="关闭" @click="close">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
               </button>
+            </div>
+
+            <!-- 学期外提示：当前展示周不在学期内（假期/未开学） -->
+            <div v-if="currentWeek === null || currentWeek === 0" class="wp-hint">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" /></svg>
+              {{ store.weekNumber === 0 ? '当前展示周在学期开始前（未开学）' : '当前展示周在学期之外（假期），下方为学期内周次' }}
             </div>
 
             <!-- 周列表：桌面两列网格 / 移动单列 -->
@@ -218,6 +228,28 @@ function range(w: { monday: Date; sunday: Date }): string {
 .wp-close svg {
   width: 16px;
   height: 16px;
+}
+
+/* 学期外提示条（当前展示周在假期/未开学） */
+.wp-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin: var(--spacing-sm) var(--spacing-lg) 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--color-warning-bg, #fffbeb);
+  border: 1px solid var(--color-warning-line, #fde68a);
+  color: var(--color-warning-text, #b45309);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.5;
+}
+
+.wp-hint svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
 }
 
 /* ============ 周列表 ============ */
