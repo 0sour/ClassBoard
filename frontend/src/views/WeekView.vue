@@ -10,7 +10,6 @@ import CourseModal from '@/components/schedule/CourseModal.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
 import Skeleton from '@/components/common/Skeleton.vue'
 import { exportElementAsPng } from '@/utils/exportPng'
-import { toMonday } from '@/utils/week'
 import { toast } from '@/utils/ui'
 import type { Course, Weekday } from '@/types'
 
@@ -26,56 +25,24 @@ const exporting = ref(false)
 const createSlot = ref<{ weekday: Weekday; period: number } | null>(null)
 
 // ============================================================
-// 移动端单日视图（方案 B）：一次显示一天课程列表 + 顶部周缩略条
-// dayOffset = 相对今天的天数偏移（0=今天）
+// 移动端单日视图（方案 B）：一次显示一天课程列表 + 顶部 7 格轮盘
+// 数据流：唯一状态 wheelCenter → 派生轮盘 7 格 + 标题 + 课程列表。
+// 高亮格、标题、列表同源，结构上不可能不同步。
 // ============================================================
-const dayOffset = ref(0)
-/** 列表动画方向（next=向右滑入 / prev=向左滑入）与上一个日期 */
-const wheelDir = ref<'next' | 'prev'>('next')
-let dayOffsetPrev = 0
-
 const DAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] as const
 const WEEKDAY_NUM = ['一', '二', '三', '四', '五', '六', '日'] as const
+/** 列表动画方向（切日时按新旧日期先后决定滑入方向） */
+const wheelDir = ref<'next' | 'prev'>('next')
 
 /** 移动端判定（<768px 与全局断点一致） */
 const isMobile = ref(window.innerWidth < 768)
 
 function onResize(): void {
   isMobile.value = window.innerWidth < 768
-  // 移动端轮盘为静态 7 格布局，窗口变化无需重算
+  // 轮盘为静态布局，窗口变化无需重算
 }
 
 window.addEventListener('resize', onResize)
-
-/** 当前展示日 */
-const currentDay = computed(() => {
-  const d = new Date(store.today)
-  d.setDate(d.getDate() + dayOffset.value)
-  return d
-})
-
-/** 单日标题：「周六 · 8月22日」 */
-const dayTitle = computed(() => {
-  const d = currentDay.value
-  return `${DAY_LABELS[d.getDay() === 0 ? 6 : d.getDay() - 1]} · ${d.getMonth() + 1}月${d.getDate()}日`
-})
-
-/** 当前展示日的课程（按节次排序） */
-const dayCourses = computed(() => {
-  const list = store.coursesOfDate(currentDay.value)
-  return [...list].sort((a, b) => a.startPeriod - b.startPeriod)
-})
-
-/** 节次时间（按节次模板） */
-function periodTime(period: number): string {
-  const p = store.periods[period - 1]
-  return p ? `${p.startTime}–${p.endTime}` : ''
-}
-
-function goToday(): void {
-  // 轮盘回今天（中心日期模型：直接重置中心）
-  setWheelCenter(store.today)
-}
 
 /** 两个日期是否为同一天 */
 function isSameDate(a: Date, b: Date): boolean {
@@ -83,19 +50,25 @@ function isSameDate(a: Date, b: Date): boolean {
 }
 
 // ============================================================
-// 轮盘式日期选择（中心日期模型，无像素定位——结构上不可能错位）
-// 固定渲染 7 格，中间格天然即选中格（选中态样式直接标中间格）。
-// 交互：点击任意格 → 该格日期成为新中心，7 格整体重建；
-// 左右滑动 → 按滑动方向步进中心日期。无轨道、无偏移、无换算。
+// 轮盘式日期选择（单一数据源，无像素定位）
+// 固定渲染 7 格，中间格天然即选中格。点击/拖动只改 wheelCenter，
+// 标题与课程列表均由 wheelCenter 派生，永远同步。
 // ============================================================
 const WHEEL_SPAN = 3 // 中心两侧各 3 格 → 共 7 格
 const wheelRef = ref<HTMLElement | null>(null)
 const wheelTrackRef = ref<HTMLElement | null>(null)
-const wheelCenter = ref(new Date(store.today))
+const wheelCenter = ref<Date>(normalizeDay(new Date(store.today)))
 const wheelDragging = ref(false)
-/** 拖动松手后抑制随后的 click（避免与 pointer 命中重复切换中心导致日期跳变） */
+/** 拖动松手后抑制随后的 click（避免 pointer 与 click 双路径重复切换） */
 let suppressWheelClickUntil = 0
-let wheelDrag: { startX: number; dxDate: Date; moved: boolean } | null = null
+let wheelDrag: { startX: number; dxDate: Date; moved: boolean; lastStep: number } | null = null
+
+/** 归零时分秒，避免日期比较误判 */
+function normalizeDay(d: Date): Date {
+  const nd = new Date(d)
+  nd.setHours(0, 0, 0, 0)
+  return nd
+}
 
 /** 7 格日期序列（索引 0..6，中间=3） */
 const wheelDates = computed(() => {
@@ -108,34 +81,46 @@ const wheelDates = computed(() => {
   return list
 })
 
-/** 提交某格为展示日 */
-function commitWheelIdx(idx: number): void {
-  const item = wheelDates.value[idx]
-  if (!item) return
-  const off = Math.round((item.date.getTime() - toMonday(store.today).getTime()) / 86400000)
-  if (off !== dayOffset.value) {
-    wheelDir.value = off > dayOffsetPrev ? 'next' : 'prev'
-    dayOffsetPrev = off
-    dayOffset.value = off
+/** 当前选中日期（中间格）——标题与课程列表的唯一来源 */
+const activeDay = computed(() => wheelDates.value[WHEEL_SPAN].date)
+
+/** 单日标题：「周三 · 8月26日」 */
+const dayTitle = computed(() => {
+  const d = activeDay.value
+  return `${DAY_LABELS[d.getDay() === 0 ? 6 : d.getDay() - 1]} · ${d.getMonth() + 1}月${d.getDate()}日`
+})
+
+/** 当前展示日的课程（按节次排序） */
+const dayCourses = computed(() => {
+  const list = store.coursesOfDate(activeDay.value)
+  return [...list].sort((a, b) => a.startPeriod - b.startPeriod)
+})
+
+/** 节次时间（按节次模板） */
+function periodTime(period: number): string {
+  const p = store.periods[period - 1]
+  return p ? `${p.startTime}–${p.endTime}` : ''
+}
+
+/** 以指定日期为新的中心（单一入口：所有切日都走这里） */
+function setWheelCenter(date: Date): void {
+  const target = normalizeDay(date)
+  const prev = wheelCenter.value
+  if (target.getTime() !== prev.getTime()) {
+    wheelDir.value = target.getTime() > prev.getTime() ? 'next' : 'prev'
+    wheelCenter.value = target
   }
 }
 
-/** 以指定日期为新的中心（并提交） */
-function setWheelCenter(date: Date): void {
-  const d = new Date(date)
-  d.setHours(0, 0, 0, 0)
-  const cur = new Date(wheelCenter.value)
-  cur.setHours(0, 0, 0, 0)
-  if (d.getTime() !== cur.getTime()) {
-    wheelCenter.value = d
-  }
-  commitWheelIdx(WHEEL_SPAN)
+function goToday(): void {
+  // 轮盘回今天（单一入口）
+  setWheelCenter(store.today)
 }
 
 /** 指针按下 */
 function onWheelDown(e: PointerEvent): void {
   if (e.pointerType === 'mouse' && e.button !== 0) return
-  wheelDrag = { startX: e.clientX, dxDate: new Date(wheelCenter.value), moved: false }
+  wheelDrag = { startX: e.clientX, dxDate: new Date(wheelCenter.value), moved: false, lastStep: 0 }
   wheelDragging.value = true
   const view = wheelRef.value
   view?.setPointerCapture?.(e.pointerId)
@@ -147,51 +132,47 @@ function onWheelMove(e: PointerEvent): void {
   const dx = e.clientX - wheelDrag.startX
   if (Math.abs(dx) > 4) wheelDrag.moved = true
   const step = Math.round(dx / 56)
-  const base = new Date(wheelDrag.dxDate)
-  base.setDate(base.getDate() + step)
-  setWheelCenter(base)
+  if (step !== wheelDrag.lastStep) {
+    wheelDrag.lastStep = step
+    const base = new Date(wheelDrag.dxDate)
+    base.setDate(base.getDate() + step)
+    setWheelCenter(base)
+  }
 }
 
 /** 指针松开 */
 function onWheelUp(e: PointerEvent): void {
   if (!wheelDrag) return
   const wasDrag = wheelDrag.moved
-  const dragStart = wheelDrag.startX
-  const dragStartDate = wheelDrag.dxDate
+  const startX = wheelDrag.startX
+  const startDate = wheelDrag.dxDate
   wheelDrag = null
   window.setTimeout(() => {
     wheelDragging.value = false
   }, 200)
   if (wasDrag) {
-    // 拖动过：抑制紧随的 click；最终中心 = 起点日期 + 整格位移
+    // 拖动结束：以起点日期 + 整格位移为最终中心；抑制随后的 click
     suppressWheelClickUntil = Date.now() + 350
-    const step = Math.round((e.clientX - dragStart) / 56)
-    const final = new Date(dragStartDate)
+    const step = Math.round((e.clientX - startX) / 56)
+    const final = new Date(startDate)
     final.setDate(final.getDate() + step)
     setWheelCenter(final)
     return
   }
-  // 点击：命中 7 格中的某格 → 成为新中心
+  // 点击：命中 7 格中的某格 → 该格日期成为新中心
   const view = wheelRef.value
   if (!view) return
   const rect = view.getBoundingClientRect()
   const clickLocal = e.clientX - rect.left
-  let hit = -1
   const track = wheelTrackRef.value
   if (!track) return
+  let hit = -1
   Array.from(track.children).forEach((el, i) => {
     const r = (el as HTMLElement).getBoundingClientRect()
     if (clickLocal >= r.left - rect.left && clickLocal <= r.right - rect.left) hit = i
   })
   if (hit < 0) return
-  if (hit === WHEEL_SPAN) {
-    commitWheelIdx(hit)
-    return
-  }
-  const diff = hit - WHEEL_SPAN
-  const cur = new Date(wheelCenter.value)
-  cur.setDate(cur.getDate() + diff)
-  setWheelCenter(cur)
+  setWheelCenter(wheelDates.value[hit].date)
 }
 
 function onWheelCancel(): void {
@@ -199,23 +180,16 @@ function onWheelCancel(): void {
   wheelDragging.value = false
 }
 
-/** 点击格子（无障碍 / 拖动后 350ms 内抑制，避免 pointer 已切换再二次切换） */
+/** 点击格子（无障碍 / 拖动后 350ms 内抑制） */
 function onWheelPick(i: number): void {
   if (Date.now() < suppressWheelClickUntil) return
-  if (i === WHEEL_SPAN) {
-    commitWheelIdx(i)
-    return
-  }
-  const diff = i - WHEEL_SPAN
-  const cur = new Date(wheelCenter.value)
-  cur.setDate(cur.getDate() + diff)
-  setWheelCenter(cur)
+  setWheelCenter(wheelDates.value[i].date)
 }
 
 /** 移动端轮盘初始化 */
 onMounted(() => {
   if (!isMobile.value) return
-  commitWheelIdx(WHEEL_SPAN)
+  // 初始即今天，无额外提交
 })
 
 onBeforeUnmount(() => {
@@ -328,7 +302,7 @@ async function exportPng(): Promise<void> {
               mode="out-in"
               :duration="200"
             >
-              <div :key="currentDay.getTime()" class="dv-list__inner">
+              <div :key="activeDay.getTime()" class="dv-list__inner">
                 <button
                   v-for="c in dayCourses"
                   :key="c.id"
