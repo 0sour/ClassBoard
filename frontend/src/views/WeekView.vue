@@ -276,29 +276,28 @@ async function exportPng(): Promise<void> {
               @pointerup="onWheelUp"
               @pointercancel="onWheelCancel"
             >
-              <Transition
-                :name="wheelDir === 'next' ? 'dv-wheel-next' : 'dv-wheel-prev'"
-                :css="!wheelDragging"
-                mode="out-in"
-                :duration="150"
+              <!-- key 变化重播进入动画（无 leave 残留）；拖动中不加动画类避免高频触发 -->
+              <div
+                ref="wheelTrackRef"
+                :key="wheelCenter.getTime()"
+                class="dv-wheel__track"
+                :class="!wheelDragging ? (wheelDir === 'next' ? 'slide-next' : 'slide-prev') : undefined"
               >
-                <div ref="wheelTrackRef" :key="wheelCenter.getTime()" class="dv-wheel__track">
-                  <button
-                    v-for="(d, i) in wheelDates"
-                    :key="d.date.getTime()"
-                    class="dv-wheel__day"
-                    :class="{
-                      active: i === WHEEL_SPAN,
-                      today: isSameDate(d.date, store.today),
-                    }"
-                    type="button"
-                    @click="onWheelPick(i)"
-                  >
-                    <span>{{ d.wd }}</span>
-                    <b>{{ d.date.getDate() }}</b>
-                  </button>
-                </div>
-              </Transition>
+                <button
+                  v-for="(d, i) in wheelDates"
+                  :key="d.date.getTime()"
+                  class="dv-wheel__day"
+                  :class="{
+                    active: i === WHEEL_SPAN,
+                    today: isSameDate(d.date, store.today),
+                  }"
+                  type="button"
+                  @click="onWheelPick(i)"
+                >
+                  <span>{{ d.wd }}</span>
+                  <b>{{ d.date.getDate() }}</b>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -527,34 +526,36 @@ async function exportPng(): Promise<void> {
   font-weight: var(--font-weight-bold);
 }
 
-/* 轮盘切日动画：整体按方向滑入/滑出（150ms，与列表动画同节奏） */
-.dv-wheel-next-enter-active,
-.dv-wheel-next-leave-active,
-.dv-wheel-prev-enter-active,
-.dv-wheel-prev-leave-active {
-  transition: opacity 150ms ease-out, transform 150ms ease-out;
+/* 轮盘切日动画：key 变化重播进入动画（无 leave 生命周期，避免拖动后残留透明度归零）
+   class 绑定 .slide-next / .slide-prev，动画 150ms ease-out */
+.dv-wheel__track.slide-next {
+  animation: dw-next 150ms ease-out;
 }
 
-/* 左滑（下一日）：新轨道从右滑入 */
-.dv-wheel-next-enter-from {
-  opacity: 0;
-  transform: translateX(20px);
+.dv-wheel__track.slide-prev {
+  animation: dw-prev 150ms ease-out;
 }
 
-.dv-wheel-next-leave-to {
-  opacity: 0;
-  transform: translateX(-20px);
+@keyframes dw-next {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
-/* 右滑（上一日）：新轨道从左滑入 */
-.dv-wheel-prev-enter-from {
-  opacity: 0;
-  transform: translateX(-20px);
-}
-
-.dv-wheel-prev-leave-to {
-  opacity: 0;
-  transform: translateX(20px);
+@keyframes dw-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 /* 单日课程列表：全宽卡片 */
