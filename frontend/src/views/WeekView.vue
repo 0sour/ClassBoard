@@ -59,13 +59,12 @@ function isSameDate(a: Date, b: Date): boolean {
 const WHEEL_ITEM_W = 56 // 格宽（CSS 固定）
 const WHEEL_INDEX = 20 // 中心格索引（41 格：0..40，长序列供惯性滚动）
 const wheelRef = ref<HTMLElement | null>(null)
-const wheelTrackRef = ref<HTMLElement | null>(null)
 const wheelCenter = ref<Date>(normalizeDay(new Date(store.today)))
 const wheelDragging = ref(false)
 /** 程序化滚动标志（抑制 scroll 事件误更新，避免回跳） */
 let wheelProgrammatic = false
-let wheelScrollRaf = 0
-let wheelScrollTimer: number | null = null
+/** 滚动停止后吸附换日的调度器 */
+let wheelSnapTimer: number | null = null
 
 /** 归零时分秒，避免日期比较误判 */
 function normalizeDay(d: Date): Date {
@@ -106,12 +105,9 @@ function periodTime(period: number): string {
   return p ? `${p.startTime}–${p.endTime}` : ''
 }
 
-/** 视口居中时第 idx 格所需的 scrollLeft（含两侧 padding 让首尾可居中） */
+/** 视口居中时第 idx 格所需的 scrollLeft（轨道 padding 恰好抵消 28px 偏移 → 即 idx*56） */
 function wheelScrollLeftOf(idx: number): number {
-  const view = wheelRef.value
-  if (!view) return 0
-  const pad = (view.clientWidth - WHEEL_ITEM_W) / 2
-  return idx * WHEEL_ITEM_W - pad
+  return idx * WHEEL_ITEM_W
 }
 
 /** 初始化/重建后：让中心格（索引 WHEEL_INDEX）滚到视口中央（无动画） */
@@ -125,56 +121,13 @@ function wheelAlignCenter(): void {
   }, 60)
 }
 
-/** 滚动事件（rAF 节流）：只读位置 → 更新选中；滚到边缘则重建序列并补偿滚动 */
+/** 滚动事件：不实时改日期（避免滚动中原地换字闪现），调度停止后吸附换日 */
 function onWheelScroll(): void {
   if (wheelProgrammatic) return
-  cancelAnimationFrame(wheelScrollRaf)
-  wheelScrollRaf = requestAnimationFrame(() => {
-    const view = wheelRef.value
-    if (!view) return
-    const pad = (view.clientWidth - WHEEL_ITEM_W) / 2
-    const idx = Math.round((view.scrollLeft + pad) / WHEEL_ITEM_W)
-    const clamped = Math.min(wheelDates.value.length - 1, Math.max(0, idx))
-    // 实时更新选中（中心格）
-    const item = wheelDates.value[clamped]
-    if (item) {
-      const off = Math.round((item.date.getTime() - toMonday(store.today).getTime()) / 86400000)
-      if (off !== dayOffsetPrev) {
-        wheelDir.value = off > dayOffsetPrev ? 'next' : 'prev'
-        dayOffsetPrev = off
-        wheelCenter.value = normalizeDay(item.date)
-      }
-    }
-    // 滚出可见范围（边缘）：重建序列，补偿滚动位置，保持视觉连续
-    if (idx <= 0 || idx >= wheelDates.value.length - 1) {
-      const target = wheelDates.value[clamped]
-      if (target) {
-        wheelCenter.value = normalizeDay(target.date)
-        // 重建后中心格应为 WHEEL_INDEX：滚动补偿
-        wheelProgrammatic = true
-        view.scrollLeft = wheelScrollLeftOf(WHEEL_INDEX) + (clamped - WHEEL_INDEX) * WHEEL_ITEM_W
-        window.setTimeout(() => {
-          wheelProgrammatic = false
-        }, 60)
-      }
-    }
-  })
-}
-
-/** 滚动停止：吸附到最近整格（若未到位，补一次 scrollTo） */
-function onWheelScrollEnd(): void {
-  const view = wheelRef.value
-  if (!view) return
-  const pad = (view.clientWidth - WHEEL_ITEM_W) / 2
-  const idx = Math.round((view.scrollLeft + pad) / WHEEL_ITEM_W)
-  const target = wheelScrollLeftOf(idx)
-  if (Math.abs(view.scrollLeft - target) > 2) {
-    wheelProgrammatic = true
-    view.scrollTo({ left: target, behavior: 'smooth' })
-    window.setTimeout(() => {
-      wheelProgrammatic = false
-    }, 120)
-  }
+  if (wheelSnapTimer !== null) window.clearTimeout(wheelSnapTimer)
+  wheelSnapTimer = window.setTimeout(() => {
+    void snapAndSettle()
+  }, 220)
 }
 
 /** 指针按下 */
@@ -183,26 +136,68 @@ function onWheelDown(e: PointerEvent): void {
   wheelDragging.value = true
 }
 
-/** 指针松开 */
+/** 指针松开：提前调度吸附换日 */
 function onWheelUp(): void {
   wheelDragging.value = false
-  onWheelScrollEnd()
+  if (wheelSnapTimer !== null) window.clearTimeout(wheelSnapTimer)
+  wheelSnapTimer = window.setTimeout(() => {
+    void snapAndSettle()
+  }, 40)
 }
 
 function onWheelCancel(): void {
   wheelDragging.value = false
 }
 
-/** 点击格子（无障碍/键盘） */
+/** 吸附到最近整格；对齐后把中心日期换为该格，并把滚动位置归一化回中心格。
+ *  视觉连续原理：换日仅重建序列（格子数字变化），滚动位置 = WHEEL_INDEX×56，
+ *  该位置的格子承载的正是刚选中的日期 → 无跳变、无闪现。 */
+async function snapAndSettle(): Promise<void> {
+  const view = wheelRef.value
+  if (!view) return
+  const idx = Math.round(view.scrollLeft / WHEEL_ITEM_W)
+  const target = idx * WHEEL_ITEM_W
+  // 未对齐整格：平滑吸附（scroll 会再触发，重复调度）
+  if (Math.abs(view.scrollLeft - target) > 2) {
+    wheelProgrammatic = true
+    view.scrollTo({ left: target, behavior: 'smooth' })
+    window.setTimeout(() => {
+      wheelProgrammatic = false
+      void snapAndSettle()
+    }, 160)
+    return
+  }
+  // 已对齐：以 idx 格日期为新中心
+  const item = wheelDates.value[idx]
+  if (!item) return
+  const off = Math.round((item.date.getTime() - toMonday(store.today).getTime()) / 86400000)
+  const diff = idx - WHEEL_INDEX
+  if (diff !== 0) {
+    if (off !== dayOffsetPrev) {
+      wheelDir.value = off > dayOffsetPrev ? 'next' : 'prev'
+      dayOffsetPrev = off
+    }
+    // 换中心日期（序列重建），滚动位置归一化回中心格 → 该格显示的就是刚选的日期
+    wheelCenter.value = normalizeDay(item.date)
+    view.scrollLeft = WHEEL_INDEX * WHEEL_ITEM_W
+    wheelProgrammatic = true
+    window.setTimeout(() => {
+      wheelProgrammatic = false
+    }, 60)
+  }
+}
+
+/** 点击格子：平滑滚到中央（scrollTo 纯数学换算，与吸附一致；滚动停止后 snapAndSettle 换日） */
 function onWheelPick(i: number): void {
   if (i === WHEEL_INDEX) return
   const view = wheelRef.value
   if (!view) return
-  // 用格子元素 scrollIntoView 让浏览器 snap 吸附到中心
-  const el = wheelTrackRef.value?.children[i] as HTMLElement | undefined
-  if (el) {
-    el.scrollIntoView({ behavior: 'smooth', inline: 'center' })
-  }
+  wheelProgrammatic = true
+  view.scrollTo({ left: i * WHEEL_ITEM_W, behavior: 'smooth' })
+  window.setTimeout(() => {
+    wheelProgrammatic = false
+    void snapAndSettle()
+  }, 300)
 }
 
 function goToday(): void {
@@ -221,8 +216,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  cancelAnimationFrame(wheelScrollRaf)
-  if (wheelScrollTimer !== null) window.clearTimeout(wheelScrollTimer)
+  if (wheelSnapTimer !== null) window.clearTimeout(wheelSnapTimer)
   window.removeEventListener('resize', onResize)
 })
 
@@ -295,8 +289,10 @@ async function exportPng(): Promise<void> {
             <button class="dv-today" type="button" @click="goToday">今天</button>
           </div>
 
-          <!-- 轮盘式日期选择：原生横向滚动 + scroll-snap（滚动/惯性/吸附由浏览器处理） -->
+          <!-- 轮盘式日期选择：原生横向滚动；指示器固定在容器（不滚动） -->
           <div class="dv-wheel-wrap reveal">
+            <!-- 常驻选中指示器：固定在 wrap（滚动容器外），轨道从框内流过 -->
+            <div class="dv-wheel__indicator"></div>
             <div
               ref="wheelRef"
               class="dv-wheel"
@@ -306,7 +302,7 @@ async function exportPng(): Promise<void> {
               @pointerup="onWheelUp"
               @pointercancel="onWheelCancel"
             >
-              <div ref="wheelTrackRef" class="dv-wheel__track">
+              <div class="dv-wheel__track">
                 <button
                   v-for="(d, i) in wheelDates"
                   :key="i"
@@ -322,8 +318,6 @@ async function exportPng(): Promise<void> {
                   <b>{{ d.date.getDate() }}</b>
                 </button>
               </div>
-              <!-- 常驻选中指示器：固定视口中央，轨道从框内流过 -->
-              <div class="dv-wheel__indicator"></div>
             </div>
           </div>
 
@@ -485,14 +479,14 @@ async function exportPng(): Promise<void> {
   padding: 4px 0;
 }
 
-/* 窗口：原生横向滚动容器（滚动/惯性/吸附全由浏览器处理） */
+/* 窗口：原生横向滚动容器；吸附由 JS snapAndSettle 负责（不开 scroll-snap，
+   避免浏览器与 JS 双重吸附打架导致回弹） */
 .dv-wheel {
   position: relative;
   height: 52px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
-  scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x;
   user-select: none;
@@ -527,7 +521,6 @@ async function exportPng(): Promise<void> {
   cursor: pointer;
   font-family: inherit;
   color: var(--color-text-secondary);
-  scroll-snap-align: center;
   transition: background-color var(--motion-duration-fast) var(--motion-easing-standard),
     color var(--motion-duration-fast) var(--motion-easing-standard);
 }
@@ -557,14 +550,14 @@ async function exportPng(): Promise<void> {
   font-weight: var(--font-weight-bold);
 }
 
-/* 常驻选中指示器：固定视口中央，轨道从框内流过 */
+/* 常驻选中指示器：固定在 wrap（滚动容器外），对准滚动容器视口中央 */
 .dv-wheel__indicator {
   position: absolute;
   left: 50%;
-  top: 0;
+  top: 4px; /* 对齐 .dv-wheel 滚动容器（wrap 上下 padding 4px） */
   transform: translateX(-50%);
   width: 56px;
-  height: 100%;
+  height: 52px;
   border: 1.5px solid var(--color-brand);
   border-radius: var(--radius-lg);
   background: transparent;
