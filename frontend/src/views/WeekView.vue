@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import WeekNav from '@/components/schedule/WeekNav.vue'
@@ -39,6 +39,12 @@ const isMobile = ref(window.innerWidth < 768)
 
 function onResize(): void {
   isMobile.value = window.innerWidth < 768
+  // 移动端轮盘：窗口尺寸变化后重算格子宽与 padding，保持选中日居中
+  if (isMobile.value) {
+    syncWheelMetrics()
+    const view = wheelRef.value
+    if (view) view.scrollLeft = WHEEL_HALF * wheelItemW.value - wheelPad.value
+  }
 }
 
 window.addEventListener('resize', onResize)
@@ -48,25 +54,6 @@ const currentDay = computed(() => {
   const d = new Date(store.today)
   d.setDate(d.getDate() + dayOffset.value)
   return d
-})
-
-/** 当前展示日所在周的周一 */
-const weekMonday = computed(() => {
-  const d = new Date(currentDay.value)
-  const diff = d.getDay() === 0 ? -6 : 1 - d.getDay()
-  d.setDate(d.getDate() + diff)
-  return d
-})
-
-/** 周缩略条 7 天列表（weekday 1-7 → 日期） */
-const weekDays = computed(() => {
-  const days: { date: Date; label: string; wd: string }[] = []
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(weekMonday.value)
-    d.setDate(weekMonday.value.getDate() + i)
-    days.push({ date: d, label: `${d.getMonth() + 1}/${d.getDate()}`, wd: WEEKDAY_NUM[i] })
-  }
-  return days
 })
 
 /** 单日标题：「周六 · 8月22日」 */
@@ -87,19 +74,103 @@ function periodTime(period: number): string {
   return p ? `${p.startTime}–${p.endTime}` : ''
 }
 
-function selectDay(i: number): void {
-  dayOffset.value = weekDays.value[i].date.getTime() - toMonday(store.today).getTime()
-  dayOffset.value = Math.round(dayOffset.value / 86400000)
-}
-
 function goToday(): void {
   dayOffset.value = 0
+  // 轮盘滑回今天（中间格）
+  void scrollWheelToIndex(0)
 }
 
 /** 两个日期是否为同一天 */
 function isSameDate(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 }
+
+// ============================================================
+// 轮盘式日期选择：选中日恒居中，左右滑动切日，中间常驻指示器
+// 序列以 centerDate 为中心 ±21 天；滑到边缘自动重建
+// ============================================================
+const WHEEL_HALF = 21 // 单侧天数
+const wheelRef = ref<HTMLElement | null>(null)
+const wheelCenter = ref(new Date(store.today))
+const wheelPad = ref(0)
+const wheelItemW = ref(64)
+
+/** 轮盘日期序列（含左右哨兵） */
+const wheelDates = computed(() => {
+  const list: { date: Date; wd: string }[] = []
+  for (let i = -WHEEL_HALF; i <= WHEEL_HALF; i++) {
+    const d = new Date(wheelCenter.value)
+    d.setDate(wheelCenter.value.getDate() + i)
+    list.push({ date: d, wd: WEEKDAY_NUM[(d.getDay() + 6) % 7] })
+  }
+  return list
+})
+
+/** 计算视口 padding 与格子宽（让首尾格也能居中） */
+function syncWheelMetrics(): void {
+  const view = wheelRef.value
+  if (!view) return
+  const first = view.querySelector('.dv-wheel__day') as HTMLElement | null
+  if (first) wheelItemW.value = first.offsetWidth || 64
+  wheelPad.value = Math.max(0, (view.clientWidth - wheelItemW.value) / 2)
+}
+
+/** 初始定位到中心格（无动画） */
+function initWheelScroll(): void {
+  const view = wheelRef.value
+  if (!view) return
+  syncWheelMetrics()
+  view.scrollLeft = WHEEL_HALF * wheelItemW.value - wheelPad.value
+}
+
+let wheelRaf = 0
+let wheelTicking = false
+
+/** 滚动中：中心格 → 更新展示日；滑到边缘重建序列 */
+function onWheelScroll(): void {
+  if (wheelTicking) return
+  wheelTicking = true
+  wheelRaf = requestAnimationFrame(() => {
+    wheelTicking = false
+    const view = wheelRef.value
+    if (!view) return
+    const idx = Math.round((view.scrollLeft + wheelPad.value) / wheelItemW.value)
+    const item = wheelDates.value[idx]
+    if (!item) return
+    const ms = item.date.getTime() - toMonday(store.today).getTime()
+    const off = Math.round(ms / 86400000)
+    if (off !== dayOffset.value) dayOffset.value = off
+    // 滑到边缘：以当前日为中心重建
+    if (idx <= 4 || idx >= wheelDates.value.length - 5) {
+      wheelCenter.value = new Date(item.date)
+      initWheelScroll()
+    }
+  })
+}
+
+/** 滚动视口使第 i 格居中（点按 / 回到今天） */
+function scrollWheelToIndex(i: number): void {
+  const view = wheelRef.value
+  if (!view) return
+  view.scrollTo({
+    left: i * wheelItemW.value - wheelPad.value,
+    behavior: 'smooth',
+  })
+  // scroll 事件会同步 dayOffset
+}
+
+/** 移动端轮盘初始化（桌面无轮盘，仅移动端执行） */
+onMounted(() => {
+  if (!isMobile.value) return
+  void nextTick(() => {
+    initWheelScroll()
+  })
+})
+
+onBeforeUnmount(() => {
+  cancelAnimationFrame(wheelRaf)
+  window.removeEventListener('resize', onResize)
+})
 
 function openCourse(course: Course): void {
   selected.value = course
@@ -170,23 +241,28 @@ async function exportPng(): Promise<void> {
             <button class="dv-today" type="button" @click="goToday">今天</button>
           </div>
 
-          <!-- 周缩略条：7 天圆点跳转 -->
-          <div class="dv-week reveal">
-            <button
-              v-for="(d, i) in weekDays"
-              :key="i"
-              class="dv-day"
-              :class="{
-                today: isSameDate(d.date, store.today),
-                active: isSameDate(d.date, currentDay),
-              }"
-              type="button"
-              @click="selectDay(i)"
+          <!-- 轮盘式日期选择：选中日居中，左右滑动切日，中间常驻指示器 -->
+          <div class="dv-wheel-wrap reveal">
+            <div
+              ref="wheelRef"
+              class="dv-wheel"
+              :style="{ '--wheel-pad': wheelPad + 'px' }"
+              @scroll.passive="onWheelScroll"
             >
-              <span>{{ d.wd }}</span>
-              <b>{{ d.date.getDate() }}</b>
-              <i class="dv-dot"></i>
-            </button>
+              <button
+                v-for="(d, i) in wheelDates"
+                :key="d.date.getTime()"
+                class="dv-wheel__day"
+                :class="{ active: isSameDate(d.date, currentDay), today: isSameDate(d.date, store.today) }"
+                type="button"
+                @click="scrollWheelToIndex(i)"
+              >
+                <span>{{ d.wd }}</span>
+                <b>{{ d.date.getDate() }}</b>
+              </button>
+            </div>
+            <!-- 常驻选中指示器 -->
+            <div class="dv-wheel__indicator"></div>
           </div>
 
           <!-- 单日课程列表（全宽卡片，无截断） -->
@@ -332,70 +408,88 @@ async function exportPng(): Promise<void> {
   background: var(--color-brand-hover);
 }
 
-/* 周缩略条：7 天均分 */
-.dv-week {
-  display: flex;
-  gap: var(--spacing-xs);
+/* ============ 轮盘式日期选择 ============ */
+.dv-wheel-wrap {
+  position: relative;
   margin-bottom: var(--spacing-lg);
+  padding: 4px 0;
 }
 
-.dv-day {
-  flex: 1;
+/* 滚动容器：左右 padding 让首尾格也能居中 */
+.dv-wheel {
+  display: flex;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 0 var(--wheel-pad);
+  scroll-snap-type: x mandatory;
+}
+
+.dv-wheel::-webkit-scrollbar {
+  display: none;
+}
+
+.dv-wheel__day {
+  flex: none;
+  scroll-snap-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 6px 0 5px;
+  width: 56px;
+  padding: 7px 0 6px;
   border: none;
   border-radius: var(--radius-md);
   background: none;
   cursor: pointer;
   font-family: inherit;
-  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard);
+  color: var(--color-text-secondary);
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
-.dv-day span {
+.dv-wheel__day span {
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
 }
 
-.dv-day b {
+.dv-wheel__day b {
   font-size: var(--font-size-md);
-  color: var(--color-text-body);
   font-weight: var(--font-weight-medium);
-}
-
-.dv-day .dv-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--color-brand);
-  opacity: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 今天：品牌色 */
-.dv-day.today b {
+.dv-wheel__day.today b {
   color: var(--color-brand);
   font-weight: var(--font-weight-bold);
 }
 
-.dv-day.today .dv-dot {
-  opacity: 1;
+/* 常驻选中指示器：固定中央胶囊底框 */
+.dv-wheel__indicator {
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  transform: translateX(-50%);
+  width: 56px;
+  height: 44px;
+  border: 1.5px solid var(--color-brand);
+  border-radius: var(--radius-lg);
+  background: var(--color-brand-subtle);
+  pointer-events: none;
+  z-index: 1;
 }
 
-/* 选中日：品牌实底 */
-.dv-day.active {
-  background: var(--color-brand);
+/* 选中格文字压在指示器上方 */
+.dv-wheel__day {
+  position: relative;
+  z-index: 2;
 }
 
-.dv-day.active span,
-.dv-day.active b {
-  color: var(--color-white);
-}
-
-.dv-day.active .dv-dot {
-  background: var(--color-white);
-  opacity: 1;
+.dv-wheel__day.active b,
+.dv-wheel__day.active span {
+  color: var(--color-brand);
+  font-weight: var(--font-weight-bold);
 }
 
 /* 单日课程列表：全宽卡片 */
