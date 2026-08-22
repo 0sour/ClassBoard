@@ -54,14 +54,18 @@ function isSameDate(a: Date, b: Date): boolean {
 // 固定渲染 7 格，中间格天然即选中格。点击/拖动只改 wheelCenter，
 // 标题与课程列表均由 wheelCenter 派生，永远同步。
 // ============================================================
-const WHEEL_SPAN = 3 // 中心两侧各 3 格 → 共 7 格
+const WHEEL_SPAN = 20 // 单侧格数 → 共 41 格（中心恒为索引 WHEEL_SPAN，靠 translateX 定位）
+const WHEEL_ITEM_W = 56
 const wheelRef = ref<HTMLElement | null>(null)
 const wheelTrackRef = ref<HTMLElement | null>(null)
 const wheelCenter = ref<Date>(normalizeDay(new Date(store.today)))
+/** 轨道 translateX（px）：中心索引格永远在视口中央，日期变化只换数字不跳位 */
+const wheelShift = ref(0)
 const wheelDragging = ref(false)
-/** 拖动松手后抑制随后的 click（避免 pointer 与 click 双路径重复切换） */
+/** 拖动松手后抑制随后的 click */
 let suppressWheelClickUntil = 0
-let wheelDrag: { startX: number; dxDate: Date; moved: boolean; lastStep: number } | null = null
+let wheelDrag: { startX: number; dxDate: Date; lastStep: number } | null = null
+let wheelShiftAnim = 0
 
 /** 归零时分秒，避免日期比较误判 */
 function normalizeDay(d: Date): Date {
@@ -70,7 +74,7 @@ function normalizeDay(d: Date): Date {
   return nd
 }
 
-/** 7 格日期序列（索引 0..6，中间=3） */
+/** 7 格日期序列（索引 0..6，中间=WHEEL_SPAN）——视觉上只有中央 7 格可见 */
 const wheelDates = computed(() => {
   const list: { date: Date; wd: string }[] = []
   for (let i = -WHEEL_SPAN; i <= WHEEL_SPAN; i++) {
@@ -81,7 +85,15 @@ const wheelDates = computed(() => {
   return list
 })
 
-/** 当前选中日期（中间格）——标题与课程列表的唯一来源 */
+/** 轨道平移量：让中央格（索引 WHEEL_SPAN）始终对齐视口中央 */
+const wheelTrackTransform = computed(() => {
+  const view = wheelRef.value
+  if (!view) return 'translateX(0px)'
+  const centerX = view.clientWidth / 2 - WHEEL_ITEM_W / 2 - WHEEL_SPAN * WHEEL_ITEM_W
+  return `translateX(${centerX + wheelShift.value}px)`
+})
+
+/** 当前选中日期（中央格）——标题与课程列表的唯一来源 */
 const activeDay = computed(() => wheelDates.value[WHEEL_SPAN].date)
 
 /** 单日标题：「周三 · 8月26日」 */
@@ -102,7 +114,7 @@ function periodTime(period: number): string {
   return p ? `${p.startTime}–${p.endTime}` : ''
 }
 
-/** 以指定日期为新的中心（单一入口：所有切日都走这里） */
+/** 以指定日期为新的中心（单一入口） */
 function setWheelCenter(date: Date): void {
   const target = normalizeDay(date)
   const prev = wheelCenter.value
@@ -113,25 +125,45 @@ function setWheelCenter(date: Date): void {
 }
 
 function goToday(): void {
-  // 轮盘回今天（单一入口）
+  // 轮盘回今天：中心切回 + 位移动画归零
   setWheelCenter(store.today)
+  animateShiftTo(0)
+}
+
+/** rAF 缓动把 wheelShift 平滑过渡到目标（松手吸附/点击归位） */
+function animateShiftTo(target: number, duration = 220): void {
+  cancelAnimationFrame(wheelShiftAnim)
+  const from = wheelShift.value
+  if (Math.abs(target - from) < 0.5) {
+    wheelShift.value = target
+    return
+  }
+  const t0 = performance.now()
+  const tick = (now: number): void => {
+    const p = Math.min(1, (now - t0) / duration)
+    const e = 1 - (1 - p) * (1 - p) * (1 - p)
+    wheelShift.value = from + (target - from) * e
+    if (p < 1) wheelShiftAnim = requestAnimationFrame(tick)
+  }
+  wheelShiftAnim = requestAnimationFrame(tick)
 }
 
 /** 指针按下 */
 function onWheelDown(e: PointerEvent): void {
   if (e.pointerType === 'mouse' && e.button !== 0) return
-  wheelDrag = { startX: e.clientX, dxDate: new Date(wheelCenter.value), moved: false, lastStep: 0 }
+  cancelAnimationFrame(wheelShiftAnim)
+  wheelDrag = { startX: e.clientX, dxDate: new Date(wheelCenter.value), lastStep: 0 }
   wheelDragging.value = true
   const view = wheelRef.value
   view?.setPointerCapture?.(e.pointerId)
 }
 
-/** 指针移动：按滑过的格数切换中心（每格 56px 一格；右拖=向过去，左拖=向未来） */
+/** 指针移动：轨道跟手平移，跨 56px 换一格中心（位置不跳变，只换数字） */
 function onWheelMove(e: PointerEvent): void {
   if (!wheelDrag) return
   const dx = e.clientX - wheelDrag.startX
-  if (Math.abs(dx) > 4) wheelDrag.moved = true
-  const step = -Math.round(dx / 56)
+  wheelShift.value = dx
+  const step = -Math.round(dx / WHEEL_ITEM_W)
   if (step !== wheelDrag.lastStep) {
     wheelDrag.lastStep = step
     const base = new Date(wheelDrag.dxDate)
@@ -140,50 +172,54 @@ function onWheelMove(e: PointerEvent): void {
   }
 }
 
-/** 指针松开 */
+/** 指针松开：吸附最近整格，位移动画归零 */
 function onWheelUp(e: PointerEvent): void {
   if (!wheelDrag) return
-  const wasDrag = wheelDrag.moved
   const startX = wheelDrag.startX
   const startDate = wheelDrag.dxDate
   wheelDrag = null
   window.setTimeout(() => {
     wheelDragging.value = false
-  }, 200)
-  if (wasDrag) {
-    // 拖动结束：以起点日期 + 整格位移为最终中心；抑制随后的 click
-    suppressWheelClickUntil = Date.now() + 350
-    const step = -Math.round((e.clientX - startX) / 56)
+  }, 120)
+  suppressWheelClickUntil = Date.now() + 350
+  const dx = e.clientX - startX
+  const step = -Math.round(dx / WHEEL_ITEM_W)
+  if (Math.abs(dx) > 4) {
+    // 拖动：最终中心 = 起点 + 整格步数；位移归零（吸附）
     const final = new Date(startDate)
     final.setDate(final.getDate() + step)
     setWheelCenter(final)
-    return
+  } else {
+    // 点击：命中格 → 该格日期成为新中心
+    const view = wheelRef.value
+    const rect = view?.getBoundingClientRect()
+    const track = wheelTrackRef.value
+    if (rect && track) {
+      const clickLocal = e.clientX - rect.left
+      let hit = -1
+      Array.from(track.children).forEach((el, i) => {
+        const r = (el as HTMLElement).getBoundingClientRect()
+        if (clickLocal >= r.left - rect.left && clickLocal <= r.right - rect.left) hit = i
+      })
+      if (hit >= 0) setWheelCenter(wheelDates.value[hit].date)
+    }
   }
-  // 点击：命中 7 格中的某格 → 该格日期成为新中心
-  const view = wheelRef.value
-  if (!view) return
-  const rect = view.getBoundingClientRect()
-  const clickLocal = e.clientX - rect.left
-  const track = wheelTrackRef.value
-  if (!track) return
-  let hit = -1
-  Array.from(track.children).forEach((el, i) => {
-    const r = (el as HTMLElement).getBoundingClientRect()
-    if (clickLocal >= r.left - rect.left && clickLocal <= r.right - rect.left) hit = i
-  })
-  if (hit < 0) return
-  setWheelCenter(wheelDates.value[hit].date)
+  animateShiftTo(0)
 }
 
 function onWheelCancel(): void {
   wheelDrag = null
   wheelDragging.value = false
+  animateShiftTo(0)
 }
 
 /** 点击格子（无障碍 / 拖动后 350ms 内抑制） */
 function onWheelPick(i: number): void {
   if (Date.now() < suppressWheelClickUntil) return
-  setWheelCenter(wheelDates.value[i].date)
+  const target = wheelDates.value[i].date
+  setWheelCenter(target)
+  // 目标格滑到中央：shift 归零即吸附
+  animateShiftTo(0)
 }
 
 /** 移动端轮盘初始化 */
@@ -276,16 +312,15 @@ async function exportPng(): Promise<void> {
               @pointerup="onWheelUp"
               @pointercancel="onWheelCancel"
             >
-              <!-- key 变化重播进入动画（无 leave 残留）；拖动中不加动画类避免高频触发 -->
+              <!-- 轨道：41 格 translateX 跟手驱动；中央格恒在视口中央，日期变化不跳位 -->
               <div
                 ref="wheelTrackRef"
-                :key="wheelCenter.getTime()"
                 class="dv-wheel__track"
-                :class="!wheelDragging ? (wheelDir === 'next' ? 'slide-next' : 'slide-prev') : undefined"
+                :style="{ transform: wheelTrackTransform }"
               >
                 <button
                   v-for="(d, i) in wheelDates"
-                  :key="d.date.getTime()"
+                  :key="i"
                   class="dv-wheel__day"
                   :class="{
                     active: i === WHEEL_SPAN,
@@ -473,11 +508,11 @@ async function exportPng(): Promise<void> {
   cursor: grabbing;
 }
 
-/* 轨道：静态 7 格 flex 均分（无平移、无像素换算） */
+/* 轨道：flex 一排，完全由 transform 定位（中心格索引 = WHEEL_SPAN 恒对齐视口中心） */
 .dv-wheel__track {
   display: flex;
-  justify-content: center;
   height: 100%;
+  will-change: transform;
 }
 
 .dv-wheel__day {
@@ -524,38 +559,6 @@ async function exportPng(): Promise<void> {
 .dv-wheel__day.active span {
   color: var(--color-brand);
   font-weight: var(--font-weight-bold);
-}
-
-/* 轮盘切日动画：key 变化重播进入动画（无 leave 生命周期，避免拖动后残留透明度归零）
-   class 绑定 .slide-next / .slide-prev，动画 150ms ease-out */
-.dv-wheel__track.slide-next {
-  animation: dw-next 150ms ease-out;
-}
-
-.dv-wheel__track.slide-prev {
-  animation: dw-prev 150ms ease-out;
-}
-
-@keyframes dw-next {
-  from {
-    opacity: 0;
-    transform: translateX(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes dw-prev {
-  from {
-    opacity: 0;
-    transform: translateX(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
 }
 
 /* 单日课程列表：全宽卡片 */
