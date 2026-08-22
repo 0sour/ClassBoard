@@ -12,6 +12,24 @@ export interface SettingsPayload {
   labReminder: { enabled: boolean; mode: 'every' | 'first'; advanceMinutes: number }
   homeworkReminder: { enabled: boolean; advanceDays: number }
   accessEnabled: boolean
+  weather: WeatherSettings
+}
+
+/** 天气设置（和风天气） */
+export interface WeatherSettings {
+  enabled: boolean
+  apiKey: string
+  location: string
+}
+
+/** 天气聚合数据（/api/weather 返回） */
+export interface WeatherData {
+  city: string
+  now: { text: string; temp: string; feelsLike: string; humidity: string; precip: string; windDir: string; windScale: string; obsTime: string }
+  daily: { fxDate: string; textDay: string; iconDay: string; tempMax: string; tempMin: string }[]
+  air: { aqi: string; category: string } | null
+  warning: { id: string; title: string; text: string; severity: string }[]
+  updatedAt: string
 }
 
 export interface ContextResponse {
@@ -159,6 +177,9 @@ export const api = {
 
   updateSettings: (patch: Partial<SettingsPayload>) =>
     request<SettingsPayload>('/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+
+  // ---- 天气 ----
+  getWeather: () => request<WeatherData>('/weather'),
 
   // ---- 备份 ----
   exportBackup: async (): Promise<void> => {

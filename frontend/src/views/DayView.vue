@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
+import WeatherCard from '@/components/schedule/WeatherCard.vue'
 import CourseModal from '@/components/schedule/CourseModal.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
 import type { Course } from '@/types'
@@ -50,6 +51,9 @@ function editCourse(course: Course): void {
       <span class="today-count num">共 {{ todayCourses.length }} 节课</span>
     </div>
 
+    <!-- 天气卡（移动端简约形态，位于日期下方） -->
+    <WeatherCard v-if="store.weatherData" variant="slim" class="reveal" />
+
     <div class="today-list">
       <button
         v-for="c in todayCourses"
@@ -97,6 +101,12 @@ function editCourse(course: Course): void {
   max-width: 768px;
   margin: 0 auto;
   padding: var(--spacing-lg);
+}
+
+/* 天气卡与课程列表间距 */
+.day-view > .weather,
+.day-view > .reveal + .weather {
+  margin-bottom: var(--spacing-lg);
 }
 
 .today-head {

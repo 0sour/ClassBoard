@@ -304,6 +304,21 @@ async function toggleOddEven(v: boolean): Promise<void> {
   await store.setShowOddEvenFilter(v)
 }
 
+// ================= 天气（和风天气） =================
+const weatherBusy = ref(false)
+
+async function saveWeatherSettings(): Promise<void> {
+  weatherBusy.value = true
+  try {
+    await store.updateSettings({ weather: store.settings.weather })
+    toast('天气设置已保存', 'success')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '保存失败，请重试', 'error')
+  } finally {
+    weatherBusy.value = false
+  }
+}
+
 // ================= 数据备份 =================
 const backupBusy = ref(false)
 const restoreInput = ref<HTMLInputElement | null>(null)
@@ -654,6 +669,56 @@ async function toggleAccess(): Promise<void> {
       </div>
     </div>
 
+    <!-- 天气设置（和风天气） -->
+    <div class="panel reveal">
+      <div class="panel-head">
+        <h3>天气</h3>
+        <span class="panel-note">默认关闭；启用后在周课表侧栏与今日页显示实时天气</span>
+      </div>
+      <div class="row">
+        <span class="row-main">
+          <span class="row-title">显示天气</span>
+          <span class="row-meta">桌面周课表侧栏 + 移动端今日页显示天气卡片</span>
+        </span>
+        <input
+          class="switch"
+          type="checkbox"
+          role="switch"
+          aria-label="显示天气"
+          :checked="store.settings.weather.enabled"
+          @change="store.settings.weather.enabled = ($event.target as HTMLInputElement).checked"
+        />
+      </div>
+      <div v-if="store.settings.weather.enabled" class="sub-row">
+        <label class="edit-field">
+          <span class="edit-field__label">城市</span>
+          <input
+            class="text-input"
+            type="text"
+            placeholder="如：杭州"
+            aria-label="天气城市"
+            v-model="store.settings.weather.location"
+          />
+        </label>
+        <label class="edit-field">
+          <span class="edit-field__label">和风天气 API Key</span>
+          <input
+            class="text-input"
+            type="password"
+            placeholder="免费版即可（devapi.qweather.com）"
+            aria-label="和风天气 API Key"
+            v-model="store.settings.weather.apiKey"
+          />
+        </label>
+        <p class="weather-hint">数据经本机服务端代理获取（隐藏 Key），30 分钟缓存；免费版包含实时天气、3 天预报、空气与预警。申请地址：https://dev.qweather.com</p>
+      </div>
+      <div v-if="store.settings.weather.enabled" class="edit-actions">
+        <button class="btn-mini btn-mini--primary" type="button" :disabled="weatherBusy" @click="saveWeatherSettings">
+          {{ weatherBusy ? '保存中…' : '保存天气设置' }}
+        </button>
+      </div>
+    </div>
+
     <!-- 数据管理 -->
     <div class="panel reveal">
       <div class="panel-head">
@@ -875,6 +940,31 @@ async function toggleAccess(): Promise<void> {
 .edit-field__label {
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
+}
+
+/* 天气设置：文本输入框 + 提示 */
+.text-input {
+  height: 34px;
+  min-width: 220px;
+  padding: 0 var(--spacing-sm);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-surface);
+  color: var(--color-text-body);
+  font-size: var(--font-size-sm);
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: var(--color-brand);
+}
+
+.weather-hint {
+  width: 100%;
+  margin-top: var(--spacing-xs);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  line-height: 1.6;
 }
 
 .date-input {

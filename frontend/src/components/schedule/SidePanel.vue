@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
+import WeatherCard from './WeatherCard.vue'
 import { MOCK_PRACTICE } from '@/data/mock'
 import type { Course } from '@/types'
 
@@ -70,6 +71,9 @@ function openPracticeItem(p: PracticeItem): void {
 
 <template>
   <aside class="side-panel">
+    <!-- 天气卡（桌面毛玻璃形态，位于本周摘要上方） -->
+    <WeatherCard v-if="store.weatherData" variant="glass" class="reveal" />
+
     <!-- 本周摘要 -->
     <div class="sp-card reveal">
       <div class="sp-head">

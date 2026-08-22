@@ -227,10 +227,23 @@ export function validateSettingsPatch(body) {
       }
     }
   }
+  if ('weather' in body) {
+    const v = body.weather
+    if (typeof v !== 'object' || v === null) issues.push({ field: 'weather', message: '须为对象' })
+    else {
+      if (typeof v.enabled !== 'boolean') issues.push({ field: 'weather.enabled', message: '须为布尔值' })
+      if (v.apiKey !== undefined && (typeof v.apiKey !== 'string' || v.apiKey.length > 100)) {
+        issues.push({ field: 'weather.apiKey', message: 'API Key 长度须 ≤ 100' })
+      }
+      if (v.location !== undefined && (typeof v.location !== 'string' || v.location.trim().length > 50)) {
+        issues.push({ field: 'weather.location', message: '城市名称长度须 ≤ 50' })
+      }
+    }
+  }
   if (issues.length) throw badRequest('设置校验失败', issues)
 
   if ('showOddEvenFilter' in body) out.showOddEvenFilter = body.showOddEvenFilter
-  for (const key of ['reminder', 'labReminder', 'homeworkReminder']) {
+  for (const key of ['reminder', 'labReminder', 'homeworkReminder', 'weather']) {
     if (key in body) out[key] = body[key]
   }
   return out

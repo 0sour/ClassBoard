@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClassBoard · 天气组件 v5（毛玻璃 + Canvas + 展开视图）</title>
+<style>
+/* ==========================================================================
+   ClassBoard 天气组件 v5
+   动态：B 方案 Canvas 粒子（重力雨丝+风 / 正弦摇摆雪）
+   视图：毛玻璃（Glassmorphism）卡片
+   交互：移动端点击卡片展开完整视图（详情指标 + 未来预报 + 预警）
+   ========================================================================== */
+:root {
+  --color-neutral-50: #f6f7f9;
+  --color-neutral-100: #eef1f5;
+  --color-neutral-200: #e7eaf0;
+  --color-neutral-300: #d8dde6;
+  --color-neutral-500: #6b7280;
+  --color-neutral-600: #4b5563;
+  --color-neutral-800: #1f2933;
+  --color-neutral-900: #111827;
+  --color-white: #ffffff;
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #bfdbfe;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-warning-bg: #fffbeb;
+  --color-warning-line: #fde68a;
+  --color-warning-text: #b45309;
+  --color-danger-bg: #fef2f2;
+  --color-danger-line: #fecaca;
+  --color-danger-text: #b91c1c;
+
+  --color-text-primary: var(--color-neutral-900);
+  --color-text-body: var(--color-neutral-800);
+  --color-text-secondary: var(--color-neutral-600);
+  --color-text-tertiary: var(--color-neutral-500);
+  --color-bg-page: var(--color-neutral-50);
+  --color-bg-surface: var(--color-white);
+  --color-border-default: var(--color-neutral-200);
+  --color-border-strong: var(--color-neutral-300);
+
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13.5px;
+  --font-size-body: 14px;
+  --font-size-lg: 15px;
+  --font-size-xl: 16px;
+  --font-size-2xl: 18px;
+  --font-size-stat: 26px;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-bold: 600;
+  --font-weight-heavy: 700;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-full: 9999px;
+
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 6px 18px rgba(16, 24, 40, 0.05);
+  --shadow-pop: 0 12px 32px rgba(16, 24, 40, 0.12), 0 2px 6px rgba(16, 24, 40, 0.06);
+
+  --motion-duration-fast: 150ms;
+  --motion-duration-normal: 180ms;
+  --motion-duration-slow: 220ms;
+  --motion-easing-standard: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  --side-panel-w: 296px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  background: var(--color-bg-page);
+  color: var(--color-text-body);
+  padding: 32px 24px 64px;
+}
+
+.page-head { max-width: 900px; margin: 0 auto 28px; }
+.page-head h1 { font-size: 22px; font-weight: var(--font-weight-heavy); color: var(--color-text-primary); }
+.page-head p { margin-top: 8px; font-size: var(--font-size-body); color: var(--color-text-secondary); }
+.page-head .note { margin-top: 12px; font-size: var(--font-size-sm); color: var(--color-text-tertiary); background: var(--color-primary-50); border: 1px solid var(--color-primary-100); border-radius: var(--radius-md); padding: 10px 14px; }
+
+/* ============ 演示控制 ============ */
+.controls {
+  max-width: 900px;
+  margin: 0 auto 28px;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 16px;
+}
+.controls .ctl-title { font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); color: var(--color-text-tertiary); letter-spacing: 0.8px; margin-bottom: 10px; }
+.ctl-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.ctl-row:last-child { margin-bottom: 0; }
+.ctl-row .ctl-label { font-size: var(--font-size-sm); color: var(--color-text-tertiary); width: 64px; flex: none; }
+.ctl-btn {
+  height: 32px; padding: 0 12px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-surface);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-body);
+  cursor: pointer;
+  transition: all var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.ctl-btn:hover { border-color: var(--color-border-strong); background: var(--color-bg-hover, #f1f4f8); }
+.ctl-btn.active { background: var(--color-primary-500); border-color: var(--color-primary-500); color: var(--color-white); font-weight: var(--font-weight-medium); }
+.ctl-auto { background: var(--color-primary-50); border-color: var(--color-primary-100); color: var(--color-primary-500); }
+
+/* ============ 场景布局 ============ */
+.scenes {
+  max-width: 900px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 296px 1fr;
+  gap: 32px;
+  align-items: start;
+}
+@media (max-width: 860px) { .scenes { grid-template-columns: 1fr; } }
+
+.scene-block { background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); overflow: hidden; }
+.scene-block .scene-title { padding: 12px 16px; border-bottom: 1px solid var(--color-border-default); font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); color: var(--color-text-tertiary); letter-spacing: 0.8px; }
+.scene-body { padding: 16px; }
+
+/* ================================================================
+   毛玻璃天气卡
+   ================================================================ */
+.weather {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  color: var(--color-white);
+  isolation: isolate;
+  cursor: pointer;
+  transition: transform var(--motion-duration-normal) var(--motion-easing-standard),
+    box-shadow var(--motion-duration-normal) var(--motion-easing-standard);
+}
+.weather:hover { transform: translateY(-1px); box-shadow: var(--shadow-pop); }
+.weather:active { transform: translateY(0); }
+
+/* 渐变背景层 */
+.wx-bg { position: absolute; inset: 0; z-index: -2; opacity: 0; transition: opacity 0.6s var(--motion-easing-standard); }
+.wx-bg.active { opacity: 1; }
+.wx-bg.sunny { background: linear-gradient(180deg, #5b8df5 0%, #2f66d0 100%); }
+.wx-bg.cloudy { background: linear-gradient(180deg, #8fa3b5 0%, #64798e 100%); }
+.wx-bg.overcast { background: linear-gradient(180deg, #97a1ad 0%, #6f7a88 100%); }
+.wx-bg.lightrain { background: linear-gradient(180deg, #5d7f9c 0%, #3c5c78 100%); }
+.wx-bg.thunder { background: linear-gradient(180deg, #4d5568 0%, #30364a 100%); }
+.wx-bg.snow { background: linear-gradient(180deg, #a5bfd6 0%, #7d99b4 100%); }
+.wx-bg.fog { background: linear-gradient(180deg, #aeb7c0 0%, #8d98a3 100%); }
+
+/* Canvas 粒子层 */
+.fx-canvas { position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%; pointer-events: none; }
+
+/* 毛玻璃内层 */
+.glass {
+  position: relative;
+  z-index: 1;
+  background: rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  border-radius: var(--radius-lg);
+  margin: 10px;
+}
+
+/* ---------- 折叠态内容 ---------- */
+.wx-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 0; }
+.wx-loc { font-size: var(--font-size-sm); opacity: 0.9; display: flex; align-items: center; gap: 5px; }
+.wx-loc svg { width: 13px; height: 13px; }
+.wx-ic { width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.22); border-radius: var(--radius-full); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.25); }
+.wx-ic svg { width: 23px; height: 23px; }
+
+.wx-main { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 8px 16px 0; }
+.wx-temp { font-size: 38px; font-weight: var(--font-weight-heavy); line-height: 1; white-space: nowrap; }
+.wx-temp small { font-size: var(--font-size-lg); font-weight: var(--font-weight-regular); opacity: 0.85; margin-left: 5px; }
+.wx-right { text-align: right; padding-bottom: 3px; min-width: 0; max-width: 58%; }
+.wx-desc { font-size: var(--font-size-sm); opacity: 0.92; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wx-hl { font-size: var(--font-size-sm); opacity: 0.75; margin-top: 3px; white-space: nowrap; }
+
+/* 折叠/展开切换箭头 */
+.wx-toggle {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%;
+  padding: 6px 0 10px;
+  color: rgba(255,255,255,0.85);
+  transition: transform var(--motion-duration-slow) var(--motion-easing-standard);
+}
+.wx-toggle svg { width: 16px; height: 16px; }
+.weather.expanded .wx-toggle { transform: rotate(180deg); }
+
+/* ============ 展开视图 ============ */
+.wx-more {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.28s var(--motion-easing-standard);
+}
+.wx-more > div { overflow: hidden; }
+.weather.expanded .wx-more { grid-template-rows: 1fr; }
+
+.wx-more-inner { padding: 2px 16px 14px; }
+
+/* 展开分隔 */
+.wx-more-inner .sep { height: 1px; background: rgba(255,255,255,0.22); margin-bottom: 12px; }
+
+/* 实时指标网格：2 列 */
+.wx-metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 14px; }
+.wx-metric { display: flex; align-items: center; gap: 9px; }
+.wx-metric .m-ic { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.18); border-radius: var(--radius-md); flex: none; }
+.wx-metric .m-ic svg { width: 15px; height: 15px; }
+.wx-metric .m-info { min-width: 0; }
+.wx-metric .m-label { font-size: var(--font-size-xs); opacity: 0.65; }
+.wx-metric .m-value { font-size: var(--font-size-md); font-weight: var(--font-weight-bold); margin-top: 1px; }
+
+/* 预警横幅 */
+.wx-alert {
+  display: flex; align-items: center; gap: 7px;
+  margin-top: 12px; padding: 7px 10px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  animation: alert-in 0.4s var(--motion-easing-standard);
+}
+@keyframes alert-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.wx-alert svg { width: 14px; height: 14px; flex: none; }
+.wx-alert .wa-level { flex: none; font-weight: var(--font-weight-bold); }
+.wx-alert .wa-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wx-alert.level-blue { background: rgba(234, 245, 255, 0.92); color: #075985; border: 1px solid #bae3ff; }
+.wx-alert.level-yellow { background: rgba(255, 251, 235, 0.92); color: var(--color-warning-text); border: 1px solid var(--color-warning-line); }
+.wx-alert.level-orange { background: rgba(255, 247, 237, 0.92); color: #c2410c; border: 1px solid #fed7aa; }
+.wx-alert.level-red { background: rgba(254, 242, 242, 0.92); color: var(--color-danger-text); border: 1px solid var(--color-danger-line); }
+
+/* 未来预报：3 天行 */
+.wx-forecast { margin-top: 12px; }
+.wx-forecast .f-title { font-size: var(--font-size-xs); opacity: 0.65; margin-bottom: 8px; letter-spacing: 0.8px; }
+.f-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid rgba(255,255,255,0.16); }
+.f-row:first-of-type { border-top: none; }
+.f-row .f-day { width: 48px; font-size: var(--font-size-sm); opacity: 0.85; flex: none; }
+.f-row .f-ic { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.16); border-radius: var(--radius-full); flex: none; }
+.f-row .f-ic svg { width: 14px; height: 14px; }
+.f-row .f-desc { flex: 1; font-size: var(--font-size-sm); opacity: 0.8; }
+.f-row .f-temp { font-size: var(--font-size-sm); opacity: 0.85; }
+.f-row .f-temp b { font-weight: var(--font-weight-bold); opacity: 1; }
+
+/* 桌面版：可展开（毛玻璃卡内展开详情） */
+
+/* 模拟本周摘要（桌面参照） */
+.mock-summary { background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); padding: 14px; margin-top: 14px; }
+.mock-summary .ms-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.mock-summary .ms-ic { width: 26px; height: 26px; border-radius: var(--radius-full); background: var(--color-primary-50); color: var(--color-primary-500); display: flex; align-items: center; justify-content: center; }
+.mock-summary .ms-ic svg { width: 13px; height: 13px; }
+.mock-summary .ms-head h4 { font-size: var(--font-size-sm); color: var(--color-text-tertiary); font-weight: var(--font-weight-medium); letter-spacing: 0.8px; }
+.mock-summary .ms-nums { display: flex; justify-content: space-between; gap: 10px; }
+.mock-summary .ms-num { flex: 1; text-align: center; }
+.mock-summary .ms-num b { display: block; font-size: 24px; font-weight: var(--font-weight-heavy); color: var(--color-text-primary); line-height: 1.2; }
+.mock-summary .ms-num span { font-size: var(--font-size-sm); color: var(--color-text-tertiary); }
+
+/* 场景提示 */
+.scene-note { margin-top: 12px; font-size: var(--font-size-xs); color: var(--color-text-tertiary); line-height: 1.7; }
+
+/* ================================================================
+   移动端：简约信息条（方案 A，白底卡片，无展开）
+   ================================================================ */
+.weather-a {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap; /* 展开区独占整行（flex 子项换行） */
+  align-items: center;
+  gap: var(--spacing-md, 12px);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 12px 16px;
+  color: var(--color-text-body);
+}
+.weather-a .wa-icon {
+  width: 40px; height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--color-primary-50);
+  color: var(--color-primary-500);
+  flex: none;
+}
+.weather-a .wa-icon svg { width: 22px; height: 22px; }
+.weather-a .wa-main { flex: 1; min-width: 0; }
+.weather-a .wa-loc {
+  display: flex; align-items: center; gap: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  margin-bottom: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.weather-a .wa-loc svg { width: 11px; height: 11px; flex: none; color: var(--color-primary-500); }
+.weather-a .wa-temp { font-size: var(--font-size-2xl, 18px); font-weight: var(--font-weight-heavy); color: var(--color-text-primary); line-height: 1.1; white-space: nowrap; }
+.weather-a .wa-temp small { font-size: var(--font-size-sm); font-weight: var(--font-weight-regular); color: var(--color-text-tertiary); margin-left: 4px; }
+.weather-a .wa-desc { font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.weather-a .wa-side { text-align: right; flex: none; white-space: nowrap; }
+.weather-a .wa-hl { font-size: var(--font-size-sm); color: var(--color-text-tertiary); white-space: nowrap; }
+.weather-a .wa-hl b { color: var(--color-text-body); font-weight: var(--font-weight-medium); }
+
+/* 简约卡预警角标（右上角胶囊） */
+.wa-alert-flag {
+  position: absolute;
+  top: -6px; right: 10px;
+  display: flex; align-items: center; gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  box-shadow: var(--shadow-pop);
+  animation: alert-in 0.4s var(--motion-easing-standard);
+  z-index: 2;
+}
+.wa-alert-flag.level-yellow { background: #f59e0b; color: var(--color-white); }
+.wa-alert-flag.level-orange { background: #f97316; color: var(--color-white); }
+.wa-alert-flag.level-red { background: #ef4444; color: var(--color-white); }
+.wa-alert-flag.level-blue { background: #06b6d4; color: var(--color-white); }
+.wa-alert-flag svg { width: 11px; height: 11px; }
+
+/* 简约卡：展开箭头 */
+.wa-side { display: flex; align-items: center; gap: 6px; }
+.wa-arrow {
+  width: 15px; height: 15px;
+  color: var(--color-text-tertiary);
+  transition: transform var(--motion-duration-slow, 220ms) var(--motion-easing-standard);
+}
+.weather-a.expanded .wa-arrow { transform: rotate(180deg); }
+
+/* 简约卡：展开详情（白卡内，深色文字；flex 换行后占满整行） */
+.wa-more {
+  flex-basis: 100%; /* 独占一行 */
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.28s var(--motion-easing-standard);
+}
+.wa-more > div { overflow: hidden; }
+.weather-a.expanded .wa-more { grid-template-rows: 1fr; }
+
+.wa-more-inner {
+  padding: 14px 0 4px;
+  margin-top: 12px;
+  border-top: 1px solid var(--color-border-default);
+}
+
+.wa-metrics { margin-bottom: 4px; }
+.wa-m-ic { background: var(--color-primary-50); color: var(--color-primary-500); }
+.wa-m-label { color: var(--color-text-tertiary); }
+.wa-m-value { color: var(--color-text-body); }
+
+.wa-forecast { margin-top: 12px; }
+.wa-f-title { color: var(--color-text-tertiary); }
+.wa-f-row { border-top-color: var(--color-border-default); }
+.wa-f-day { color: var(--color-text-secondary); }
+.wa-f-ic { background: var(--color-bg-subtle); color: var(--color-text-secondary); }
+.wa-f-desc { color: var(--color-text-body); }
+.wa-f-temp { color: var(--color-text-secondary); }
+.wa-f-temp b { color: var(--color-text-primary); }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <h1>🧊 ClassBoard · 天气组件 v5（毛玻璃 + Canvas 动态 + 展开视图）</h1>
+  <p>B 方案 Canvas 粒子（重力雨丝 / 摇摆雪）+ 毛玻璃视图；桌面端紧凑卡（296px），移动端点击卡片展开详情。</p>
+  <div class="note">📱 移动端卡片**点击展开/收起**：展开显示实时指标（体感/湿度/降水/风力）、天气预警、未来 3 天预报。切换天气/预警实时联动。</div>
+</div>
+
+<!-- ============ 演示控制 ============ -->
+<div class="controls">
+  <div class="ctl-title">演示控制</div>
+  <div class="ctl-row">
+    <span class="ctl-label">天气</span>
+    <button class="ctl-btn active" data-wx="sunny">☀️ 晴</button>
+    <button class="ctl-btn" data-wx="cloudy">☁️ 多云</button>
+    <button class="ctl-btn" data-wx="overcast">☁️ 阴</button>
+    <button class="ctl-btn" data-wx="lightrain">🌧 小雨</button>
+    <button class="ctl-btn" data-wx="thunder">⛈ 雷阵雨</button>
+    <button class="ctl-btn" data-wx="snow">🌨 雪</button>
+    <button class="ctl-btn" data-wx="fog">🌫 雾</button>
+    <button class="ctl-btn ctl-auto" id="btnAuto">▶ 自动轮播</button>
+  </div>
+  <div class="ctl-row">
+    <span class="ctl-label">预警</span>
+    <button class="ctl-btn active" data-alert="none">无预警</button>
+    <button class="ctl-btn" data-alert="heat">🔥 高温橙色</button>
+    <button class="ctl-btn" data-alert="storm">🌧 暴雨蓝色</button>
+    <button class="ctl-btn" data-alert="gale">💨 大风黄色</button>
+    <button class="ctl-btn" data-alert="haze">🌫 雾霾红色</button>
+  </div>
+</div>
+
+<!-- ================= 场景 ================= -->
+<div class="scenes">
+
+  <!-- 桌面端：侧栏 296px -->
+  <div class="scene-block">
+    <div class="scene-title">桌面端 · 周课表右侧侧栏（296px）— 紧凑卡</div>
+    <div class="scene-body">
+      <div class="weather desktop" id="wDesktop">
+        <div class="wx-bg sunny active"></div><div class="wx-bg cloudy"></div><div class="wx-bg overcast"></div>
+        <div class="wx-bg lightrain"></div><div class="wx-bg thunder"></div><div class="wx-bg snow"></div><div class="wx-bg fog"></div>
+        <canvas class="fx-canvas"></canvas>
+        <div class="glass">
+          <div class="wx-head">
+            <span class="wx-loc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></svg>杭州 · 西湖区</span>
+            <span class="wx-ic" data-el="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" /></svg></span>
+          </div>
+          <div class="wx-main">
+            <div class="wx-temp" data-el="temp">26° <small>晴</small></div>
+            <div class="wx-right">
+              <div class="wx-desc" data-el="desc">体感 28° · 微风</div>
+              <div class="wx-hl" data-el="hl"><b>33°</b> / 22°</div>
+            </div>
+          </div>
+
+          <!-- 预警横幅（折叠区常驻，点击预警按钮即时可见） -->
+          <div class="wx-alert" data-el="alert" style="display:none;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><path d="M12 9v4M12 17h.01" /></svg>
+            <span class="wa-level"></span><span class="wa-msg"></span>
+          </div>
+
+          <!-- 展开视图（点击卡片展开） -->
+          <div class="wx-more">
+            <div>
+              <div class="wx-more-inner">
+                <div class="sep"></div>
+                <!-- 实时指标 -->
+                <div class="wx-metrics">
+                  <div class="wx-metric">
+                    <span class="m-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 2.5-1.5 4.5-3 6.5S13.5 20 12 21c-1.5-1-2.5-3-4-5.5S5 11.5 5 9a7 7 0 0 1 7-7Z" /></svg></span>
+                    <span class="m-info"><span class="m-label">体感温度</span><span class="m-value" data-el="feels">28°</span></span>
+                  </div>
+                  <div class="wx-metric">
+                    <span class="m-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69 5.64 9.05a5.5 5.5 0 0 0 7.78 7.78 5.5 5.5 0 0 0 7.78-7.78Z" /></svg></span>
+                    <span class="m-info"><span class="m-label">湿度</span><span class="m-value" data-el="humidity">62%</span></span>
+                  </div>
+                  <div class="wx-metric">
+                    <span class="m-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M5 8h14M5 12h14M5 16h14" /></svg></span>
+                    <span class="m-info"><span class="m-label">降水概率</span><span class="m-value" data-el="pop">10%</span></span>
+                  </div>
+                  <div class="wx-metric">
+                    <span class="m-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.07-8.88 5.5 5.5 0 0 0-10.55 1.13A3.5 3.5 0 0 0 7 19h10.5Z" /></svg></span>
+                    <span class="m-info"><span class="m-label">风力风向</span><span class="m-value" data-el="wind">东南风 2 级</span></span>
+                  </div>
+                  <div class="wx-metric">
+                    <span class="m-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.07-8.88 5.5 5.5 0 0 0-10.55 1.13A3.5 3.5 0 0 0 7 19h10.5Z" /><path d="M8 12a4 4 0 0 1 4-4 4.5 4.5 0 0 1 4.5 4.5" /></svg></span>
+                    <span class="m-info"><span class="m-label">空气质量</span><span class="m-value" data-el="aqi">优 42</span></span>
+                  </div>
+                  <div class="wx-metric">
+                    <span class="m-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg></span>
+                    <span class="m-info"><span class="m-label">日出 / 日落</span><span class="m-value" data-el="sun">05:27 / 18:42</span></span>
+                  </div>
+                </div>
+
+                <!-- 未来 3 天预报 -->
+                <div class="wx-forecast">
+                  <div class="f-title">未来 3 天</div>
+                  <div class="f-row">
+                    <span class="f-day">明天</span>
+                    <span class="f-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25" /><path d="M16 13v6M12 13v6M8 13v6" /></svg></span>
+                    <span class="f-desc">小雨</span>
+                    <span class="f-temp"><b>24°</b> / 19°</span>
+                  </div>
+                  <div class="f-row">
+                    <span class="f-day">周日</span>
+                    <span class="f-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.07-8.88 5.5 5.5 0 0 0-10.55 1.13A3.5 3.5 0 0 0 7 19h10.5Z" /><path d="M8 12a4 4 0 0 1 4-4 4.5 4.5 0 0 1 4.5 4.5" /></svg></span>
+                    <span class="f-desc">多云</span>
+                    <span class="f-temp"><b>27°</b> / 21°</span>
+                  </div>
+                  <div class="f-row">
+                    <span class="f-day">周一</span>
+                    <span class="f-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" /></svg></span>
+                    <span class="f-desc">晴</span>
+                    <span class="f-temp"><b>29°</b> / 22°</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 折叠箭头 -->
+          <div class="wx-toggle">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+          </div>
+        </div>
+      </div>
+      <!-- 参照：本周摘要 -->
+      <div class="mock-summary">
+        <div class="ms-head"><span class="ms-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83" /><path d="M22 12A10 10 0 0 0 12 2v10z" /></svg></span><h4>本周摘要</h4></div>
+        <div class="ms-nums">
+          <div class="ms-num"><b>9</b><span>节课</span></div>
+          <div class="ms-num"><b>0</b><span>实验课</span></div>
+          <div class="ms-num"><b>0</b><span>今日课程</span></div>
+        </div>
+      </div>
+      <div class="scene-note">桌面端保持紧凑：位置/温度/高低温，无展开；雨雪粒子动态与移动端一致。</div>
+    </div>
+  </div>
+
+  <!-- 移动端：今日页（点击展开） -->
+  <div class="scene-block">
+    <div class="scene-title">移动端 · 今日页日期下方 — 点击展开</div>
+    <div class="scene-body" style="max-width: 393px;">
+      <!-- 模拟日期头 -->
+      <div style="margin-bottom: 12px;">
+        <div style="font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); color: var(--color-text-primary);">今天 · 8月22日</div>
+        <div style="font-size: var(--font-size-sm); color: var(--color-text-tertiary); margin-top: 3px;">共 2 节课</div>
+      </div>
+
+      <!-- 天气卡（简约信息条，方案 A，点击展开详情） -->
+      <div class="weather-a" id="wMobile">
+        <!-- 预警角标 -->
+        <div class="wa-alert-flag" data-el="aFlag" style="display:none;"></div>
+
+        <div class="wa-icon" data-el="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" /></svg>
+        </div>
+        <div class="wa-main">
+          <div class="wa-loc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></svg><span data-el="loc">杭州 · 西湖区</span></div>
+          <div class="wa-temp" data-el="temp">26° <small>晴</small></div>
+          <div class="wa-desc" data-el="desc">体感 28° · 微风</div>
+        </div>
+        <div class="wa-side">
+          <div class="wa-hl" data-el="hl"><b>33°</b> / 22°</div>
+          <svg class="wa-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+        </div>
+
+        <!-- 展开详情（白卡内） -->
+        <div class="wa-more">
+          <div>
+            <div class="wa-more-inner">
+              <!-- 实时指标 -->
+              <div class="wx-metrics wa-metrics">
+                <div class="wx-metric">
+                  <span class="m-ic wa-m-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 2.5-1.5 4.5-3 6.5S13.5 20 12 21c-1.5-1-2.5-3-4-5.5S5 11.5 5 9a7 7 0 0 1 7-7Z" /></svg></span>
+                  <span class="m-info"><span class="m-label wa-m-label">体感温度</span><span class="m-value wa-m-value" data-el="feels">28°</span></span>
+                </div>
+                <div class="wx-metric">
+                  <span class="m-ic wa-m-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69 5.64 9.05a5.5 5.5 0 0 0 7.78 7.78 5.5 5.5 0 0 0 7.78-7.78Z" /></svg></span>
+                  <span class="m-info"><span class="m-label wa-m-label">湿度</span><span class="m-value wa-m-value" data-el="humidity">62%</span></span>
+                </div>
+                <div class="wx-metric">
+                  <span class="m-ic wa-m-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M5 8h14M5 12h14M5 16h14" /></svg></span>
+                  <span class="m-info"><span class="m-label wa-m-label">降水概率</span><span class="m-value wa-m-value" data-el="pop">10%</span></span>
+                </div>
+                <div class="wx-metric">
+                  <span class="m-ic wa-m-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.07-8.88 5.5 5.5 0 0 0-10.55 1.13A3.5 3.5 0 0 0 7 19h10.5Z" /></svg></span>
+                  <span class="m-info"><span class="m-label wa-m-label">风力风向</span><span class="m-value wa-m-value" data-el="wind">东南风 2 级</span></span>
+                </div>
+                <div class="wx-metric">
+                  <span class="m-ic wa-m-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.07-8.88 5.5 5.5 0 0 0-10.55 1.13A3.5 3.5 0 0 0 7 19h10.5Z" /><path d="M8 12a4 4 0 0 1 4-4 4.5 4.5 0 0 1 4.5 4.5" /></svg></span>
+                  <span class="m-info"><span class="m-label wa-m-label">空气质量</span><span class="m-value wa-m-value" data-el="aqi">优 42</span></span>
+                </div>
+                <div class="wx-metric">
+                  <span class="m-ic wa-m-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg></span>
+                  <span class="m-info"><span class="m-label wa-m-label">日出 / 日落</span><span class="m-value wa-m-value" data-el="sun">05:27 / 18:42</span></span>
+                </div>
+              </div>
+
+              <!-- 未来 3 天预报 -->
+              <div class="wx-forecast wa-forecast">
+                <div class="f-title wa-f-title">未来 3 天</div>
+                <div class="f-row wa-f-row">
+                  <span class="f-day wa-f-day">明天</span>
+                  <span class="f-ic wa-f-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25" /><path d="M16 13v6M12 13v6M8 13v6" /></svg></span>
+                  <span class="f-desc wa-f-desc">小雨</span>
+                  <span class="f-temp wa-f-temp"><b>24°</b> / 19°</span>
+                </div>
+                <div class="f-row wa-f-row">
+                  <span class="f-day wa-f-day">周日</span>
+                  <span class="f-ic wa-f-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.07-8.88 5.5 5.5 0 0 0-10.55 1.13A3.5 3.5 0 0 0 7 19h10.5Z" /><path d="M8 12a4 4 0 0 1 4-4 4.5 4.5 0 0 1 4.5 4.5" /></svg></span>
+                  <span class="f-desc wa-f-desc">多云</span>
+                  <span class="f-temp wa-f-temp"><b>27°</b> / 21°</span>
+                </div>
+                <div class="f-row wa-f-row">
+                  <span class="f-day wa-f-day">周一</span>
+                  <span class="f-ic wa-f-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" /></svg></span>
+                  <span class="f-desc wa-f-desc">晴</span>
+                  <span class="f-temp wa-f-temp"><b>29°</b> / 22°</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 模拟课程 -->
+      <div style="background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); padding: 12px 14px; display: flex; align-items: center; gap: 10px; margin-top: 12px;">
+        <span style="width: 10px; height: 10px; border-radius: 3px; background: var(--color-primary-500); flex: none;"></span>
+        <span style="font-weight: var(--font-weight-bold); color: var(--color-text-primary); font-size: var(--font-size-sm); min-width: 84px;">08:00–09:40</span>
+        <span style="flex: 1; font-size: var(--font-size-body); color: var(--color-text-primary);">高等数学 A1</span>
+        <span style="font-size: var(--font-size-sm); color: var(--color-text-tertiary);">A101</span>
+      </div>
+
+      <div class="scene-note">📱 移动端沿用简约信息条（白底卡片，与现有 UI 一致）；预警以右上角胶囊角标显示；雨/雪动态在桌面毛玻璃卡上展示。</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ============ 数据映射（演示） ============ */
+const WEATHER = {
+  sunny:    { name: '晴',   temp: '26°', desc: '体感 28° · 微风',     hl: '<b>33°</b> / 22°', feels: '28°', humidity: '62%', pop: '10%',  wind: '东南风 2 级', aqi: '优 42' },
+  cloudy:   { name: '多云', temp: '24°', desc: '体感 26° · 东南风',   hl: '<b>29°</b> / 20°', feels: '26°', humidity: '58%', pop: '20%',  wind: '东南风 3 级', aqi: '良 58' },
+  overcast: { name: '阴',   temp: '21°', desc: '体感 21° · 无持续风', hl: '<b>24°</b> / 18°', feels: '21°', humidity: '66%', pop: '30%',  wind: '东风 1 级',   aqi: '良 65' },
+  lightrain:{ name: '小雨', temp: '19°', desc: '体感 18° · 湿度 92%', hl: '<b>21°</b> / 16°', feels: '18°', humidity: '92%', pop: '80%',  wind: '北风 2 级',   aqi: '优 38' },
+  thunder:  { name: '雷阵雨', temp: '22°', desc: '体感 24° · 雷暴大风', hl: '<b>26°</b> / 17°', feels: '24°', humidity: '88%', pop: '90%',  wind: '北风 4 级',   aqi: '良 52' },
+  snow:     { name: '雪',   temp: '-2°', desc: '体感 -6° · 北风 4 级', hl: '<b>1°</b> / -5°',   feels: '-6°', humidity: '78%', pop: '70%',  wind: '北风 4 级',   aqi: '优 30' },
+  fog:      { name: '雾',   temp: '16°', desc: '体感 16° · 能见度 300m', hl: '<b>19°</b> / 14°', feels: '16°', humidity: '95%', pop: '10%', wind: '静风',      aqi: '中度 132' },
+};
+
+const ICON = {
+  sunny: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" /></svg>',
+  cloudy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.07-8.88 5.5 5.5 0 0 0-10.55 1.13A3.5 3.5 0 0 0 7 19h10.5Z" /><path d="M8 12a4 4 0 0 1 4-4 4.5 4.5 0 0 1 4.5 4.5" /></svg>',
+  overcast: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h3M6 7.5 4 6M6 16.5 4 18M9 5l-1-2M9 19l-1 2M14 6.5a3.5 3.5 0 0 1 3 5.5h.5a3 3 0 0 1 0 6H6a4 4 0 0 1-.4-7.97" /></svg>',
+  lightrain: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25" /><path d="M16 13v6M12 13v6M8 13v6" /></svg>',
+  thunder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25" /><path d="m13 11-4 6h5l-3 6" /></svg>',
+  snow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25" /><path d="M12 13v.01M12 17v.01M9 15v.01M15 15v.01" /></svg>',
+  fog: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5h8M8 9h10M4 13h16M4 17h10" /><circle cx="6" cy="6" r="1.5" fill="currentColor" /><circle cx="18" cy="10" r="1.5" fill="currentColor" /></svg>',
+};
+
+const ALERT = {
+  none: null,
+  heat:  { level: 'orange', name: '高温橙色预警', msg: '最高气温达 38°C 以上，注意防暑降温' },
+  storm: { level: 'blue',   name: '暴雨蓝色预警', msg: '12 小时内降雨量将达 50mm 以上' },
+  gale:  { level: 'yellow', name: '大风黄色预警', msg: '阵风 8-9 级，出行注意安全' },
+  haze:  { level: 'red',    name: '雾霾红色预警', msg: '能见度低于 500m，减少户外活动' },
+};
+
+let currentWx = 'sunny';
+let currentAlert = 'none';
+let autoTimer = null;
+const wxOrder = ['sunny', 'cloudy', 'overcast', 'lightrain', 'thunder', 'snow', 'fog'];
+
+/* ============ Canvas 粒子（B 方案） ============ */
+(function initCanvasFX() {
+  const canvases = document.querySelectorAll('.fx-canvas');
+  const engines = [];
+  canvases.forEach(canvas => {
+    const wrap = canvas;
+    const ctx = canvas.getContext('2d');
+    let w = 0, h = 0, dpr = window.devicePixelRatio || 1;
+    let raindrops = [], snowflakes = [];
+    let mode = null;
+
+    const resize = () => {
+      const r = wrap.parentElement.getBoundingClientRect();
+      w = r.width; h = r.height;
+      canvas.width = Math.max(1, w * dpr);
+      canvas.height = Math.max(1, h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      raindrops = Array.from({ length: 30 }, () => ({
+        x: Math.random() * w, y: Math.random() * h,
+        len: 7 + Math.random() * 9, spd: 110 + Math.random() * 90,
+        a: 0.3 + Math.random() * 0.5,
+      }));
+      snowflakes = Array.from({ length: 24 }, () => ({
+        x: Math.random() * w, y: Math.random() * h,
+        r: 1 + Math.random() * 1.8,
+        spd: 28 + Math.random() * 45,
+        sway: 0.6 + Math.random() * 1.2,
+        ph: Math.random() * Math.PI * 2,
+        a: 0.45 + Math.random() * 0.45,
+      }));
+    };
+    resize();
+    window.addEventListener('resize', resize);
+
+    let last = performance.now();
+    function tick(now) {
+      requestAnimationFrame(tick);
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      ctx.clearRect(0, 0, w, h);
+      if (mode === 'rain' || mode === 'heavy') {
+        const speed = mode === 'heavy' ? 1.3 : 1;
+        for (const d of raindrops) {
+          d.y += d.spd * speed * dt;
+          d.x -= d.spd * 0.08 * dt;
+          if (d.y > h + 10) { d.y = -10; d.x = Math.random() * w; }
+          ctx.strokeStyle = 'rgba(255,255,255,' + d.a + ')';
+          ctx.lineWidth = 1.3;
+          ctx.beginPath();
+          ctx.moveTo(d.x, d.y);
+          ctx.lineTo(d.x + 2, d.y - d.len);
+          ctx.stroke();
+        }
+      } else if (mode === 'snow') {
+        for (const f of snowflakes) {
+          f.x += Math.sin(now * 0.001 * f.sway + f.ph) * 0.5 * dt * 60;
+          f.y += f.spd * dt;
+          if (f.y > h + 5) { f.y = -5; f.x = Math.random() * w; }
+          if (f.x < -5) f.x = w + 5; else if (f.x > w + 5) f.x = -5;
+          ctx.fillStyle = 'rgba(255,255,255,' + f.a + ')';
+          ctx.beginPath();
+          ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    requestAnimationFrame(tick);
+    engines.push({ setMode: (wx) => {
+      if (wx === 'lightrain') mode = 'rain';
+      else if (wx === 'thunder') mode = 'heavy';
+      else if (wx === 'snow') mode = 'snow';
+      else mode = null;
+    } });
+  });
+  window.__setCanvasMode = (wx) => engines.forEach(e => e.setMode(wx));
+})();
+
+/* ============ 渲染 ============ */
+function renderAll() {
+  const data = WEATHER[currentWx];
+  // 两端卡片：桌面毛玻璃（.weather）+ 移动简约（.weather-a）
+  document.querySelectorAll('.weather, .weather-a').forEach(card => {
+    card.querySelectorAll('.wx-bg').forEach(el => el.classList.toggle('active', el.classList.contains(currentWx)));
+    const q = s => card.querySelector(s);
+    const icon = q('[data-el="icon"]'); if (icon) icon.innerHTML = ICON[currentWx];
+    const temp = q('[data-el="temp"]'); if (temp) temp.innerHTML = data.temp + ' <small>' + data.name + '</small>';
+    const desc = q('[data-el="desc"]'); if (desc) desc.textContent = data.desc;
+    const hl = q('[data-el="hl"]'); if (hl) hl.innerHTML = data.hl;
+    const feels = q('[data-el="feels"]'); if (feels) feels.textContent = data.feels;
+    const humidity = q('[data-el="humidity"]'); if (humidity) humidity.textContent = data.humidity;
+    const pop = q('[data-el="pop"]'); if (pop) pop.textContent = data.pop;
+    const wind = q('[data-el="wind"]'); if (wind) wind.textContent = data.wind;
+    const aqi = q('[data-el="aqi"]'); if (aqi) aqi.textContent = data.aqi;
+
+    const a = ALERT[currentAlert];
+    // 简约卡（移动端）：右上角预警胶囊角标
+    const aFlag = q('[data-el="aFlag"]');
+    if (aFlag) {
+      if (!a) { aFlag.style.display = 'none'; }
+      else {
+        aFlag.style.display = 'flex';
+        aFlag.className = 'wa-alert-flag level-' + a.level;
+        aFlag.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><path d="M12 9v4M12 17h.01" /></svg>' + a.name;
+      }
+      return;
+    }
+    // 毛玻璃卡：内部预警横幅（折叠区可见）
+    const alertEl = q('[data-el="alert"]');
+    if (!alertEl) return;
+    if (!a) { alertEl.style.display = 'none'; alertEl.className = 'wx-alert'; }
+    else {
+      alertEl.style.display = 'flex';
+      alertEl.className = 'wx-alert level-' + a.level;
+      alertEl.querySelector('.wa-level').textContent = a.name;
+      alertEl.querySelector('.wa-msg').textContent = '：' + a.msg;
+    }
+  });
+  document.querySelectorAll('[data-wx]').forEach(b => b.classList.toggle('active', b.getAttribute('data-wx') === currentWx));
+  document.querySelectorAll('[data-alert]').forEach(b => b.classList.toggle('active', b.getAttribute('data-alert') === currentAlert));
+}
+
+/* ============ 交互：两端卡片点击展开/收起 ============ */
+document.getElementById('wDesktop').addEventListener('click', function () {
+  this.classList.toggle('expanded');
+});
+document.getElementById('wMobile').addEventListener('click', function () {
+  this.classList.toggle('expanded');
+});
+
+/* 控制区绑定 */
+document.querySelectorAll('[data-wx]').forEach(btn => btn.addEventListener('click', () => {
+  stopAuto(); currentWx = btn.getAttribute('data-wx'); renderAll(); window.__setCanvasMode(currentWx);
+}));
+document.querySelectorAll('[data-alert]').forEach(btn => btn.addEventListener('click', () => {
+  currentAlert = btn.getAttribute('data-alert'); renderAll();
+}));
+
+const autoBtn = document.getElementById('btnAuto');
+function stopAuto() {
+  if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+  autoBtn.classList.remove('active');
+  autoBtn.textContent = '▶ 自动轮播';
+}
+autoBtn.addEventListener('click', () => {
+  if (autoTimer) { stopAuto(); return; }
+  autoBtn.classList.add('active');
+  autoBtn.textContent = '⏸ 停止轮播';
+  let i = wxOrder.indexOf(currentWx);
+  autoTimer = setInterval(() => {
+    i = (i + 1) % wxOrder.length;
+    currentWx = wxOrder[i];
+    renderAll();
+    window.__setCanvasMode(currentWx);
+  }, 1800);
+});
+
+renderAll();
+window.__setCanvasMode('sunny');
+</script>
+</body>
+</html>

@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS = {
   reminder: { enabled: false, mode: 'every', advanceMinutes: 10 },
   labReminder: { enabled: false, mode: 'every', advanceMinutes: 10 },
   homeworkReminder: { enabled: false, advanceDays: 2 },
+  weather: { enabled: false, apiKey: '', location: '' },
 }
 
 function readJson(key, fallback) {
@@ -26,6 +27,7 @@ export function readSettings() {
     reminder: { ...DEFAULT_SETTINGS.reminder, ...readJson('reminder', {}) },
     labReminder: { ...DEFAULT_SETTINGS.labReminder, ...readJson('lab_reminder', {}) },
     homeworkReminder: { ...DEFAULT_SETTINGS.homeworkReminder, ...readJson('homework_reminder', {}) },
+    weather: { ...DEFAULT_SETTINGS.weather, ...readJson('weather', {}) },
   }
 }
 
@@ -36,6 +38,7 @@ export function writeSettings(patch) {
       reminder: 'reminder',
       labReminder: 'lab_reminder',
       homeworkReminder: 'homework_reminder',
+      weather: 'weather',
     }[key]
     if (storeKey) setSetting(storeKey, JSON.stringify(value))
   }
@@ -68,5 +71,6 @@ export function ensureDefaultSettings() {
     setSetting('reminder', JSON.stringify(DEFAULT_SETTINGS.reminder))
     setSetting('lab_reminder', JSON.stringify(DEFAULT_SETTINGS.labReminder))
     setSetting('homework_reminder', JSON.stringify(DEFAULT_SETTINGS.homeworkReminder))
+    setSetting('weather', JSON.stringify(DEFAULT_SETTINGS.weather))
   }
 }

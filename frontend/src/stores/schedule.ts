@@ -4,7 +4,7 @@
 // ============================================================
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { api, type ScheduleResponse, type SettingsPayload } from '@/api/client'
+import { api, type ScheduleResponse, type SettingsPayload, type WeatherData } from '@/api/client'
 import { MOCK_COURSES, MOCK_PERIODS, MOCK_SEMESTER } from '@/data/mock'
 import type { Course, Exam, Homework, Period, Semester, Weekday, WeekType } from '@/types'
 import { pickCourseColor } from '@/utils/course'
@@ -43,7 +43,28 @@ export const useScheduleStore = defineStore('schedule', () => {
     labReminder: { enabled: false, mode: 'every', advanceMinutes: 10 },
     homeworkReminder: { enabled: false, advanceDays: 2 },
     accessEnabled: false,
+    weather: { enabled: false, apiKey: '', location: '' },
   })
+
+  // 天气数据（/api/weather；服务端 30 分钟缓存）
+  const weatherData = ref<WeatherData | null>(null)
+  const weatherLoading = ref(false)
+
+  /** 拉取天气（设置页保存后调用；失败保留旧数据） */
+  async function refreshWeather(): Promise<void> {
+    if (!remote.value || !settings.value.weather?.enabled) {
+      weatherData.value = null
+      return
+    }
+    weatherLoading.value = true
+    try {
+      weatherData.value = await api.getWeather()
+    } catch {
+      weatherData.value = null
+    } finally {
+      weatherLoading.value = false
+    }
+  }
 
   // 访问口令：开启且未登录时为 true（App 层据此展示口令页）
   const accessRequired = ref(false)
@@ -508,7 +529,7 @@ export const useScheduleStore = defineStore('schedule', () => {
   }
 
   // ---- 设置 ----
-  /** 部分写设置（提醒 / 单双周过滤），成功后同步本地 */
+  /** 部分写设置（提醒 / 单双周过滤 / 天气），成功后同步本地 */
   async function updateSettings(patch: Partial<SettingsPayload>): Promise<void> {
     if (!remote.value) {
       settings.value = { ...settings.value, ...patch }
@@ -519,6 +540,7 @@ export const useScheduleStore = defineStore('schedule', () => {
     settings.value = updated
     showOddEvenFilter.value = updated.showOddEvenFilter
     if (patch.showOddEvenFilter !== undefined) await refreshSchedule()
+    if (patch.weather !== undefined) await refreshWeather()
   }
 
   /** 单双周过滤开关（同时写回设置） */
@@ -593,6 +615,9 @@ export const useScheduleStore = defineStore('schedule', () => {
     weekOffset,
     showOddEvenFilter,
     settings,
+    weatherData,
+    weatherLoading,
+    refreshWeather,
     accessRequired,
     remote,
     mattersLoading,

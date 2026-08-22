@@ -21,6 +21,7 @@ import { homeworkRouter } from './routes/homework.js'
 import { importRouter } from './routes/import.js'
 import { backupRouter } from './routes/backup.js'
 import { settingsRouter } from './routes/settings.js'
+import { weatherRouter } from './routes/weather.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const FRONTEND_DIST = process.env.CLASSBOARD_DIST_DIR
@@ -47,6 +48,7 @@ app.use('/api/homework', requireSession, homeworkRouter)
 app.use('/api/import', requireSession, importRouter)
 app.use('/api/backup', requireSession, backupRouter)
 app.use('/api/settings', requireSession, settingsRouter)
+app.use('/api/weather', requireSession, weatherRouter)
 
 // /api 下未匹配 → 404
 app.use('/api', (req, res) => {
