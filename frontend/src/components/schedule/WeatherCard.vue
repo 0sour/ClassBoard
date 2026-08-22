@@ -203,7 +203,7 @@ const visible = computed(() => store.weatherData !== null)
 
 <template>
   <!-- ============ 桌面形态：毛玻璃渐变卡 ============ -->
-  <div v-if="visible && variant === 'glass'" class="wx-card glass-card" :class="{ expanded }" @click="toggleExpand">
+  <div v-if="visible && variant === 'glass'" class="weather glass-card" :class="{ expanded }" @click="toggleExpand">
     <div class="wx-bg" :style="{ background: gradientBg }"></div>
     <canvas ref="canvasRef" class="fx-canvas"></canvas>
 
