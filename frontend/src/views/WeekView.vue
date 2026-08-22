@@ -170,7 +170,8 @@ function animateToOffset(target: number, duration = 240): void {
   wheelAnim = requestAnimationFrame(tick)
 }
 
-/** 以当前中心日重建序列（滑到边缘时调用，offset 保持不变） */
+/** 以当前中心日重建序列（滑到边缘时调用，offset 保持不变；
+    同时同步拖拽基准，避免重建后继续拖动位置跳变） */
 function rebuildWheel(): void {
   const idx = centerIdxOf(wheelOffset.value)
   const item = wheelDates.value[idx]
@@ -178,6 +179,11 @@ function rebuildWheel(): void {
   wheelCenter.value = new Date(item.date)
   syncWheelPad()
   wheelOffset.value = wheelOffsetOf(WHEEL_HALF)
+  if (wheelDrag) {
+    // 重建把 offset 重置到新序列中心，拖拽基准也要随之重置，
+    // 否则下次 pointermove 用旧 baseOffset 计算会跳回旧位置
+    wheelDrag.baseOffset = wheelOffset.value
+  }
   commitWheelIdx(WHEEL_HALF)
 }
 
