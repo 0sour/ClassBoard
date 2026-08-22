@@ -27,14 +27,31 @@ interface CityOption {
 
 const rootRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLInputElement | null>(null)
+/** 下拉面板（Teleport 到 body，需与 root 一并视为内部区域，避免点击面板内被误关） */
+const panelRef = ref<HTMLElement | null>(null)
 const open = ref(false)
 const options = ref<CityOption[]>([])
 const searching = ref(false)
 const activeIndex = ref(-1)
 const noResult = ref(false)
+/** 面板 fixed 定位（相对视口，跟随输入框） */
+const panelX = ref(0)
+const panelY = ref(0)
 
 let debounceTimer: number | null = null
 let searchSeq = 0
+
+const MENU_WIDTH = 264
+
+/** 依据输入框位置计算面板坐标（底部 +6px；宽度溢出视口时回退对齐右缘） */
+function updatePosition(): void {
+  const r = inputRef.value?.getBoundingClientRect()
+  if (!r) return
+  let x = r.left
+  if (x + MENU_WIDTH > window.innerWidth - 8) x = Math.max(8, window.innerWidth - MENU_WIDTH - 8)
+  panelX.value = Math.round(x)
+  panelY.value = Math.round(r.bottom + 6)
+}
 
 /** 输入变化：防抖 300ms 搜索 */
 function onInput(): void {
@@ -108,11 +125,11 @@ function scrollActiveIntoView(): void {
   })
 }
 
-/** 点击外部关闭 */
+/** 点击外部关闭（面板 Teleport 到 body，需一并视为内部区域） */
 function onDocMousedown(e: MouseEvent): void {
-  if (open.value && rootRef.value && !rootRef.value.contains(e.target as Node)) {
-    open.value = false
-  }
+  const t = e.target as Node
+  if (rootRef.value?.contains(t) || panelRef.value?.contains(t)) return
+  open.value = false
 }
 
 /** 外部值变化（回显/清空）时同步输入框 */
@@ -124,9 +141,20 @@ watch(
   },
 )
 
-onMounted(() => document.addEventListener('mousedown', onDocMousedown))
+/** 滚动/缩放时面板跟随输入框 */
+function onViewportChange(): void {
+  if (open.value) updatePosition()
+}
+
+onMounted(() => {
+  document.addEventListener('mousedown', onDocMousedown)
+  window.addEventListener('scroll', onViewportChange, true)
+  window.addEventListener('resize', onViewportChange)
+})
 onBeforeUnmount(() => {
   document.removeEventListener('mousedown', onDocMousedown)
+  window.removeEventListener('scroll', onViewportChange, true)
+  window.removeEventListener('resize', onViewportChange)
   if (debounceTimer !== null) window.clearTimeout(debounceTimer)
 })
 
@@ -149,34 +177,44 @@ function admText(opt: CityOption): string {
         :value="modelValue"
         autocomplete="off"
         @input="onInput"
-        @focus="open = true"
+        @focus="open = true; updatePosition()"
         @keydown="onKeydown"
       />
       <svg v-if="searching" class="city-select__spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56" /></svg>
     </span>
 
-    <Transition name="city">
-      <div v-if="open" class="city-select__menu" role="listbox" :aria-label="ariaLabel">
-        <button
-          v-for="(opt, i) in options"
-          :key="opt.id"
-          class="city-opt"
-          :class="{ 'is-active': i === activeIndex }"
-          type="button"
-          role="option"
-          :aria-selected="i === activeIndex"
-          @mousedown.prevent
-          @click="choose(opt)"
+    <!-- 下拉面板 Teleport 到 body：fixed 定位跟随输入框，规避页面层叠/裁剪遮挡 -->
+    <Teleport to="body">
+      <Transition name="city">
+        <div
+          v-if="open"
+          ref="panelRef"
+          class="city-select__menu"
+          role="listbox"
+          :aria-label="ariaLabel"
+          :style="{ left: panelX + 'px', top: panelY + 'px', zIndex: 9999 }"
         >
-          <span class="city-opt__name">{{ opt.name }}</span>
-          <span class="city-opt__adm">{{ admText(opt) }}</span>
-        </button>
-        <div v-if="noResult" class="city-empty">未找到匹配城市，试试「杭州」「信阳」等名称</div>
-        <div v-else-if="!options.length" class="city-empty">
-          {{ searching ? '搜索中…' : '输入城市名搜索，如「杭州」' }}
+          <button
+            v-for="(opt, i) in options"
+            :key="opt.id"
+            class="city-opt"
+            :class="{ 'is-active': i === activeIndex }"
+            type="button"
+            role="option"
+            :aria-selected="i === activeIndex"
+            @mousedown.prevent
+            @click="choose(opt)"
+          >
+            <span class="city-opt__name">{{ opt.name }}</span>
+            <span class="city-opt__adm">{{ admText(opt) }}</span>
+          </button>
+          <div v-if="noResult" class="city-empty">未找到匹配城市，试试「杭州」「信阳」等名称</div>
+          <div v-else-if="!options.length" class="city-empty">
+            {{ searching ? '搜索中…' : '输入城市名搜索，如「杭州」' }}
+          </div>
         </div>
-      </div>
-    </Transition>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -225,12 +263,10 @@ function admText(opt: CityOption): string {
   to { transform: rotate(360deg); }
 }
 
-/* 下拉面板（与 AppSelect 风格一致） */
+/* 下拉面板（Teleport 到 body，fixed 定位；坐标由 inline style 提供） */
 .city-select__menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  min-width: 100%;
+  position: fixed;
+  min-width: 264px;
   max-width: 320px;
   max-height: 260px;
   overflow-y: auto;
@@ -239,7 +275,6 @@ function admText(opt: CityOption): string {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-pop);
   padding: var(--spacing-xs);
-  z-index: var(--z-index-float);
 }
 
 .city-opt {
