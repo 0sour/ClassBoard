@@ -77,7 +77,8 @@ weatherRouter.get(
 
     const [now, daily, air, warning, sun] = await Promise.all([
       fetchQWeather(`/weather/now?location=${loc.id}`, weather.apiKey, `now:${loc.id}`),
-      fetchQWeather(`/weather/3d?location=${loc.id}`, weather.apiKey, `daily:${loc.id}`),
+      // 7 天预报（免费版支持）：前端取未来 3 天展示
+      fetchQWeather(`/weather/7d?location=${loc.id}`, weather.apiKey, `daily7:${loc.id}`),
       fetchQWeather(`/air/now?location=${loc.id}`, weather.apiKey, `air:${loc.id}`),
       fetchQWeather(`/warning/now?location=${loc.id}`, weather.apiKey, `warn:${loc.id}`, 10 * 60 * 1000),
       fetchSunTimes(loc.lat, loc.lon),
