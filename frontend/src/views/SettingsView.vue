@@ -3,6 +3,7 @@
 import { computed, reactive, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import AppSelect, { type AppSelectOption } from '@/components/common/AppSelect.vue'
+import CitySearchSelect from '@/components/common/CitySearchSelect.vue'
 import TimePicker from '@/components/common/TimePicker.vue'
 import DatePicker from '@/components/common/DatePicker.vue'
 import { confirm, toast } from '@/utils/ui'
@@ -693,12 +694,11 @@ async function toggleAccess(): Promise<void> {
       <div v-if="store.settings.weather.enabled" class="sub-row">
         <label class="edit-field">
           <span class="edit-field__label">城市</span>
-          <input
-            class="text-input"
-            type="text"
-            placeholder="如：杭州"
+          <CitySearchSelect
+            :model-value="store.settings.weather.location"
+            placeholder="输入城市名搜索，如「杭州」"
             aria-label="天气城市"
-            v-model="store.settings.weather.location"
+            @update:model-value="(v: string) => store.settings.weather.location = v"
           />
         </label>
         <label class="edit-field">

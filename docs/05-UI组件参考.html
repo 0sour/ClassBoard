@@ -10,7 +10,7 @@
    ClassBoard 设计系统组件参考页 · v2.8 · 清新浅色极简
    样式基座：原样嵌入《03-设计语言文档》v2.1 第 10 节（:root Token，唯一权威来源）。
    页面组件样式一律引用上述 token 变量。v2.x 明确本期不做暗色模式。
-   组件规范对齐《04-UI设计文档》v2.8（组件清单、三态、交互与无障碍）。
+   组件规范对齐《04-UI设计文档》v2.9（组件清单、三态、交互与无障碍）。
    ========================================================================== */
 
 /* ===== 第 10 节：Token 输出（CSS 自定义属性）— 原样嵌入，唯一权威来源 ===== */
@@ -551,6 +551,38 @@ svg { display: block; }
 .dp-day.selected { background: var(--color-brand); color: var(--color-text-inverse); font-weight: var(--font-weight-medium); }
 .dp-day.selected:hover { background: var(--color-brand-hover); }
 .dp-day--blank { pointer-events: none; }
+
+/* 城市搜索下拉 CitySearchSelect（v2.9 补全，文档 4.12） */
+.city-select-demo { position: relative; display: inline-block; }
+.city-select-demo__input {
+  height: 34px; min-width: 220px;
+  padding: 0 var(--spacing-sm);
+  border: 1px solid var(--color-border-default); border-radius: var(--radius-sm);
+  background: var(--color-bg-surface); color: var(--color-text-body);
+  font-size: var(--font-size-sm);
+  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.city-select-demo__input:focus { outline: none; border-color: var(--color-border-focus); }
+.city-select-demo__menu {
+  position: absolute; top: calc(100% + 6px); left: 0;
+  min-width: 100%; max-width: 320px; max-height: 260px; overflow-y: auto;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop); padding: var(--spacing-xs);
+  z-index: var(--z-index-float);
+}
+.city-opt {
+  display: flex; align-items: baseline; gap: var(--spacing-sm);
+  width: 100%; padding: var(--spacing-sm) var(--spacing-md);
+  background: none; border: none; border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm); color: var(--color-text-body);
+  cursor: pointer; text-align: left;
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.city-opt:hover { background: var(--color-brand-subtle); }
+.city-opt__name { font-weight: var(--font-weight-medium); color: var(--color-text-body); flex: none; }
+.city-opt__adm { font-size: var(--font-size-xs); color: var(--color-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.city-empty { padding: var(--spacing-lg) var(--spacing-md); text-align: center; font-size: var(--font-size-sm); color: var(--color-text-tertiary); }
 
 /* 开关 Switch */
 .switch-row { display: flex; align-items: center; gap: var(--spacing-md); padding: 6px 0; }
@@ -1241,10 +1273,10 @@ svg { display: block; }
     <h1>ClassBoard 设计系统组件参考</h1>
     <p>本页为课程表 Web 应用的组件落地规范：所有样式直接引用《03-设计语言文档》v2.1 第 10 节中的 CSS 自定义属性（唯一权威 token 来源），组件与交互对齐《04-UI设计文档》v2.8，视觉观感与选定的「清新浅色极简」风格（预览 01）保持一致。请在浏览器直接打开预览，各组件均可交互。</p>
     <div class="page-intro__meta">
-      <span class="meta-chip">文档版本 v2.8</span>
+      <span class="meta-chip">文档版本 v2.9</span>
       <span class="meta-chip">风格：清新浅色极简（预览 01）</span>
       <span class="meta-chip">token 来源：设计语言文档 第 10 节（v2.1）</span>
-      <span class="meta-chip">组件规范：UI 设计文档 v2.8</span>
+      <span class="meta-chip">组件规范：UI 设计文档 v2.9</span>
       <span class="meta-chip">本期不做暗色模式</span>
       <span class="meta-chip">单文件自包含 · 离线可用</span>
     </div>
@@ -1714,6 +1746,31 @@ svg { display: block; }
           </div>
         </div>
         <p class="demo-note"><svg class="icon icon--14"><use href="#i-info"/></svg>月份导航 28×28 hover bg-subtle；日按钮 30px 高，hover bg-subtle，今天 brand 加粗、选中 brand 底白字；超出可选范围置灰。</p>
+      </div>
+    </div>
+
+    <!-- 城市搜索下拉（v2.9 补全，文档 4.12） -->
+    <div class="demo">
+      <h3>城市搜索下拉 CitySearchSelect（v2.9 补全）</h3>
+      <p class="demo__desc">天气设置城市输入（文档 4.12）：输入即搜索（300ms 防抖），下拉展示城市名 + 省/市归属；键盘 ↑↓/Enter/Esc 导航；外部点击关闭</p>
+      <div class="demo__content">
+        <div class="sub-label">输入「杭州」试试（演示数据为静态示例，接入后端后走 /api/weather/cities）</div>
+        <div class="demo-row">
+          <div class="city-select-demo" id="city-demo">
+            <div class="city-select-demo__wrap">
+              <input class="city-select-demo__input" type="text" placeholder="输入城市名搜索，如「杭州」" aria-label="天气城市" autocomplete="off" id="city-demo-input" />
+            </div>
+            <div class="city-select-demo__menu" id="city-demo-menu" role="listbox" style="display:none;">
+              <button class="city-opt" type="button" role="option"><span class="city-opt__name">杭州</span><span class="city-opt__adm">浙江省 · 杭州</span></button>
+              <button class="city-opt" type="button" role="option"><span class="city-opt__name">萧山</span><span class="city-opt__adm">浙江省 · 杭州</span></button>
+              <button class="city-opt" type="button" role="option"><span class="city-opt__name">桐庐</span><span class="city-opt__adm">浙江省 · 杭州</span></button>
+              <button class="city-opt" type="button" role="option"><span class="city-opt__name">淳安</span><span class="city-opt__adm">浙江省 · 杭州</span></button>
+              <button class="city-opt" type="button" role="option"><span class="city-opt__name">建德</span><span class="city-opt__adm">浙江省 · 杭州</span></button>
+            </div>
+            <div class="city-select-demo__menu city-empty" id="city-demo-empty" style="display:none;">未找到匹配城市，试试「杭州」「信阳」等名称</div>
+          </div>
+        </div>
+        <p class="demo-note"><svg class="icon icon--14"><use href="#i-info"/></svg>输入框高 34px、宽 ≥220px；下拉面板 max-height 260px 内部滚动；hover 与键盘激活项 brand-subtle 底；搜索中显示旋转加载图标。</p>
       </div>
     </div>
   </section>
@@ -2464,6 +2521,42 @@ svg { display: block; }
         root.classList.remove('is-open');
         trigger.setAttribute('aria-expanded', 'false');
       }
+    });
+  })();
+
+  /* ---------- 城市搜索下拉 CitySearchSelect（v2.9 补全，文档 4.12） ---------- */
+  (function () {
+    var root = $('#city-demo'), input = $('#city-demo-input'),
+        menu = $('#city-demo-menu'), empty = $('#city-demo-empty');
+    function showMenu() {
+      menu.style.display = 'block';
+      empty.style.display = 'none';
+    }
+    function showEmpty() {
+      menu.style.display = 'none';
+      empty.style.display = 'block';
+    }
+    function hide() {
+      menu.style.display = 'none';
+      empty.style.display = 'none';
+    }
+    input.addEventListener('focus', function () {
+      if (input.value.trim()) showMenu();
+      else showEmpty();
+    });
+    input.addEventListener('input', function () {
+      if (input.value.trim()) showMenu();
+      else hide();
+    });
+    $$('.city-opt', menu).forEach(function (opt) {
+      opt.addEventListener('mousedown', function (e) { e.preventDefault(); });
+      opt.addEventListener('click', function () {
+        input.value = opt.querySelector('.city-opt__name').textContent;
+        hide();
+      });
+    });
+    document.addEventListener('click', function (e) {
+      if (!e.target.closest('#city-demo')) hide();
     });
   })();
 

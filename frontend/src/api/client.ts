@@ -183,6 +183,9 @@ export const api = {
   // ---- 天气 ----
   getWeather: () => request<WeatherData>('/weather'),
 
+  /** 城市搜索（设置页下拉）：返回 [{ name, adm1, adm2, id }] */
+  searchCities: (q: string) => request<{ name: string; adm1: string; adm2: string; id: string }[]>(`/weather/cities?q=${encodeURIComponent(q)}`),
+
   // ---- 备份 ----
   exportBackup: async (): Promise<void> => {
     const res = await fetch(BASE + '/backup')

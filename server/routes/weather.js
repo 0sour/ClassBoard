@@ -95,3 +95,28 @@ weatherRouter.get(
     })
   }),
 )
+
+/** 城市搜索（设置页下拉用）：QWeather 城市搜索接口，24h 缓存 */
+weatherRouter.get(
+  '/cities',
+  wrap(async (req, res) => {
+    const { weather } = readSettings()
+    const q = String(req.query.q ?? '').trim()
+    if (!weather.enabled || !weather.apiKey) throw badRequest('天气功能未启用，请在设置页配置')
+    if (!q || q.length < 1) return res.json([])
+    const cacheKey = `cities:${q}`
+    const hit = cache.get(cacheKey)
+    if (hit && Date.now() - hit.ts < 24 * 3600 * 1000) return res.json(hit.data)
+    const url = `https://geoapi.qweather.com/v2/city/lookup?location=${encodeURIComponent(q)}&key=${weather.apiKey}&number=8`
+    const body = await (await fetch(url)).json()
+    if (body.code !== '200') return res.json([])
+    const list = (body.location ?? []).map((l) => ({
+      name: l.name,
+      adm1: l.adm1,
+      adm2: l.adm2,
+      id: l.id,
+    }))
+    cache.set(cacheKey, { ts: Date.now(), data: list })
+    res.json(list)
+  }),
+)
