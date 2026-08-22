@@ -312,7 +312,7 @@ async function exportPng(): Promise<void> {
               @pointerup="onWheelUp"
               @pointercancel="onWheelCancel"
             >
-              <!-- 轨道：41 格 translateX 跟手驱动；中央格恒在视口中央，日期变化不跳位 -->
+              <!-- 轨道：41 格 translateX 跟手驱动；指示器固定在视口中央（不随轨道移动） -->
               <div
                 ref="wheelTrackRef"
                 class="dv-wheel__track"
@@ -323,7 +323,7 @@ async function exportPng(): Promise<void> {
                   :key="i"
                   class="dv-wheel__day"
                   :class="{
-                    active: i === WHEEL_SPAN,
+                    active: isSameDate(d.date, activeDay),
                     today: isSameDate(d.date, store.today),
                   }"
                   type="button"
@@ -333,6 +333,8 @@ async function exportPng(): Promise<void> {
                   <b>{{ d.date.getDate() }}</b>
                 </button>
               </div>
+              <!-- 常驻选中指示器：固定视口中央，轨道从框内流过 -->
+              <div class="dv-wheel__indicator"></div>
             </div>
           </div>
 
@@ -494,10 +496,11 @@ async function exportPng(): Promise<void> {
   padding: 4px 0;
 }
 
-/* 窗口：overflow hidden，不产生浏览器滚动；轨道用 transform 平移 */
+/* 窗口：overflow hidden 裁切长轨道（防止 41 格撑出页面横向滚动条） */
 .dv-wheel {
   position: relative;
   height: 52px;
+  overflow: hidden;
   touch-action: none;
   cursor: grab;
   user-select: none;
@@ -549,16 +552,27 @@ async function exportPng(): Promise<void> {
   font-weight: var(--font-weight-bold);
 }
 
-/* 选中格（恒为中间格）：自带胶囊高亮，无独立指示器元素——结构上零偏移 */
-.dv-wheel__day.active {
-  background: var(--color-brand-subtle);
-  box-shadow: inset 0 0 0 1.5px var(--color-brand);
-}
-
+/* 选中格：仅文字品牌色（高亮框由固定指示器提供，格子本身不亮，
+   拖动时不会出现"高亮跟着格子跑"的错位感） */
 .dv-wheel__day.active b,
 .dv-wheel__day.active span {
   color: var(--color-brand);
   font-weight: var(--font-weight-bold);
+}
+
+/* 常驻选中指示器：固定视口中央，轨道从框内流过 */
+.dv-wheel__indicator {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  width: 56px;
+  height: 100%;
+  border: 1.5px solid var(--color-brand);
+  border-radius: var(--radius-lg);
+  background: transparent;
+  pointer-events: none;
+  z-index: 2;
 }
 
 /* 单日课程列表：全宽卡片 */
