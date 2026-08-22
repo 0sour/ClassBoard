@@ -62,6 +62,10 @@ const wheelRef = ref<HTMLElement | null>(null)
 const wheelIdx = ref(WHEEL_CENTER)
 const wheelDragging = ref(false)
 let wheelScrollRaf = 0
+/** 自动回正定时器（滚动停止 300ms 后吸附） */
+let wheelSettleTimer: number | null = null
+/** 吸附中标志（避免 settle 引发的 scroll 再调度自己） */
+let wheelSettling = false
 
 /** 归零时分秒，避免日期比较误判 */
 function normalizeDay(d: Date): Date {
@@ -106,9 +110,16 @@ function periodTime(period: number): string {
   return p ? `${p.startTime}–${p.endTime}` : ''
 }
 
-/** 滚动事件（rAF 节流）：中央格索引实时跟随，日期/标题/列表同步刷新 */
+/** 滚动事件（rAF 节流）：中央格索引实时跟随，日期/标题/列表同步刷新；
+ *  同时调度「停止后自动回正」定时器（兼容不支持 scrollend 的环境） */
 function onWheelScroll(): void {
+  if (wheelSettling) return
   cancelAnimationFrame(wheelScrollRaf)
+  if (wheelSettleTimer !== null) window.clearTimeout(wheelSettleTimer)
+  wheelSettleTimer = window.setTimeout(() => {
+    wheelSettleTimer = null
+    settleAlign()
+  }, 300)
   wheelScrollRaf = requestAnimationFrame(() => {
     const view = wheelRef.value
     if (!view) return
@@ -129,6 +140,11 @@ function onWheelScroll(): void {
 function onWheelDown(e: PointerEvent): void {
   if (e.pointerType === 'mouse' && e.button !== 0) return
   wheelDragging.value = true
+  // 拖动中取消自动回正调度
+  if (wheelSettleTimer !== null) {
+    window.clearTimeout(wheelSettleTimer)
+    wheelSettleTimer = null
+  }
 }
 
 /** 指针松开：吸附到最近整格（对齐格子，避免停在两格之间） */
@@ -141,14 +157,30 @@ function onWheelCancel(): void {
   wheelDragging.value = false
 }
 
-/** 吸附到最近整格（scrollTo 平滑），让格子始终对齐指示器 */
+/** 吸附到最近整格（scrollTo 平滑），让格子始终对齐指示器正中 */
 function settleAlign(): void {
   const view = wheelRef.value
   if (!view) return
   const idx = Math.round(view.scrollLeft / WHEEL_ITEM_W)
   const target = idx * WHEEL_ITEM_W
-  if (Math.abs(view.scrollLeft - target) > 2) {
+  if (Math.abs(view.scrollLeft - target) > 1.5) {
+    wheelSettling = true
     view.scrollTo({ left: target, behavior: 'smooth' })
+    // 平滑滚动结束后再校验一次（防滚动回调未触发）
+    if (wheelSettleTimer !== null) window.clearTimeout(wheelSettleTimer)
+    wheelSettleTimer = window.setTimeout(() => {
+      wheelSettleTimer = null
+      wheelSettling = false
+      const now = view.scrollLeft
+      const cur = Math.round(now / WHEEL_ITEM_W)
+      if (Math.abs(now - cur * WHEEL_ITEM_W) > 1.5) {
+        settleAlign()
+      } else {
+        // 最终对齐后同步选中索引
+        const clamped = Math.min(wheelDates.value.length - 1, Math.max(0, cur))
+        if (clamped !== wheelIdx.value) wheelIdx.value = clamped
+      }
+    }, 420)
   }
 }
 
