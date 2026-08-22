@@ -29,6 +29,8 @@ export interface WeatherData {
   daily: { fxDate: string; textDay: string; iconDay: string; tempMax: string; tempMin: string }[]
   air: { aqi: string; category: string } | null
   warning: { id: string; title: string; text: string; severity: string }[]
+  /** 日出日落（Open-Meteo，免费接口） */
+  sun: { sunrise: string; sunset: string } | null
   updatedAt: string
 }
 

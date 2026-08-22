@@ -84,7 +84,10 @@ const aqi = computed(() => {
   const air = store.weatherData?.air
   return air ? `${air.category} ${air.aqi}` : '--'
 })
-const sunText = computed(() => '--') // QWeather 免费版无日出日落，占位
+const sunText = computed(() => {
+  const sun = store.weatherData?.sun
+  return sun ? `${sun.sunrise} / ${sun.sunset}` : '--'
+})
 
 /** 预警：取最高级别（QWeather severity 1=红/2=橙/3=黄/4=蓝） */
 const activeWarning = computed(() => {
