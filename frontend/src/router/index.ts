@@ -8,7 +8,11 @@ import { createRouter, createWebHistory } from 'vue-router'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', redirect: '/week' },
+    // 默认页：手机（<768px）进「今天」，桌面进「周课表」
+    {
+      path: '/',
+      redirect: () => (window.innerWidth < 768 ? '/day' : '/week'),
+    },
     {
       path: '/week',
       name: 'week',
@@ -33,8 +37,8 @@ const router = createRouter({
       component: () => import('@/views/SettingsView.vue'),
       meta: { title: '设置', tab: 'settings' },
     },
-    // 兜底：未知路径重定向到周课表（UI 1.1：周课表为默认首页）
-    { path: '/:pathMatch(.*)*', redirect: '/week' },
+    // 兜底：未知路径重定向到默认页（手机「今天」/ 桌面「周课表」）
+    { path: '/:pathMatch(.*)*', redirect: () => (window.innerWidth < 768 ? '/day' : '/week') },
   ],
 })
 

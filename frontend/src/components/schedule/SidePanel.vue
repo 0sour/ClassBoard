@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import WeatherCard from './WeatherCard.vue'
@@ -13,6 +13,16 @@ const emit = defineEmits<{
   (e: 'openCourse', course: Course): void
   (e: 'openHomework', homework: { id: number; name: string; courseId?: number | null }): void
 }>()
+
+// 桌面端（≥768px）才在侧栏显示天气卡；移动端天气卡只在今日页（DayView）
+const isDesktop = ref(window.innerWidth >= 768)
+
+function onResize(): void {
+  isDesktop.value = window.innerWidth >= 768
+}
+
+window.addEventListener('resize', onResize)
+onBeforeUnmount(() => window.removeEventListener('resize', onResize))
 
 // 组合卡：待交作业 / 实践与其他 分段切换（样式同顶栏视图切换 seg）
 const panelTab = ref<'hw' | 'practice'>('hw')
@@ -71,8 +81,8 @@ function openPracticeItem(p: PracticeItem): void {
 
 <template>
   <aside class="side-panel">
-    <!-- 天气卡（桌面毛玻璃形态，位于本周摘要上方） -->
-    <WeatherCard v-if="store.weatherData" variant="glass" class="reveal" />
+    <!-- 天气卡（仅桌面端显示在侧栏顶部；移动端在今日页） -->
+    <WeatherCard v-if="isDesktop && store.weatherData" variant="glass" class="reveal" />
 
     <!-- 本周摘要 -->
     <div class="sp-card reveal">

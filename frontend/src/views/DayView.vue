@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import WeatherCard from '@/components/schedule/WeatherCard.vue'
 import CourseModal from '@/components/schedule/CourseModal.vue'
@@ -10,6 +10,16 @@ const store = useScheduleStore()
 const selected = ref<Course | null>(null)
 const editing = ref<Course | null>(null)
 const showEditor = ref(false)
+
+// 天气卡仅移动端显示（桌面端由周课表侧栏的毛玻璃卡承担）
+const isMobile = ref(window.innerWidth < 768)
+
+function onResize(): void {
+  isMobile.value = window.innerWidth < 768
+}
+
+window.addEventListener('resize', onResize)
+onBeforeUnmount(() => window.removeEventListener('resize', onResize))
 
 const today = computed(() => store.today)
 const todayLabel = computed(() => {
@@ -51,8 +61,8 @@ function editCourse(course: Course): void {
       <span class="today-count num">共 {{ todayCourses.length }} 节课</span>
     </div>
 
-    <!-- 天气卡（移动端简约形态，位于日期下方） -->
-    <WeatherCard v-if="store.weatherData" variant="slim" class="reveal" />
+    <!-- 天气卡（仅移动端显示；桌面端由周课表侧栏承担） -->
+    <WeatherCard v-if="isMobile && store.weatherData" variant="slim" class="reveal" />
 
     <div class="today-list">
       <button
