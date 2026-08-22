@@ -465,7 +465,8 @@ const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周�
 }
 
 .seg {
-  display: inline-flex;
+  display: flex;
+  justify-content: center; /* 移动端居中；桌面保持布局 */
   gap: 2px;
   background: var(--color-bg-subtle);
   border-radius: var(--radius-md);
@@ -589,7 +590,8 @@ const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周�
 }
 
 .filter-bar {
-  display: inline-flex;
+  display: flex;
+  justify-content: center; /* 移动端居中 */
   gap: var(--spacing-xs);
   padding: 3px;
   background: var(--color-bg-subtle);
