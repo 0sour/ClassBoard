@@ -120,9 +120,10 @@ function syncWheelPad(): void {
   wheelWinW.value = view.clientWidth
 }
 
-/** 使第 idx 格中心对齐视口中心所需的 offset（轨道无 padding，纯数学） */
+/** 使第 idx 格中心对齐视口中心所需的 offset（轨道无 padding，纯数学：
+    格中心 = offset + idx×56 + 28，令其 = winW/2 → offset = winW/2 − idx×56 − 28） */
 function wheelOffsetOf(idx: number): number {
-  return wheelWinW.value / 2 - idx * WHEEL_ITEM_W
+  return wheelWinW.value / 2 - idx * WHEEL_ITEM_W - WHEEL_ITEM_W / 2
 }
 
 /** 初始：中心格（WHEEL_HALF）居中 */
@@ -133,7 +134,7 @@ function initWheel(): void {
 
 /** 由 offset 反推中心格索引（clamp） */
 function centerIdxOf(offset: number): number {
-  const raw = Math.round((wheelWinW.value / 2 - offset) / WHEEL_ITEM_W)
+  const raw = Math.round((wheelWinW.value / 2 - WHEEL_ITEM_W / 2 - offset) / WHEEL_ITEM_W)
   return Math.min(WHEEL_HALF * 2, Math.max(0, raw))
 }
 
@@ -544,7 +545,7 @@ async function exportPng(): Promise<void> {
   font-weight: var(--font-weight-bold);
 }
 
-/* 常驻选中指示器：固定中央胶囊底框 */
+/* 常驻选中指示器：固定中央胶囊框，透明底仅描边（不遮挡日期文字） */
 .dv-wheel__indicator {
   position: absolute;
   left: 50%;
@@ -554,7 +555,7 @@ async function exportPng(): Promise<void> {
   height: 44px;
   border: 1.5px solid var(--color-brand);
   border-radius: var(--radius-lg);
-  background: var(--color-brand-subtle);
+  background: transparent;
   pointer-events: none;
   z-index: 1;
 }
