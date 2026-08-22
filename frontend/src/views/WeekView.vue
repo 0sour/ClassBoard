@@ -140,7 +140,9 @@ function onWheelScroll(): void {
 function onWheelDown(e: PointerEvent): void {
   if (e.pointerType === 'mouse' && e.button !== 0) return
   wheelDragging.value = true
-  // 拖动中取消自动回正调度
+  // 新一轮拖动：解除吸附中状态并取消回正调度，
+  // 否则残留 wheelSettling 会吞掉后续所有滚动事件（日期不跟、不回正）
+  wheelSettling = false
   if (wheelSettleTimer !== null) {
     window.clearTimeout(wheelSettleTimer)
     wheelSettleTimer = null
@@ -177,6 +179,7 @@ function settleAlign(): void {
         settleAlign()
       } else {
         // 最终对齐后同步选中索引
+        wheelSettling = false
         const clamped = Math.min(wheelDates.value.length - 1, Math.max(0, cur))
         if (clamped !== wheelIdx.value) wheelIdx.value = clamped
       }
