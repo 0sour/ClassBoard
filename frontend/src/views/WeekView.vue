@@ -42,10 +42,14 @@ const isMobile = ref(window.innerWidth < 768)
 
 function onResize(): void {
   isMobile.value = window.innerWidth < 768
-  // 移动端轮盘：窗口尺寸变化后重算居中偏移，保持当前展示日居中
+  // 移动端轮盘：窗口尺寸变化后，以当前中心格几何吸附回中心
   if (isMobile.value) {
-    syncWheelPad()
-    wheelOffset.value = wheelOffsetOf(centerIdxOf(wheelOffset.value))
+    const idx = wheelCenterIdx()
+    const target = offsetToCenterItem(idx)
+    if (target !== null) {
+      wheelOffset.value = target
+      commitWheelIdx(idx)
+    }
   }
 }
 
@@ -78,10 +82,11 @@ function periodTime(period: number): string {
 
 function goToday(): void {
   dayOffset.value = 0
-  // 轮盘滑回今天（中心格）
+  // 轮盘滑回今天（序列中心格）
   cancelAnimationFrame(wheelAnim)
   wheelCenter.value = new Date(store.today)
-  void animateToOffset(wheelOffsetOf(WHEEL_HALF))
+  const target = offsetToCenterItem(WHEEL_HALF)
+  if (target !== null) void animateToOffset(target)
 }
 
 /** 两个日期是否为同一天 */
@@ -90,22 +95,23 @@ function isSameDate(a: Date, b: Date): boolean {
 }
 
 // ============================================================
-// 轮盘式日期选择（重写：transform 驱动，不依赖浏览器 scroll）
-// 结构：窗口（overflow hidden）内一条 track（translateX 平移）
-// 指针拖拽手写：pointerdown/move/up 更新平移量并实时切日，
-// 松手 rAF 缓动吸附最近整格；点击格子 rAF 动画滑到中央。
-// 边缘 7 格内重建序列，保持无限滚动。
+// 轮盘式日期选择（DOM 几何驱动，彻底告别手推公式）
+// 一切以实测为准：用 getBoundingClientRect 找「最接近视口中心的格子」，
+// 拖动实时提交中心格日期；点击用包含点击点的格子；吸附=把中心格
+// 平移到视口中心（delta = 格中心−视口中心，纯几何）。
 // ============================================================
 const WHEEL_HALF = 21 // 单侧天数
-const WHEEL_ITEM_W = 56 // 与 .dv-wheel__day width 一致（CSS 固定）
+const WHEEL_ITEM_W = 56 // 格宽（CSS 固定，仅用于构造序列）
 const wheelRef = ref<HTMLElement | null>(null)
+const wheelTrackRef = ref<HTMLElement | null>(null)
 const wheelCenter = ref(new Date(store.today))
 const wheelOffset = ref(0) // track translateX（px）
-const wheelWinW = ref(0) // 视口宽度（决定中心位置）
-let wheelAnim = 0 // rAF 动画 id
+/** 拖动中不播放列表动画（高频切换会打架），吸附完成后再播 */
+const wheelDragging = ref(false)
+let wheelAnim = 0
 let wheelDrag: { startX: number; baseOffset: number; moved: boolean } | null = null
 
-/** 轮盘日期序列（±WHEEL_HALF，索引 0 在轨道最左） */
+/** 轮盘日期序列（±WHEEL_HALF） */
 const wheelDates = computed(() => {
   const list: { date: Date; wd: string }[] = []
   for (let i = -WHEEL_HALF; i <= WHEEL_HALF; i++) {
@@ -116,32 +122,45 @@ const wheelDates = computed(() => {
   return list
 })
 
-/** 视口宽度缓存（决定中心位置） */
-function syncWheelPad(): void {
+/** 轨道格子元素数组 */
+function wheelEls(): HTMLElement[] {
+  const track = wheelTrackRef.value
+  return track ? (Array.from(track.children) as HTMLElement[]) : []
+}
+
+/** 视口中心 x（相对视口） */
+function wheelViewportCenter(): number {
   const view = wheelRef.value
-  if (!view) return
-  wheelWinW.value = view.clientWidth
+  return view ? view.clientWidth / 2 : 0
 }
 
-/** 使第 idx 格中心对齐视口中心所需的 offset（轨道无 padding，纯数学：
-    格中心 = offset + idx×56 + 28，令其 = winW/2 → offset = winW/2 − idx×56 − 28） */
-function wheelOffsetOf(idx: number): number {
-  return wheelWinW.value / 2 - idx * WHEEL_ITEM_W - WHEEL_ITEM_W / 2
+/** 第 idx 格当前中心 x（相对视口） */
+function wheelItemCenterX(idx: number): number | null {
+  const el = wheelEls()[idx]
+  if (!el) return null
+  const r = el.getBoundingClientRect()
+  return r.left + r.width / 2
 }
 
-/** 初始：中心格（WHEEL_HALF）居中 */
-function initWheel(): void {
-  syncWheelPad()
-  wheelOffset.value = wheelOffsetOf(WHEEL_HALF)
+/** DOM 实测：离视口中心最近的格子索引 */
+function wheelCenterIdx(): number {
+  const els = wheelEls()
+  if (!els.length) return WHEEL_HALF
+  const c = wheelViewportCenter()
+  let best = Math.floor(els.length / 2)
+  let bestD = Infinity
+  els.forEach((el, i) => {
+    const r = el.getBoundingClientRect()
+    const d = Math.abs(r.left + r.width / 2 - c)
+    if (d < bestD) {
+      bestD = d
+      best = i
+    }
+  })
+  return best
 }
 
-/** 由 offset 反推中心格索引（clamp） */
-function centerIdxOf(offset: number): number {
-  const raw = Math.round((wheelWinW.value / 2 - WHEEL_ITEM_W / 2 - offset) / WHEEL_ITEM_W)
-  return Math.min(WHEEL_HALF * 2, Math.max(0, raw))
-}
-
-/** 提交某格为展示日（数据切换；记录方向供列表动画使用） */
+/** 提交某格为展示日（数据切换） */
 function commitWheelIdx(idx: number): void {
   const item = wheelDates.value[idx]
   if (!item) return
@@ -153,41 +172,64 @@ function commitWheelIdx(idx: number): void {
   }
 }
 
-/** 拖动中不播放列表动画（高频切换会打架），吸附完成后再播 */
-const wheelDragging = ref(false)
+/** 当前中心格日期 */
+function commitWheelCenter(): void {
+  commitWheelIdx(wheelCenterIdx())
+}
 
-/** rAF 缓动动画到目标 offset（easeOutCubic，~240ms） */
-function animateToOffset(target: number, duration = 240): void {
+/** rAF 缓动动画到目标 offset（easeOutCubic） */
+function animateToOffset(target: number, duration = 240, onDone?: () => void): void {
   cancelAnimationFrame(wheelAnim)
   const from = wheelOffset.value
+  if (Math.abs(target - from) < 0.5) {
+    wheelOffset.value = target
+    onDone?.()
+    return
+  }
   const t0 = performance.now()
   const tick = (now: number): void => {
     const p = Math.min(1, (now - t0) / duration)
     const e = 1 - (1 - p) * (1 - p) * (1 - p)
     wheelOffset.value = from + (target - from) * e
     if (p < 1) wheelAnim = requestAnimationFrame(tick)
+    else onDone?.()
   }
   wheelAnim = requestAnimationFrame(tick)
 }
 
-/** 以当前中心日重建序列（滑到边缘时调用，offset 保持不变；
-    同时同步拖拽基准，避免重建后继续拖动位置跳变） */
+/** 把第 idx 格平移到视口中心所需的 offset（纯几何：现 offset − 中心偏移量） */
+function offsetToCenterItem(idx: number): number | null {
+  const x = wheelItemCenterX(idx)
+  if (x === null) return null
+  const delta = x - wheelViewportCenter()
+  return wheelOffset.value - delta
+}
+
+/** 初始：中心格（序列中间）居中 */
+function initWheel(): void {
+  // 序列首格偏移使中间格居中：第 0 格中心 = 0+28 → 需平移 winW/2−28−WHEEL_HALF*56
+  wheelOffset.value = wheelViewportCenter() - WHEEL_ITEM_W / 2 - WHEEL_HALF * WHEEL_ITEM_W
+  void nextTick(() => {
+    // 确保 DOM 就绪后微调（首格宽度可能与常量有差）
+    const target = offsetToCenterItem(WHEEL_HALF)
+    if (target !== null) wheelOffset.value = target
+    commitWheelIdx(WHEEL_HALF)
+  })
+}
+
+/** 重建序列（滑到边缘）：以当前中心日为新的序列中心，offset 几何同步 */
 function rebuildWheel(): void {
-  const idx = centerIdxOf(wheelOffset.value)
+  const idx = wheelCenterIdx()
   const item = wheelDates.value[idx]
   if (!item) return
   wheelCenter.value = new Date(item.date)
-  syncWheelPad()
-  wheelOffset.value = wheelOffsetOf(WHEEL_HALF)
-  if (wheelDrag) {
-    // 重建把 offset 重置到新序列中心，拖拽基准也要随之重置，
-    // 否则下次 pointermove 用旧 baseOffset 计算会跳回旧位置
-    wheelDrag.baseOffset = wheelOffset.value
-  }
+  const newOffset = offsetToCenterItem(idx)
+  if (newOffset !== null) wheelOffset.value = newOffset
+  if (wheelDrag) wheelDrag.baseOffset = wheelOffset.value
   commitWheelIdx(WHEEL_HALF)
 }
 
-/** 指针按下：记录起点，开始拖拽 */
+/** 指针按下 */
 function onWheelDown(e: PointerEvent): void {
   if (e.pointerType === 'mouse' && e.button !== 0) return
   cancelAnimationFrame(wheelAnim)
@@ -197,42 +239,48 @@ function onWheelDown(e: PointerEvent): void {
   view?.setPointerCapture?.(e.pointerId)
 }
 
-/** 指针移动：跟随拖动并实时切日 */
+/** 指针移动：实时跟手并提交中心格 */
 function onWheelMove(e: PointerEvent): void {
   if (!wheelDrag) return
   const dx = e.clientX - wheelDrag.startX
   if (Math.abs(dx) > 3) wheelDrag.moved = true
   wheelOffset.value = wheelDrag.baseOffset + dx
-  commitWheelIdx(centerIdxOf(wheelOffset.value))
-  // 滑到边缘：重建序列
-  const idx = centerIdxOf(wheelOffset.value)
+  commitWheelCenter()
+  // 滑到边缘：重建序列（保持视觉连续）
+  const idx = wheelCenterIdx()
   if (idx <= 7 || idx >= wheelDates.value.length - 8) rebuildWheel()
 }
 
-/** 指针松开：吸附到最近整格；未拖动视为点击 */
+/** 指针松开：吸附中心格 / 点击精确命中 */
 function onWheelUp(e: PointerEvent): void {
   if (!wheelDrag) return
   const wasDrag = wheelDrag.moved
   wheelDrag = null
-  // 吸附动画结束后恢复列表过渡（动画期间 wheelDragging=true 抑制过渡）
   window.setTimeout(() => {
     wheelDragging.value = false
   }, 280)
   if (!wasDrag) {
-    // 点击：以指针位置命中格子，动画滑到中央
+    // 点击：命中包含指针的格子
     const view = wheelRef.value
     if (!view) return
     const rect = view.getBoundingClientRect()
     const clickLocal = e.clientX - rect.left
-    const idx = Math.round((clickLocal - wheelOffset.value) / WHEEL_ITEM_W)
-    const target = wheelOffsetOf(idx)
+    let hit = -1
+    wheelEls().forEach((el, i) => {
+      const r = el.getBoundingClientRect()
+      if (clickLocal >= r.left - rect.left - 2 && clickLocal <= r.right - rect.left + 2) hit = i
+    })
+    if (hit < 0) return
+    const target = offsetToCenterItem(hit)
+    if (target === null) return
     animateToOffset(target)
-    commitWheelIdx(idx)
+    commitWheelIdx(hit)
     return
   }
-  // 拖动结束：吸附最近整格
-  const idx = centerIdxOf(wheelOffset.value)
-  animateToOffset(wheelOffsetOf(idx))
+  // 拖动结束：中心格吸附
+  const idx = wheelCenterIdx()
+  const target = offsetToCenterItem(idx)
+  if (target !== null) animateToOffset(target)
   commitWheelIdx(idx)
 }
 
@@ -241,11 +289,13 @@ function onWheelCancel(): void {
   wheelDragging.value = false
 }
 
-/** 点击格子（无障碍/键盘场景）：动画滑到中央 */
+/** 点击格子（无障碍/键盘场景） */
 function onWheelPick(i: number): void {
   cancelAnimationFrame(wheelAnim)
+  const target = offsetToCenterItem(i)
+  if (target === null) return
+  animateToOffset(target)
   commitWheelIdx(i)
-  animateToOffset(wheelOffsetOf(i))
 }
 
 /** 移动端轮盘初始化（桌面无轮盘，仅移动端执行） */
@@ -341,7 +391,7 @@ async function exportPng(): Promise<void> {
               @pointerup="onWheelUp"
               @pointercancel="onWheelCancel"
             >
-              <div class="dv-wheel__track" :style="{ transform: `translateX(${wheelOffset}px)` }">
+              <div ref="wheelTrackRef" class="dv-wheel__track" :style="{ transform: `translateX(${wheelOffset}px)` }">
                 <button
                   v-for="(d, i) in wheelDates"
                   :key="d.date.getTime()"
