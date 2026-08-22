@@ -10,7 +10,6 @@ import CourseModal from '@/components/schedule/CourseModal.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
 import Skeleton from '@/components/common/Skeleton.vue'
 import { exportElementAsPng } from '@/utils/exportPng'
-import { toMonday } from '@/utils/week'
 import { toast } from '@/utils/ui'
 import type { Course, Weekday } from '@/types'
 
@@ -33,7 +32,6 @@ const DAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', 
 const WEEKDAY_NUM = ['一', '二', '三', '四', '五', '六', '日'] as const
 /** 列表动画方向（切日时按新旧日期先后决定滑入方向） */
 const wheelDir = ref<'next' | 'prev'>('next')
-let dayOffsetPrev = 0
 
 /** 移动端判定（<768px 与全局断点一致） */
 const isMobile = ref(window.innerWidth < 768)
@@ -51,20 +49,19 @@ function isSameDate(a: Date, b: Date): boolean {
 }
 
 // ============================================================
-// 轮盘式日期选择（原生横向滚动 + scroll-snap）
-// 容器 overflow-x auto + scroll-snap，滚动/惯性/吸附全由浏览器处理。
-// 7 格居中排布，scroll 事件只读 scrollLeft → 中心格 → 更新选中日期；
-// 滚到边缘（snap 后中心偏移）→ 重建序列并同步滚动位置（无视觉跳变）。
+// 轮盘式日期选择（固定序列 + 原生滚动，滚动停在哪就在哪）
+// 序列以今天为中心固定 ±100 天（201 格），永不重建、永无回滚。
+// scroll 事件实时读 scrollLeft → 中央格索引 → 更新选中日期。
+// 点击格/今天按钮 → scrollTo 平滑滚动，滚动过程日期实时跟随。
 // ============================================================
 const WHEEL_ITEM_W = 56 // 格宽（CSS 固定）
-const WHEEL_INDEX = 20 // 中心格索引（41 格：0..40，长序列供惯性滚动）
+const WHEEL_CENTER = 100 // 今天所在格索引（201 格：0..200）
+const WHEEL_SPAN = 100 // 单侧天数
 const wheelRef = ref<HTMLElement | null>(null)
-const wheelCenter = ref<Date>(normalizeDay(new Date(store.today)))
+/** 当前中央格索引（scroll 实时更新） */
+const wheelIdx = ref(WHEEL_CENTER)
 const wheelDragging = ref(false)
-/** 程序化滚动标志（抑制 scroll 事件误更新，避免回跳） */
-let wheelProgrammatic = false
-/** 滚动停止后吸附换日的调度器 */
-let wheelSnapTimer: number | null = null
+let wheelScrollRaf = 0
 
 /** 归零时分秒，避免日期比较误判 */
 function normalizeDay(d: Date): Date {
@@ -73,19 +70,23 @@ function normalizeDay(d: Date): Date {
   return nd
 }
 
-/** 7 格日期序列（索引 0..6，中心=3） */
+/** 固定日期序列（以今天为中心 ±100 天，永不重建） */
 const wheelDates = computed(() => {
   const list: { date: Date; wd: string }[] = []
-  for (let i = -WHEEL_INDEX; i <= WHEEL_INDEX; i++) {
-    const d = new Date(wheelCenter.value)
-    d.setDate(wheelCenter.value.getDate() + i)
+  const today = normalizeDay(new Date(store.today))
+  for (let i = -WHEEL_SPAN; i <= WHEEL_SPAN; i++) {
+    const d = new Date(today)
+    d.setDate(today.getDate() + i)
     list.push({ date: d, wd: WEEKDAY_NUM[(d.getDay() + 6) % 7] })
   }
   return list
 })
 
-/** 当前选中日期（中心格）——标题与课程列表的唯一来源 */
-const activeDay = computed(() => wheelDates.value[WHEEL_INDEX].date)
+/** 当前选中日期（中央格）——标题与课程列表的唯一来源 */
+const activeDay = computed(() => {
+  const item = wheelDates.value[wheelIdx.value]
+  return item ? item.date : normalizeDay(new Date(store.today))
+})
 
 /** 单日标题：「周三 · 8月26日」 */
 const dayTitle = computed(() => {
@@ -105,29 +106,23 @@ function periodTime(period: number): string {
   return p ? `${p.startTime}–${p.endTime}` : ''
 }
 
-/** 视口居中时第 idx 格所需的 scrollLeft（轨道 padding 恰好抵消 28px 偏移 → 即 idx*56） */
-function wheelScrollLeftOf(idx: number): number {
-  return idx * WHEEL_ITEM_W
-}
-
-/** 初始化/重建后：让中心格（索引 WHEEL_INDEX）滚到视口中央（无动画） */
-function wheelAlignCenter(): void {
-  const view = wheelRef.value
-  if (!view) return
-  wheelProgrammatic = true
-  view.scrollLeft = wheelScrollLeftOf(WHEEL_INDEX)
-  window.setTimeout(() => {
-    wheelProgrammatic = false
-  }, 60)
-}
-
-/** 滚动事件：不实时改日期（避免滚动中原地换字闪现），调度停止后吸附换日 */
+/** 滚动事件（rAF 节流）：中央格索引实时跟随，日期/标题/列表同步刷新 */
 function onWheelScroll(): void {
-  if (wheelProgrammatic) return
-  if (wheelSnapTimer !== null) window.clearTimeout(wheelSnapTimer)
-  wheelSnapTimer = window.setTimeout(() => {
-    void snapAndSettle()
-  }, 220)
+  cancelAnimationFrame(wheelScrollRaf)
+  wheelScrollRaf = requestAnimationFrame(() => {
+    const view = wheelRef.value
+    if (!view) return
+    const idx = Math.round(view.scrollLeft / WHEEL_ITEM_W)
+    const clamped = Math.min(wheelDates.value.length - 1, Math.max(0, idx))
+    if (clamped !== wheelIdx.value) {
+      const prev = wheelDates.value[wheelIdx.value]?.date
+      const next = wheelDates.value[clamped]?.date
+      if (prev && next && next.getTime() !== prev.getTime()) {
+        wheelDir.value = next.getTime() > prev.getTime() ? 'next' : 'prev'
+      }
+      wheelIdx.value = clamped
+    }
+  })
 }
 
 /** 指针按下 */
@@ -136,87 +131,56 @@ function onWheelDown(e: PointerEvent): void {
   wheelDragging.value = true
 }
 
-/** 指针松开：提前调度吸附换日 */
+/** 指针松开：吸附到最近整格（对齐格子，避免停在两格之间） */
 function onWheelUp(): void {
   wheelDragging.value = false
-  if (wheelSnapTimer !== null) window.clearTimeout(wheelSnapTimer)
-  wheelSnapTimer = window.setTimeout(() => {
-    void snapAndSettle()
-  }, 40)
+  settleAlign()
 }
 
 function onWheelCancel(): void {
   wheelDragging.value = false
 }
 
-/** 吸附到最近整格；对齐后把中心日期换为该格，并把滚动位置归一化回中心格。
- *  视觉连续原理：换日仅重建序列（格子数字变化），滚动位置 = WHEEL_INDEX×56，
- *  该位置的格子承载的正是刚选中的日期 → 无跳变、无闪现。 */
-async function snapAndSettle(): Promise<void> {
+/** 吸附到最近整格（scrollTo 平滑），让格子始终对齐指示器 */
+function settleAlign(): void {
   const view = wheelRef.value
   if (!view) return
   const idx = Math.round(view.scrollLeft / WHEEL_ITEM_W)
   const target = idx * WHEEL_ITEM_W
-  // 未对齐整格：平滑吸附（scroll 会再触发，重复调度）
   if (Math.abs(view.scrollLeft - target) > 2) {
-    wheelProgrammatic = true
     view.scrollTo({ left: target, behavior: 'smooth' })
-    window.setTimeout(() => {
-      wheelProgrammatic = false
-      void snapAndSettle()
-    }, 160)
-    return
-  }
-  // 已对齐：以 idx 格日期为新中心
-  const item = wheelDates.value[idx]
-  if (!item) return
-  const off = Math.round((item.date.getTime() - toMonday(store.today).getTime()) / 86400000)
-  const diff = idx - WHEEL_INDEX
-  if (diff !== 0) {
-    if (off !== dayOffsetPrev) {
-      wheelDir.value = off > dayOffsetPrev ? 'next' : 'prev'
-      dayOffsetPrev = off
-    }
-    // 换中心日期（序列重建），滚动位置归一化回中心格 → 该格显示的就是刚选的日期
-    wheelCenter.value = normalizeDay(item.date)
-    view.scrollLeft = WHEEL_INDEX * WHEEL_ITEM_W
-    wheelProgrammatic = true
-    window.setTimeout(() => {
-      wheelProgrammatic = false
-    }, 60)
   }
 }
 
-/** 点击格子：平滑滚到中央（scrollTo 纯数学换算，与吸附一致；滚动停止后 snapAndSettle 换日） */
+/** 点击格子：平滑滚动到该格（滚动过程日期实时跟随，停止后对齐） */
 function onWheelPick(i: number): void {
-  if (i === WHEEL_INDEX) return
+  if (i === wheelIdx.value) return
   const view = wheelRef.value
   if (!view) return
-  wheelProgrammatic = true
   view.scrollTo({ left: i * WHEEL_ITEM_W, behavior: 'smooth' })
-  window.setTimeout(() => {
-    wheelProgrammatic = false
-    void snapAndSettle()
-  }, 300)
 }
 
+/** 回到今天：平滑滚到今天所在格 */
 function goToday(): void {
-  wheelCenter.value = normalizeDay(store.today)
-  void nextTick(() => {
-    wheelAlignCenter()
-  })
+  const view = wheelRef.value
+  if (!view) return
+  view.scrollTo({ left: WHEEL_CENTER * WHEEL_ITEM_W, behavior: 'smooth' })
 }
 
-/** 移动端轮盘初始化 */
+/** 移动端轮盘初始化：今天居中 */
 onMounted(() => {
   if (!isMobile.value) return
   void nextTick(() => {
-    wheelAlignCenter()
+    const view = wheelRef.value
+    if (view) {
+      view.scrollLeft = WHEEL_CENTER * WHEEL_ITEM_W
+      wheelIdx.value = WHEEL_CENTER
+    }
   })
 })
 
 onBeforeUnmount(() => {
-  if (wheelSnapTimer !== null) window.clearTimeout(wheelSnapTimer)
+  cancelAnimationFrame(wheelScrollRaf)
   window.removeEventListener('resize', onResize)
 })
 
