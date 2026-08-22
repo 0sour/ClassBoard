@@ -385,8 +385,8 @@ const visible = computed(() => store.weatherData !== null)
 .wx-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 0; }
 .wx-loc { font-size: var(--font-size-sm); opacity: 0.9; display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wx-loc svg { width: 13px; height: 13px; flex: none; }
-.wx-ic { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.22); border-radius: var(--radius-full); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.25); flex: none; }
-.wx-ic svg { width: 22px; height: 22px; }
+.wx-ic { width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, rgba(255,255,255,0.28), rgba(255,255,255,0.14)); border-radius: var(--radius-full); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.28); flex: none; }
+.wx-ic :deep(svg) { width: 23px; height: 23px; display: block; }
 
 .wx-main { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 8px 14px 0; }
 .wx-temp { font-size: 36px; font-weight: var(--font-weight-heavy); line-height: 1; white-space: nowrap; }
@@ -440,7 +440,7 @@ const visible = computed(() => store.weatherData !== null)
 .f-row:first-of-type { border-top: none; }
 .f-day { width: 48px; font-size: var(--font-size-sm); opacity: 0.85; flex: none; }
 .f-ic { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.16); border-radius: var(--radius-full); flex: none; }
-.f-ic svg { width: 14px; height: 14px; }
+.f-ic :deep(svg) { width: 14px; height: 14px; display: block; }
 .f-desc { flex: 1; font-size: var(--font-size-sm); opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .f-temp { font-size: var(--font-size-sm); opacity: 0.85; white-space: nowrap; }
 .f-temp b { font-weight: var(--font-weight-bold); opacity: 1; }
@@ -457,8 +457,8 @@ const visible = computed(() => store.weatherData !== null)
   padding: 12px 16px;
   color: var(--color-text-body);
 }
-.wa-icon { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-md); background: var(--color-brand-subtle); color: var(--color-brand); flex: none; }
-.wa-icon svg { width: 22px; height: 22px; }
+.wa-icon { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-md); background: linear-gradient(135deg, var(--color-brand-subtle), #e3edff); color: var(--color-brand); flex: none; }
+.wa-icon :deep(svg) { width: 22px; height: 22px; display: block; }
 .wa-main { flex: 1; min-width: 0; }
 .wa-loc { display: flex; align-items: center; gap: 4px; font-size: var(--font-size-xs); color: var(--color-text-tertiary); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wa-loc svg { width: 11px; height: 11px; flex: none; color: var(--color-brand); }
