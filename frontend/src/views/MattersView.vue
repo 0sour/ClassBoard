@@ -331,7 +331,7 @@ const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周�
       </div>
       <div class="list">
         <!-- 作业列表：勾选完成/取消完成后，条目以折叠+淡出动画消失（TransitionGroup） -->
-        <TransitionGroup name="hw" tag="div">
+        <TransitionGroup name="hw" tag="div" class="hw-group">
           <div v-for="h in filteredHomework" :key="h.id" class="list-item" :class="{ selected: isDesktop && selectedHomework?.id === h.id }">
             <label class="check" :aria-label="h.done ? '标记为未完成' : '标记为已完成'">
               <input type="checkbox" :checked="h.done" @change="toggleHomework(h)" />
@@ -500,20 +500,22 @@ const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周�
   gap: var(--spacing-md);
 }
 
-/* 作业列表消失动画：勾选完成后条目淡出 + 右移 + 其余条目平滑重排 */
+/* 作业列表消失动画：勾选完成后条目淡出 + 右移 + 其余条目平滑重排。
+   注意：.list-item 自带 transition，需用双类选择器提升优先级，否则覆盖 leave 过渡导致瞬间消失；
+   Vue 3 移动过渡实际添加 .hw-move 类（非 -active） */
 .hw-group {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-md);
 }
 
-.hw-leave-active,
-.hw-move-active {
+.list-item.hw-leave-active,
+.list-item.hw-move {
   transition: opacity var(--motion-duration-slow) var(--motion-easing-standard),
     transform var(--motion-duration-slow) var(--motion-easing-standard);
 }
 
-.hw-leave-to {
+.list-item.hw-leave-to {
   opacity: 0;
   transform: translateX(24px);
 }
