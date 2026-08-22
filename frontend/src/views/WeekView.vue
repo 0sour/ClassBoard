@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import WeekNav from '@/components/schedule/WeekNav.vue'
@@ -42,15 +42,7 @@ const isMobile = ref(window.innerWidth < 768)
 
 function onResize(): void {
   isMobile.value = window.innerWidth < 768
-  // 移动端轮盘：窗口尺寸变化后，以当前中心格几何吸附回中心
-  if (isMobile.value) {
-    const idx = wheelCenterIdx()
-    const target = offsetToCenterItem(idx)
-    if (target !== null) {
-      wheelOffset.value = target
-      commitWheelIdx(idx)
-    }
-  }
+  // 移动端轮盘为静态 7 格布局，窗口变化无需重算
 }
 
 window.addEventListener('resize', onResize)
@@ -81,12 +73,8 @@ function periodTime(period: number): string {
 }
 
 function goToday(): void {
-  dayOffset.value = 0
-  // 轮盘滑回今天（序列中心格）
-  cancelAnimationFrame(wheelAnim)
-  wheelCenter.value = new Date(store.today)
-  const target = offsetToCenterItem(WHEEL_HALF)
-  if (target !== null) void animateToOffset(target)
+  // 轮盘回今天（中心日期模型：直接重置中心）
+  setWheelCenter(store.today)
 }
 
 /** 两个日期是否为同一天 */
@@ -95,26 +83,22 @@ function isSameDate(a: Date, b: Date): boolean {
 }
 
 // ============================================================
-// 轮盘式日期选择（DOM 几何驱动，彻底告别手推公式）
-// 一切以实测为准：用 getBoundingClientRect 找「最接近视口中心的格子」，
-// 拖动实时提交中心格日期；点击用包含点击点的格子；吸附=把中心格
-// 平移到视口中心（delta = 格中心−视口中心，纯几何）。
+// 轮盘式日期选择（中心日期模型，无像素定位——结构上不可能错位）
+// 固定渲染 7 格，中间格天然即选中格（选中态样式直接标中间格）。
+// 交互：点击任意格 → 该格日期成为新中心，7 格整体重建；
+// 左右滑动 → 按滑动方向步进中心日期。无轨道、无偏移、无换算。
 // ============================================================
-const WHEEL_HALF = 21 // 单侧天数
-const WHEEL_ITEM_W = 56 // 格宽（CSS 固定，仅用于构造序列）
+const WHEEL_SPAN = 3 // 中心两侧各 3 格 → 共 7 格
 const wheelRef = ref<HTMLElement | null>(null)
 const wheelTrackRef = ref<HTMLElement | null>(null)
 const wheelCenter = ref(new Date(store.today))
-const wheelOffset = ref(0) // track translateX（px）
-/** 拖动中不播放列表动画（高频切换会打架），吸附完成后再播 */
 const wheelDragging = ref(false)
-let wheelAnim = 0
-let wheelDrag: { startX: number; baseOffset: number; moved: boolean } | null = null
+let wheelDrag: { startX: number; dxDate: Date; moved: boolean } | null = null
 
-/** 轮盘日期序列（±WHEEL_HALF） */
+/** 7 格日期序列（索引 0..6，中间=3） */
 const wheelDates = computed(() => {
   const list: { date: Date; wd: string }[] = []
-  for (let i = -WHEEL_HALF; i <= WHEEL_HALF; i++) {
+  for (let i = -WHEEL_SPAN; i <= WHEEL_SPAN; i++) {
     const d = new Date(wheelCenter.value)
     d.setDate(wheelCenter.value.getDate() + i)
     list.push({ date: d, wd: WEEKDAY_NUM[(d.getDay() + 6) % 7] })
@@ -122,45 +106,7 @@ const wheelDates = computed(() => {
   return list
 })
 
-/** 轨道格子元素数组 */
-function wheelEls(): HTMLElement[] {
-  const track = wheelTrackRef.value
-  return track ? (Array.from(track.children) as HTMLElement[]) : []
-}
-
-/** 视口中心 x（相对视口） */
-function wheelViewportCenter(): number {
-  const view = wheelRef.value
-  return view ? view.clientWidth / 2 : 0
-}
-
-/** 第 idx 格当前中心 x（相对视口） */
-function wheelItemCenterX(idx: number): number | null {
-  const el = wheelEls()[idx]
-  if (!el) return null
-  const r = el.getBoundingClientRect()
-  return r.left + r.width / 2
-}
-
-/** DOM 实测：离视口中心最近的格子索引 */
-function wheelCenterIdx(): number {
-  const els = wheelEls()
-  if (!els.length) return WHEEL_HALF
-  const c = wheelViewportCenter()
-  let best = Math.floor(els.length / 2)
-  let bestD = Infinity
-  els.forEach((el, i) => {
-    const r = el.getBoundingClientRect()
-    const d = Math.abs(r.left + r.width / 2 - c)
-    if (d < bestD) {
-      bestD = d
-      best = i
-    }
-  })
-  return best
-}
-
-/** 提交某格为展示日（数据切换） */
+/** 提交某格为展示日 */
 function commitWheelIdx(idx: number): void {
   const item = wheelDates.value[idx]
   if (!item) return
@@ -172,116 +118,68 @@ function commitWheelIdx(idx: number): void {
   }
 }
 
-/** 当前中心格日期 */
-function commitWheelCenter(): void {
-  commitWheelIdx(wheelCenterIdx())
-}
-
-/** rAF 缓动动画到目标 offset（easeOutCubic） */
-function animateToOffset(target: number, duration = 240, onDone?: () => void): void {
-  cancelAnimationFrame(wheelAnim)
-  const from = wheelOffset.value
-  if (Math.abs(target - from) < 0.5) {
-    wheelOffset.value = target
-    onDone?.()
-    return
+/** 以指定日期为新的中心（并提交） */
+function setWheelCenter(date: Date): void {
+  const d = new Date(date)
+  d.setHours(0, 0, 0, 0)
+  const cur = new Date(wheelCenter.value)
+  cur.setHours(0, 0, 0, 0)
+  if (d.getTime() !== cur.getTime()) {
+    wheelCenter.value = d
   }
-  const t0 = performance.now()
-  const tick = (now: number): void => {
-    const p = Math.min(1, (now - t0) / duration)
-    const e = 1 - (1 - p) * (1 - p) * (1 - p)
-    wheelOffset.value = from + (target - from) * e
-    if (p < 1) wheelAnim = requestAnimationFrame(tick)
-    else onDone?.()
-  }
-  wheelAnim = requestAnimationFrame(tick)
-}
-
-/** 把第 idx 格平移到视口中心所需的 offset（纯几何：现 offset − 中心偏移量） */
-function offsetToCenterItem(idx: number): number | null {
-  const x = wheelItemCenterX(idx)
-  if (x === null) return null
-  const delta = x - wheelViewportCenter()
-  return wheelOffset.value - delta
-}
-
-/** 初始：中心格（序列中间）居中 */
-function initWheel(): void {
-  // 序列首格偏移使中间格居中：第 0 格中心 = 0+28 → 需平移 winW/2−28−WHEEL_HALF*56
-  wheelOffset.value = wheelViewportCenter() - WHEEL_ITEM_W / 2 - WHEEL_HALF * WHEEL_ITEM_W
-  void nextTick(() => {
-    // 确保 DOM 就绪后微调（首格宽度可能与常量有差）
-    const target = offsetToCenterItem(WHEEL_HALF)
-    if (target !== null) wheelOffset.value = target
-    commitWheelIdx(WHEEL_HALF)
-  })
-}
-
-/** 重建序列（滑到边缘）：以当前中心日为新的序列中心，offset 几何同步 */
-function rebuildWheel(): void {
-  const idx = wheelCenterIdx()
-  const item = wheelDates.value[idx]
-  if (!item) return
-  wheelCenter.value = new Date(item.date)
-  const newOffset = offsetToCenterItem(idx)
-  if (newOffset !== null) wheelOffset.value = newOffset
-  if (wheelDrag) wheelDrag.baseOffset = wheelOffset.value
-  commitWheelIdx(WHEEL_HALF)
+  commitWheelIdx(WHEEL_SPAN)
 }
 
 /** 指针按下 */
 function onWheelDown(e: PointerEvent): void {
   if (e.pointerType === 'mouse' && e.button !== 0) return
-  cancelAnimationFrame(wheelAnim)
-  wheelDrag = { startX: e.clientX, baseOffset: wheelOffset.value, moved: false }
+  wheelDrag = { startX: e.clientX, dxDate: new Date(wheelCenter.value), moved: false }
   wheelDragging.value = true
   const view = wheelRef.value
   view?.setPointerCapture?.(e.pointerId)
 }
 
-/** 指针移动：实时跟手并提交中心格 */
+/** 指针移动：按滑过的格数切换中心（每格 56px 一格） */
 function onWheelMove(e: PointerEvent): void {
   if (!wheelDrag) return
   const dx = e.clientX - wheelDrag.startX
-  if (Math.abs(dx) > 3) wheelDrag.moved = true
-  wheelOffset.value = wheelDrag.baseOffset + dx
-  commitWheelCenter()
-  // 滑到边缘：重建序列（保持视觉连续）
-  const idx = wheelCenterIdx()
-  if (idx <= 7 || idx >= wheelDates.value.length - 8) rebuildWheel()
+  if (Math.abs(dx) > 4) wheelDrag.moved = true
+  const step = Math.round(dx / 56)
+  const base = new Date(wheelDrag.dxDate)
+  base.setDate(base.getDate() + step)
+  setWheelCenter(base)
 }
 
-/** 指针松开：吸附中心格 / 点击精确命中 */
+/** 指针松开 */
 function onWheelUp(e: PointerEvent): void {
   if (!wheelDrag) return
   const wasDrag = wheelDrag.moved
   wheelDrag = null
   window.setTimeout(() => {
     wheelDragging.value = false
-  }, 280)
-  if (!wasDrag) {
-    // 点击：命中包含指针的格子
-    const view = wheelRef.value
-    if (!view) return
-    const rect = view.getBoundingClientRect()
-    const clickLocal = e.clientX - rect.left
-    let hit = -1
-    wheelEls().forEach((el, i) => {
-      const r = el.getBoundingClientRect()
-      if (clickLocal >= r.left - rect.left - 2 && clickLocal <= r.right - rect.left + 2) hit = i
-    })
-    if (hit < 0) return
-    const target = offsetToCenterItem(hit)
-    if (target === null) return
-    animateToOffset(target)
+  }, 200)
+  if (wasDrag) return
+  // 点击：命中 7 格中的某格 → 成为新中心
+  const view = wheelRef.value
+  if (!view) return
+  const rect = view.getBoundingClientRect()
+  const clickLocal = e.clientX - rect.left
+  let hit = -1
+  const track = wheelTrackRef.value
+  if (!track) return
+  Array.from(track.children).forEach((el, i) => {
+    const r = (el as HTMLElement).getBoundingClientRect()
+    if (clickLocal >= r.left - rect.left && clickLocal <= r.right - rect.left) hit = i
+  })
+  if (hit < 0) return
+  if (hit === WHEEL_SPAN) {
     commitWheelIdx(hit)
     return
   }
-  // 拖动结束：中心格吸附
-  const idx = wheelCenterIdx()
-  const target = offsetToCenterItem(idx)
-  if (target !== null) animateToOffset(target)
-  commitWheelIdx(idx)
+  const diff = hit - WHEEL_SPAN
+  const cur = new Date(wheelCenter.value)
+  cur.setDate(cur.getDate() + diff)
+  setWheelCenter(cur)
 }
 
 function onWheelCancel(): void {
@@ -289,25 +187,25 @@ function onWheelCancel(): void {
   wheelDragging.value = false
 }
 
-/** 点击格子（无障碍/键盘场景） */
+/** 点击格子（无障碍） */
 function onWheelPick(i: number): void {
-  cancelAnimationFrame(wheelAnim)
-  const target = offsetToCenterItem(i)
-  if (target === null) return
-  animateToOffset(target)
-  commitWheelIdx(i)
+  if (i === WHEEL_SPAN) {
+    commitWheelIdx(i)
+    return
+  }
+  const diff = i - WHEEL_SPAN
+  const cur = new Date(wheelCenter.value)
+  cur.setDate(cur.getDate() + diff)
+  setWheelCenter(cur)
 }
 
-/** 移动端轮盘初始化（桌面无轮盘，仅移动端执行） */
+/** 移动端轮盘初始化 */
 onMounted(() => {
   if (!isMobile.value) return
-  void nextTick(() => {
-    initWheel()
-  })
+  commitWheelIdx(WHEEL_SPAN)
 })
 
 onBeforeUnmount(() => {
-  cancelAnimationFrame(wheelAnim)
   window.removeEventListener('resize', onResize)
 })
 
@@ -380,23 +278,26 @@ async function exportPng(): Promise<void> {
             <button class="dv-today" type="button" @click="goToday">今天</button>
           </div>
 
-          <!-- 轮盘式日期选择：transform 轨道，指针拖拽，中间常驻指示器 -->
+          <!-- 轮盘式日期选择：静态 7 格，中间格即选中格（无像素定位） -->
           <div class="dv-wheel-wrap reveal">
             <div
               ref="wheelRef"
               class="dv-wheel"
-              :class="{ 'is-dragging': wheelDrag !== null }"
+              :class="{ 'is-dragging': wheelDragging }"
               @pointerdown="onWheelDown"
               @pointermove="onWheelMove"
               @pointerup="onWheelUp"
               @pointercancel="onWheelCancel"
             >
-              <div ref="wheelTrackRef" class="dv-wheel__track" :style="{ transform: `translateX(${wheelOffset}px)` }">
+              <div ref="wheelTrackRef" class="dv-wheel__track">
                 <button
                   v-for="(d, i) in wheelDates"
                   :key="d.date.getTime()"
                   class="dv-wheel__day"
-                  :class="{ active: isSameDate(d.date, currentDay), today: isSameDate(d.date, store.today) }"
+                  :class="{
+                    active: i === WHEEL_SPAN,
+                    today: isSameDate(d.date, store.today),
+                  }"
                   type="button"
                   @click="onWheelPick(i)"
                 >
@@ -404,8 +305,6 @@ async function exportPng(): Promise<void> {
                   <b>{{ d.date.getDate() }}</b>
                 </button>
               </div>
-              <!-- 常驻选中指示器 -->
-              <div class="dv-wheel__indicator"></div>
             </div>
           </div>
 
@@ -570,7 +469,6 @@ async function exportPng(): Promise<void> {
 /* 窗口：overflow hidden，不产生浏览器滚动；轨道用 transform 平移 */
 .dv-wheel {
   position: relative;
-  overflow: hidden;
   height: 52px;
   touch-action: none;
   cursor: grab;
@@ -582,30 +480,28 @@ async function exportPng(): Promise<void> {
   cursor: grabbing;
 }
 
-/* 轨道：flex 一行排开，translateX 由 JS 驱动（居中纯数学：winW/2 − idx×56） */
+/* 轨道：静态 7 格 flex 均分（无平移、无像素换算） */
 .dv-wheel__track {
-  position: absolute;
-  left: 0;
-  top: 0;
   display: flex;
-  will-change: transform;
+  justify-content: center;
+  height: 100%;
 }
 
 .dv-wheel__day {
-  flex: none;
+  flex: 0 0 56px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 2px;
-  width: 56px;
-  padding: 7px 0 6px;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   background: none;
   cursor: pointer;
   font-family: inherit;
   color: var(--color-text-secondary);
-  transition: color var(--motion-duration-fast) var(--motion-easing-standard);
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .dv-wheel__day span {
@@ -625,25 +521,10 @@ async function exportPng(): Promise<void> {
   font-weight: var(--font-weight-bold);
 }
 
-/* 常驻选中指示器：固定中央胶囊框，透明底仅描边（不遮挡日期文字） */
-.dv-wheel__indicator {
-  position: absolute;
-  left: 50%;
-  top: 4px;
-  transform: translateX(-50%);
-  width: 56px;
-  height: 44px;
-  border: 1.5px solid var(--color-brand);
-  border-radius: var(--radius-lg);
-  background: transparent;
-  pointer-events: none;
-  z-index: 1;
-}
-
-/* 选中格文字压在指示器上方 */
-.dv-wheel__day {
-  position: relative;
-  z-index: 2;
+/* 选中格（恒为中间格）：自带胶囊高亮，无独立指示器元素——结构上零偏移 */
+.dv-wheel__day.active {
+  background: var(--color-brand-subtle);
+  box-shadow: inset 0 0 0 1.5px var(--color-brand);
 }
 
 .dv-wheel__day.active b,
