@@ -93,6 +93,8 @@ const wheelRef = ref<HTMLElement | null>(null)
 const wheelTrackRef = ref<HTMLElement | null>(null)
 const wheelCenter = ref(new Date(store.today))
 const wheelDragging = ref(false)
+/** 拖动松手后抑制随后的 click（避免与 pointer 命中重复切换中心导致日期跳变） */
+let suppressWheelClickUntil = 0
 let wheelDrag: { startX: number; dxDate: Date; moved: boolean } | null = null
 
 /** 7 格日期序列（索引 0..6，中间=3） */
@@ -154,11 +156,21 @@ function onWheelMove(e: PointerEvent): void {
 function onWheelUp(e: PointerEvent): void {
   if (!wheelDrag) return
   const wasDrag = wheelDrag.moved
+  const dragStart = wheelDrag.startX
+  const dragStartDate = wheelDrag.dxDate
   wheelDrag = null
   window.setTimeout(() => {
     wheelDragging.value = false
   }, 200)
-  if (wasDrag) return
+  if (wasDrag) {
+    // 拖动过：抑制紧随的 click；最终中心 = 起点日期 + 整格位移
+    suppressWheelClickUntil = Date.now() + 350
+    const step = Math.round((e.clientX - dragStart) / 56)
+    const final = new Date(dragStartDate)
+    final.setDate(final.getDate() + step)
+    setWheelCenter(final)
+    return
+  }
   // 点击：命中 7 格中的某格 → 成为新中心
   const view = wheelRef.value
   if (!view) return
@@ -187,8 +199,9 @@ function onWheelCancel(): void {
   wheelDragging.value = false
 }
 
-/** 点击格子（无障碍） */
+/** 点击格子（无障碍 / 拖动后 350ms 内抑制，避免 pointer 已切换再二次切换） */
 function onWheelPick(i: number): void {
+  if (Date.now() < suppressWheelClickUntil) return
   if (i === WHEEL_SPAN) {
     commitWheelIdx(i)
     return
