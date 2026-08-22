@@ -125,6 +125,8 @@ function initWheelScroll(): void {
 
 let wheelRaf = 0
 let wheelTicking = false
+/** 程序化滚动中：抑制 onWheelScroll 的 dayOffset 覆盖（避免回跳） */
+let wheelProgrammatic = false
 
 /** 滚动中：中心格 → 更新展示日；滑到边缘重建序列 */
 function onWheelScroll(): void {
@@ -139,7 +141,7 @@ function onWheelScroll(): void {
     if (!item) return
     const ms = item.date.getTime() - toMonday(store.today).getTime()
     const off = Math.round(ms / 86400000)
-    if (off !== dayOffset.value) dayOffset.value = off
+    if (!wheelProgrammatic && off !== dayOffset.value) dayOffset.value = off
     // 滑到边缘：以当前日为中心重建
     if (idx <= 4 || idx >= wheelDates.value.length - 5) {
       wheelCenter.value = new Date(item.date)
@@ -152,11 +154,22 @@ function onWheelScroll(): void {
 function scrollWheelToIndex(i: number): void {
   const view = wheelRef.value
   if (!view) return
+  // 程序化滚动：平滑动画期间抑制 scroll 事件误更新 dayOffset
+  wheelProgrammatic = true
   view.scrollTo({
     left: i * wheelItemW.value - wheelPad.value,
     behavior: 'smooth',
   })
-  // scroll 事件会同步 dayOffset
+  window.setTimeout(() => {
+    wheelProgrammatic = false
+    // 动画结束后按最终位置校准（用户中途触摸则放弃）
+    const idx = Math.round((view.scrollLeft + wheelPad.value) / wheelItemW.value)
+    const item = wheelDates.value[idx]
+    if (item) {
+      const ms = item.date.getTime() - toMonday(store.today).getTime()
+      dayOffset.value = Math.round(ms / 86400000)
+    }
+  }, 320)
 }
 
 /** 移动端轮盘初始化（桌面无轮盘，仅移动端执行） */
@@ -415,15 +428,14 @@ async function exportPng(): Promise<void> {
   padding: 4px 0;
 }
 
-/* 滚动容器：左右 padding 让首尾格也能居中 */
+/* 滚动容器：左右 padding 让首尾格也能居中；自由拖动（不用 scroll-snap，避免拖动被抢走） */
 .dv-wheel {
   display: flex;
   overflow-x: auto;
-  scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
   padding: 0 var(--wheel-pad);
-  scroll-snap-type: x mandatory;
+  touch-action: pan-x;
 }
 
 .dv-wheel::-webkit-scrollbar {
@@ -432,7 +444,6 @@ async function exportPng(): Promise<void> {
 
 .dv-wheel__day {
   flex: none;
-  scroll-snap-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
