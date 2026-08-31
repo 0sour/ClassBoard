@@ -45,7 +45,7 @@ function onKeydown(e: KeyboardEvent): void {
 .confirm-mask {
   position: fixed;
   inset: 0;
-  z-index: var(--z-index-modal);
+  z-index: var(--z-index-confirm);
   display: flex;
   align-items: center;
   justify-content: center;

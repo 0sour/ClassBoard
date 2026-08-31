@@ -304,29 +304,47 @@ export function parseCellText(text: string, weekday: Weekday, fallback: [number,
   }
 }
 
-/** 周次规则字符串 → weekType/weekList */
+/** 周次规则字符串 → weekType/weekList
+ * 语义（正方教务系统）：(单)/(双) 只修饰最后一段；
+ * 单段时若覆盖全学期奇偶（1-16 内全部单/双周）归约为 odd/even，
+ * 否则展开为 custom（如 1-7周(单) → 1,3,5,7，不含 9-15 周）；
+ * 多段时仅最后一段按奇偶过滤（如 1-8周,10-16周(双) → 1-8 全周 + 10,12,14,16）。 */
 export function parseWeeks(spec: string): { weekType: WeekType; weekList: number[] | null } {
   const s = spec.trim()
   if (!s) return { weekType: 'all', weekList: null }
   const isOdd = s.endsWith('(单)')
   const isEven = s.endsWith('(双)')
   const clean = s.replace(/周/g, '').replace(/\(单\)/g, '').replace(/\(双\)/g, '')
+  const segs = clean.split(',')
+
+  // 展开：奇偶标记只作用于最后一段，其余段全部展开
   const list: number[] = []
-  for (const seg of clean.split(',')) {
-    const r = seg.trim()
-    const range = /^(\d+)-(\d+)$/.exec(r)
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i].trim()
+    const range = /^(\d+)-(\d+)$/.exec(seg)
+    const parity = i === segs.length - 1 ? (isOdd ? 'odd' : isEven ? 'even' : null) : null
     if (range) {
-      for (let w = Number(range[1]); w <= Number(range[2]); w++) list.push(w)
-    } else if (/^\d+$/.test(r)) {
-      list.push(Number(r))
+      const a = Number(range[1])
+      const b = Number(range[2])
+      for (let w = a; w <= b; w++) {
+        if (parity === 'odd' && w % 2 === 0) continue
+        if (parity === 'even' && w % 2 === 1) continue
+        list.push(w)
+      }
+    } else if (/^\d+$/.test(seg)) {
+      list.push(Number(seg))
     }
   }
-  if (isOdd) return { weekType: 'odd', weekList: null }
-  if (isEven) return { weekType: 'even', weekList: null }
   const unique = [...new Set(list)].sort((a, b) => a - b)
   if (unique.length === 0) return { weekType: 'all', weekList: null }
+  // 全学期（1-16 全周）→ all
   const full = unique.length === 16 && unique[0] === 1 && unique[15] === 16
   if (full) return { weekType: 'all', weekList: null }
+  // 全学期奇偶（1-16 内全部单/双周）→ odd/even
+  const ALL_ODD = [1, 3, 5, 7, 9, 11, 13, 15]
+  const ALL_EVEN = [2, 4, 6, 8, 10, 12, 14, 16]
+  if (unique.length === 8 && unique.every((w, i) => w === ALL_ODD[i])) return { weekType: 'odd', weekList: null }
+  if (unique.length === 8 && unique.every((w, i) => w === ALL_EVEN[i])) return { weekType: 'even', weekList: null }
   return { weekType: 'custom', weekList: unique }
 }
 

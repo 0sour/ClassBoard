@@ -284,11 +284,20 @@ export const useScheduleStore = defineStore('schedule', () => {
     void refreshSchedule()
   }
 
-  /** 跳转到指定周（相对今天所在周的天数偏移） */
+  /** 跳转到指定周（相对今天所在周的天数偏移；今天在学期外时以学期第 1 周为基准） */
   function goToWeek(week: number): void {
     const base = todayWeekNumber.value
-    if (base === null) return
-    weekOffset.value = week - base
+    if (base !== null) {
+      weekOffset.value = week - base
+    } else {
+      // 今天在学期外（未开学/假期）：以学期第 1 周周一为锚点
+      const sem = currentSemester.value
+      if (!sem) return
+      const firstMonday = toMonday(parseDate(sem.startDate))
+      const target = new Date(firstMonday)
+      target.setDate(firstMonday.getDate() + (week - 1) * 7)
+      weekOffset.value = Math.round((target.getTime() - toMonday(today.value).getTime()) / 86400000 / 7)
+    }
     void refreshSchedule()
   }
 
@@ -646,6 +655,7 @@ export const useScheduleStore = defineStore('schedule', () => {
     todayCourses,
     todayCoursesByWeekday,
     refreshToday,
+    refreshSchedule,
     weekExams,
     weekHomework,
     weekInfoOf,

@@ -162,8 +162,20 @@ describe('PDF 解析：周次规则展开', () => {
   it('1-15周(单) → odd', () => {
     expect(parseWeeks('1-15周(单)')).toEqual({ weekType: 'odd', weekList: null })
   })
-  it('1-8周,10-16周(双) → even', () => {
-    expect(parseWeeks('1-8周,10-16周(双)')).toEqual({ weekType: 'even', weekList: null })
+  it('1-7周(单) → 仅 1-7 内单周（不含 9-15 周）', () => {
+    const r = parseWeeks('1-7周(单)')
+    expect(r.weekType).toBe('custom')
+    expect(r.weekList).toEqual([1, 3, 5, 7])
+  })
+  it('1-8周(双) → 仅 1-8 内双周', () => {
+    const r = parseWeeks('1-8周(双)')
+    expect(r.weekType).toBe('custom')
+    expect(r.weekList).toEqual([2, 4, 6, 8])
+  })
+  it('1-8周,10-16周(双) → 前段全周 + 后段双周（(双) 只修饰最后一段）', () => {
+    const r = parseWeeks('1-8周,10-16周(双)')
+    expect(r.weekType).toBe('custom')
+    expect(r.weekList).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16])
   })
   it('1-10周,12周,15周 → custom', () => {
     const r = parseWeeks('1-10周,12周,15周')
@@ -216,9 +228,10 @@ describe('PDF 解析：真实 fixture 全量', () => {
     }
   })
 
-  it('单双周规则样本正确（数字信号处理 1-7周(单) 星期四）', () => {
+  it('单双周规则样本正确（数字信号处理 1-7周(单) 星期四 → 仅 1-7 内单周）', () => {
     const r = rows.find((x) => x.name === '数字信号处理' && x.weekday === 4)
-    expect(r?.weekType).toBe('odd')
+    expect(r?.weekType).toBe('custom')
+    expect(r?.weekList).toEqual([1, 3, 5, 7])
     expect(r?.startPeriod).toBe(5)
     expect(r?.endPeriod).toBe(6)
   })

@@ -70,9 +70,9 @@ const isMatters = computed(() => route.name === 'matters')
 
 const reminders = computed(() => {
   const list: { id: string; title: string; meta: string; kind: '课程' | '作业' }[] = []
-  // 今日上课课程
+  // 今日上课课程（今天真实所在周，不随周视图切换变化）
   const wd = ((store.today.getDay() + 6) % 7 + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7
-  for (const c of store.coursesByWeekday[wd]) {
+  for (const c of store.todayCoursesByWeekday[wd]) {
     const p = store.periods[c.startPeriod - 1]
     list.push({
       id: `c${c.id}`,

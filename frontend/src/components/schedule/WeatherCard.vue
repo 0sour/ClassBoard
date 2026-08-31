@@ -290,7 +290,7 @@ const visible = computed(() => store.weatherData !== null)
   <div v-else-if="visible && variant === 'slim'" class="weather slim-card" :class="{ expanded }" @click="toggleExpand">
     <div v-if="activeWarning" class="wa-alert-flag" :class="'level-' + activeWarning.level">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><path d="M12 9v4M12 17h.01" /></svg>
-      {{ activeWarning.title }}
+      <span class="wa-alert-text">{{ activeWarning.title }}</span>
     </div>
 
     <span class="wa-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'>${wxIcon}</svg>`"></span>
@@ -459,6 +459,9 @@ const visible = computed(() => store.weatherData !== null)
   box-shadow: var(--shadow-card);
   padding: 12px 16px;
   color: var(--color-text-body);
+  /* 覆盖 .weather 的 overflow:hidden：预警角标悬出上边界（top:-6px）需完整显示；
+     展开动画由 .wa-more > div 的 overflow:hidden 控制，不受影响 */
+  overflow: visible;
 }
 .wa-icon { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-md); background: linear-gradient(135deg, var(--color-brand-subtle), #e3edff); color: var(--color-brand); flex: none; }
 .wa-icon :deep(svg) { width: 22px; height: 22px; display: block; }
@@ -474,11 +477,12 @@ const visible = computed(() => store.weatherData !== null)
 .wa-arrow { width: 15px; height: 15px; color: var(--color-text-tertiary); margin-top: 2px; transition: transform var(--motion-duration-slow) var(--motion-easing-standard); }
 .slim-card.expanded .wa-arrow { transform: rotate(180deg); }
 
-/* 简约卡预警角标 */
+/* 简约卡预警角标：绝对定位贴卡片右上角，长标题收缩为省略号，不超出卡片 */
 .wa-alert-flag {
   position: absolute;
   top: -6px; right: 10px;
   display: flex; align-items: center; gap: 4px;
+  max-width: calc(100% - 20px);
   padding: 2px 8px;
   border-radius: var(--radius-full);
   font-size: var(--font-size-xs);
@@ -486,6 +490,12 @@ const visible = computed(() => store.weatherData !== null)
   box-shadow: var(--shadow-pop);
   animation: alert-in 0.4s var(--motion-easing-standard);
   z-index: 2;
+}
+.wa-alert-flag .wa-alert-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .wa-alert-flag.level-yellow { background: #f59e0b; color: var(--color-white); }
 .wa-alert-flag.level-orange { background: #f97316; color: var(--color-white); }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import WeekNav from '@/components/schedule/WeekNav.vue'
@@ -10,6 +10,7 @@ import CourseModal from '@/components/schedule/CourseModal.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
 import Skeleton from '@/components/common/Skeleton.vue'
 import { exportElementAsPng } from '@/utils/exportPng'
+import { parseDate, toMonday } from '@/utils/week'
 import { toast } from '@/utils/ui'
 import type { Course, Weekday } from '@/types'
 
@@ -55,8 +56,8 @@ function isSameDate(a: Date, b: Date): boolean {
 // 点击格/今天按钮 → scrollTo 平滑滚动，滚动过程日期实时跟随。
 // ============================================================
 const WHEEL_ITEM_W = 56 // 格宽（CSS 固定）
-const WHEEL_CENTER = 100 // 今天所在格索引（201 格：0..200）
-const WHEEL_SPAN = 100 // 单侧天数
+const WHEEL_CENTER = 150 // 今天所在格索引（301 格：0..300）
+const WHEEL_SPAN = 150 // 单侧天数（覆盖整个学期：学期末距今天最远约 120 天）
 const wheelRef = ref<HTMLElement | null>(null)
 /** 当前中央格索引（scroll 实时更新） */
 const wheelIdx = ref(WHEEL_CENTER)
@@ -195,11 +196,46 @@ function onWheelPick(i: number): void {
   view.scrollTo({ left: i * WHEEL_ITEM_W, behavior: 'smooth' })
 }
 
-/** 回到今天：平滑滚到今天所在格 */
+/** 回到今天：瞬时定位到轮盘中央（smooth 滚动过冲会与 settleAlign 二次吸附竞争，停在相邻格） */
 function goToday(): void {
   const view = wheelRef.value
   if (!view) return
-  view.scrollTo({ left: WHEEL_CENTER * WHEEL_ITEM_W, behavior: 'smooth' })
+  view.scrollLeft = WHEEL_CENTER * WHEEL_ITEM_W
+}
+
+/** 轮盘切日跨周时同步展示周：周摘要/周徽章等随 weekContext 联动（不随轮盘漂移） */
+watch(activeDay, (d) => {
+  if (!isMobile.value) return
+  const monday = toMonday(d)
+  const target = Math.round((monday.getTime() - toMonday(store.today).getTime()) / 86400000 / 7)
+  if (target !== store.weekOffset) {
+    store.weekOffset = target
+    void store.refreshSchedule()
+  }
+})
+
+/** 移动端周选择器选中周：轮盘跳到该周周一（周摘要/徽章由 watch(activeDay) 联动）
+ * 用瞬时定位而非 smooth：平滑滚动过冲会与 settleAlign 的二次吸附竞争，最终停在相邻格。
+ * 基准用轮盘锚点（挂载时今天 00:00，wheelDates 序列同源）而非 store.today（含时分秒，
+ * 跨天取整会差 1 格）。 */
+function onMobileWeekSelect(week: number): void {
+  const sem = store.currentSemester
+  if (!sem) return
+  const firstMonday = toMonday(parseDate(sem.startDate))
+  const target = new Date(firstMonday)
+  target.setDate(firstMonday.getDate() + (week - 1) * 7)
+  const view = wheelRef.value
+  if (!view) return
+  const anchor = normalizeDay(new Date(store.today))
+  const idx = Math.round((target.getTime() - anchor.getTime()) / 86400000) + WHEEL_CENTER
+  const clamped = Math.min(wheelDates.value.length - 1, Math.max(0, idx))
+  view.scrollLeft = clamped * WHEEL_ITEM_W
+}
+
+/** 周选择器选中：移动端滚轮盘，桌面端走 weekOffset（模板内联三元不会调用函数，须用显式方法） */
+function onWeekSelect(week: number): void {
+  if (isMobile.value) onMobileWeekSelect(week)
+  else store.goToWeek(week)
 }
 
 /** 移动端轮盘初始化：今天居中 */
@@ -277,8 +313,8 @@ async function exportPng(): Promise<void> {
         <WeekNav v-if="!isMobile" class="reveal" />
         <div v-else class="day-view-m">
           <div class="dv-head reveal">
-            <!-- 周标题：点击弹出周选择器 + 单双周徽章 -->
-            <WeekPicker :current-week="store.weekNumber" @select="store.goToWeek">
+            <!-- 周标题：点击弹出周选择器 + 单双周徽章（移动端选中后轮盘滚到该周） -->
+            <WeekPicker :current-week="store.weekNumber" @select="onWeekSelect">
               <span class="dv-title num">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" /></svg>
                 {{ dayTitle }}
@@ -338,7 +374,14 @@ async function exportPng(): Promise<void> {
                   <span class="dv-dot-color" :style="{ background: `var(--${c.color}-text)` }"></span>
                   <span class="dv-time num">{{ periodTime(c.startPeriod).split('–')[0] }}<small>–{{ periodTime(c.endPeriod).split('–')[1] }}</small></span>
                   <span class="dv-main">
-                    <span class="dv-name">{{ c.name }}</span>
+                    <span class="dv-name-row">
+                      <span class="dv-name">{{ c.name }}</span>
+                      <span
+                        v-if="c.type === 'lab'"
+                        class="dv-lab"
+                        :style="{ color: `var(--${c.color}-text)`, background: `var(--${c.color}-bg)`, borderColor: `var(--${c.color}-line)` }"
+                      >实验</span>
+                    </span>
                     <span class="dv-loc">{{ c.location }} · {{ c.teacher }}</span>
                   </span>
                   <span class="dv-slot num">第 {{ c.startPeriod }}{{ c.endPeriod > c.startPeriod ? `–${c.endPeriod}` : '' }} 节</span>
@@ -665,6 +708,30 @@ async function exportPng(): Promise<void> {
   text-overflow: ellipsis;
 }
 
+/* 课程名行：名称 + 实验课标签同行 */
+.dv-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dv-name-row .dv-name {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 实验课标签（随课程色板，与桌面 CourseBlock.lab-tag 一致） */
+.dv-lab {
+  flex: none;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  line-height: 1.6;
+  border: 1px solid;
+  border-radius: var(--radius-full);
+  padding: 0 6px;
+}
+
 .dv-loc {
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
@@ -769,6 +836,14 @@ async function exportPng(): Promise<void> {
   border: 1px solid var(--color-border-default);
   border-top: none;
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+/* 移动端：无课表网格衔接，操作条独立成卡（四角圆角 + 完整边框），与课程卡片协调 */
+@media (max-width: 767px) {
+  .card-foot {
+    border-top: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
+  }
 }
 
 /* 打印 / 导出操作条（文档 4.7：操作对象仅限课表网格） */

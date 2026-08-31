@@ -9,6 +9,9 @@ dist/
 server/lib/data/*.db
 server/lib/data/*.db-*
 
+# 本地备份（NAS 课表数据快照，勿提交）
+backups/
+
 # 日志与临时文件
 *.log
 .DS_Store
