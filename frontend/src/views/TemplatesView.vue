@@ -616,13 +616,37 @@ function toggleSaveFromAll(): void {
   saveFromSelected.value = next
 }
 
+/** 从学期另存下拉 */
+const showSaveDropdown = ref(false)
+
 function openSaveFromSemester(): void {
+  showSaveDropdown.value = false
   saveFromSemesterId.value = store.currentSemesterId
   saveFromName.value = ''
   saveFromCourses.value = []
   saveFromSelected.value = new Set()
   showSaveFromSemester.value = true
   void loadSaveFromCourses()
+}
+
+/** 从学期另存学期模板：学期信息 + 节次时间 */
+function openSaveSemesterFromSemester(): void {
+  showSaveDropdown.value = false
+  const sem = store.currentSemester
+  if (!sem) {
+    toast('请先创建学期', 'error')
+    return
+  }
+  editingId.value = null
+  Object.assign(semesterForm, {
+    name: sem.name,
+    startDate: sem.startDate,
+    endDate: sem.endDate,
+    weekStartDay: sem.weekStartDay,
+    periods: store.periods.map((p) => ({ startTime: p.startTime, endTime: p.endTime })),
+  })
+  semesterFormError.value = ''
+  showSemesterForm.value = true
 }
 
 /** 加载所选学期的课程列表 */
@@ -765,7 +789,16 @@ function weekLabel(r: ImportRow): string {
         <p class="tpl-sub">班级共享课程模板，一键导入到你的课表</p>
       </div>
       <div v-if="store.currentUser?.role === 'admin'" class="tpl-admin-actions">
-        <button class="btn-mini" type="button" @click="openSaveFromSemester">从学期另存</button>
+        <div class="tpl-save-dropdown">
+          <button class="btn-mini" type="button" aria-haspopup="menu" :aria-expanded="showSaveDropdown" @click="showSaveDropdown = !showSaveDropdown">
+            从学期另存
+            <svg class="tpl-drop-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+          </button>
+          <div v-if="showSaveDropdown" class="tpl-drop-menu" role="menu">
+            <button type="button" role="menuitem" @click="openSaveFromSemester">另存课程模板</button>
+            <button type="button" role="menuitem" @click="openSaveSemesterFromSemester">另存学期模板</button>
+          </div>
+        </div>
         <button class="btn-mini" type="button" @click="openCreate('course')">＋ 新建课程模板</button>
         <button class="btn-mini" type="button" @click="openCreate('unit')">＋ 新建组合模板</button>
         <button class="btn-add" type="button" @click="openSemesterCreate">＋ 新建学期模板</button>
@@ -1443,6 +1476,45 @@ function weekLabel(r: ImportRow): string {
   display: flex;
   gap: var(--spacing-sm);
   flex: none;
+}
+
+/* 从学期另存下拉 */
+.tpl-save-dropdown {
+  position: relative;
+}
+
+.tpl-drop-arrow {
+  width: 12px;
+  height: 12px;
+  margin-left: 2px;
+  vertical-align: -1px;
+}
+
+.tpl-drop-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 150px;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  padding: var(--spacing-xs);
+  z-index: var(--z-index-modal);
+}
+
+.tpl-drop-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
+  color: var(--color-text-body);
+}
+
+.tpl-drop-menu button:hover {
+  background: var(--color-bg-hover);
 }
 
 .tpl-toolbar {
