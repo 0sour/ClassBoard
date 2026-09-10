@@ -517,8 +517,10 @@ async function saveFromSemester(): Promise<void> {
   saveFromBusy.value = true
   try {
     const content = saveFromCourses.value.filter((_, i) => saveFromSelected.value.has(i))
+    // 单门课程 → 课程模板；多门课程 → 组合模板
+    const kind = content.length === 1 ? 'course' : 'unit'
     await api.createTemplate({
-      kind: 'unit',
+      kind,
       name: saveFromName.value.trim(),
       category: '混合',
       description: `从学期「${store.semesters.find((s) => s.id === saveFromSemesterId.value)?.name ?? ''}」另存`,
@@ -526,7 +528,7 @@ async function saveFromSemester(): Promise<void> {
     })
     showSaveFromSemester.value = false
     await load()
-    toast(`已保存为模板（${content.length} 门课）`, 'success')
+    toast(`已保存为${kind === 'course' ? '课程' : '组合'}模板（${content.length} 门课）`, 'success')
   } catch (e) {
     toast(e instanceof Error ? e.message : '保存失败，请重试', 'error')
   } finally {
