@@ -324,6 +324,31 @@ const previewByWeekday = computed(() => {
   return [1, 2, 3, 4, 5, 6, 7].map((wd) => ({ weekday: wd, rows: map[wd] }))
 })
 
+/** 周课表网格预览：7 天 × 12 节，同一格堆叠显示该时段全部课程（含周次标签） */
+const GRID_PERIODS = 12
+
+/** 某天某节的所有课程（含跨节次课程在起始节次渲染） */
+function coursesAt(weekday: number, period: number): ImportRow[] {
+  const day = previewByWeekday.value.find((d) => d.weekday === weekday)
+  if (!day) return []
+  return day.rows.filter((r) => r.startPeriod === period)
+}
+
+/** 该位置是否被跨节次课程覆盖（非起始节次 → 跳过渲染） */
+function coveredBySpan(weekday: number, period: number): boolean {
+  const day = previewByWeekday.value.find((d) => d.weekday === weekday)
+  if (!day) return false
+  return day.rows.some((r) => r.startPeriod < period && period <= r.endPeriod)
+}
+
+/** 周次标签（网格内显示） */
+function weekTag(r: ImportRow): string {
+  if (r.weekType === 'all') return '每周'
+  if (r.weekType === 'odd') return '单周'
+  if (r.weekType === 'even') return '双周'
+  return r.weekList?.length ? `第${r.weekList.join(',')}周` : ''
+}
+
 function weekLabel(r: ImportRow): string {
   if (r.weekType === 'all') return '每周'
   if (r.weekType === 'odd') return '单周'
@@ -409,17 +434,31 @@ function weekLabel(r: ImportRow): string {
           </button>
         </div>
 
-        <!-- 按星期分组的课程预览 -->
-        <div class="tpl-preview">
-          <div v-for="(d, i) in previewByWeekday" :key="d.weekday" class="tpl-preview-day">
-            <span class="tpl-preview-wd">{{ WEEKDAY_LABELS[i] }}</span>
-            <div v-if="d.rows.length" class="tpl-preview-rows">
-              <div v-for="r in d.rows" :key="`${r.name}-${r.startPeriod}`" class="tpl-preview-row">
-                <span class="tpl-preview-name">{{ r.name }}</span>
-                <span class="tpl-preview-meta num">第 {{ r.startPeriod }}{{ r.endPeriod > r.startPeriod ? `–${r.endPeriod}` : '' }} 节 · {{ weekLabel(r) }}</span>
-              </div>
-            </div>
-            <div v-else class="tpl-preview-empty">—</div>
+        <!-- 周课表网格预览：7 天 × 12 节，同格堆叠显示不同周次的课程 -->
+        <div class="tpl-grid-preview" aria-label="课程预览网格">
+          <div class="tpl-grid-preview__grid">
+            <div class="tpl-grid-preview__head p-h">节次</div>
+            <div v-for="wd in 7" :key="'h' + wd" class="tpl-grid-preview__head">{{ WEEKDAY_LABELS[wd - 1] }}</div>
+            <template v-for="p in GRID_PERIODS" :key="'r' + p">
+              <div class="tpl-grid-preview__period">{{ p }}</div>
+              <template v-for="wd in 7" :key="'c' + wd + '-' + p">
+                <div
+                  v-if="!coveredBySpan(wd, p)"
+                  class="tpl-grid-preview__cell"
+                  :class="{ 'has-course': coursesAt(wd, p).length > 0 }"
+                >
+                  <div
+                    v-for="r in coursesAt(wd, p)"
+                    :key="`${r.name}-${r.startPeriod}`"
+                    class="tpl-grid-preview__course"
+                    :class="{ 'is-lab': r.type === 'lab' }"
+                  >
+                    <span class="tpl-grid-preview__cname">{{ r.name }}</span>
+                    <span v-if="weekTag(r)" class="tpl-grid-preview__cweek num">{{ weekTag(r) }}</span>
+                  </div>
+                </div>
+              </template>
+            </template>
           </div>
         </div>
 
@@ -912,7 +951,7 @@ function weekLabel(r: ImportRow): string {
 
 /* 预览弹窗 */
 .tpl-preview-modal {
-  width: min(520px, 100%);
+  width: min(720px, 100%);
 }
 
 .tpl-preview-head {
@@ -972,70 +1011,84 @@ function weekLabel(r: ImportRow): string {
   color: var(--color-text-primary);
 }
 
-.tpl-preview {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-xs);
-  max-height: 240px;
-  overflow-y: auto;
-  padding: var(--spacing-sm);
-  background: var(--color-bg-page);
+/* 周课表网格预览 */
+.tpl-grid-preview {
+  overflow-x: auto;
+  border: 1px solid var(--color-border-default);
   border-radius: var(--radius-md);
+  max-height: 320px;
+  overflow-y: auto;
 }
 
-.tpl-preview-day {
-  display: flex;
-  gap: var(--spacing-sm);
-  align-items: flex-start;
+.tpl-grid-preview__grid {
+  display: grid;
+  grid-template-columns: 36px repeat(7, minmax(72px, 1fr));
+  grid-template-rows: auto repeat(12, minmax(30px, auto));
+  min-width: 620px;
 }
 
-.tpl-preview-wd {
-  flex: none;
-  width: 40px;
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-bold);
+.tpl-grid-preview__head {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--color-bg-subtle);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
   color: var(--color-text-secondary);
-  padding-top: 4px;
+  text-align: center;
+  border-bottom: 1px solid var(--color-border-default);
 }
 
-.tpl-preview-rows {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.tpl-preview-row {
+.tpl-grid-preview__period {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
-  padding: 4px 8px;
-  background: var(--color-bg-surface);
-  border-radius: var(--radius-sm);
+  justify-content: center;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  border-bottom: 1px solid var(--color-border-default);
+  border-right: 1px solid var(--color-border-default);
 }
 
-.tpl-preview-name {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-body);
-  flex: 1;
-  min-width: 0;
+.tpl-grid-preview__cell {
+  min-height: 30px;
+  padding: 2px;
+  border-bottom: 1px solid var(--color-border-default);
+  border-right: 1px solid var(--color-border-default);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tpl-grid-preview__course {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-brand-line);
+  background: var(--color-brand-subtle);
+  color: var(--color-brand);
+  font-size: 10px;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.tpl-grid-preview__course.is-lab {
+  border-color: var(--course-3-line);
+  background: var(--course-3-bg);
+  color: var(--course-3-text);
+}
+
+.tpl-grid-preview__cname {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.tpl-preview-meta {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-tertiary);
-  flex: none;
-}
-
-.tpl-preview-empty {
-  flex: 1;
-  font-size: var(--font-size-xs);
-  color: var(--color-text-tertiary);
-  padding-top: 4px;
+.tpl-grid-preview__cweek {
+  font-size: 9px;
+  opacity: 0.75;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .tpl-mode {
