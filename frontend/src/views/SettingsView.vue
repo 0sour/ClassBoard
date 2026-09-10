@@ -1,15 +1,48 @@
 <script setup lang="ts">
-// 设置页（规范 3.6）：学期管理 / 节次时间模板 / 提醒设置 / 数据管理 / 访问口令 / 外观
-import { computed, reactive, ref } from 'vue'
+// 设置页（多用户版）：Tab 分区 = 学期 / 节次 / 提醒 / 天气 / 数据 / 账号 / 用户管理（admin）
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import AppSelect, { type AppSelectOption } from '@/components/common/AppSelect.vue'
 import CitySearchSelect from '@/components/common/CitySearchSelect.vue'
 import TimePicker from '@/components/common/TimePicker.vue'
 import DatePicker from '@/components/common/DatePicker.vue'
 import { confirm, toast } from '@/utils/ui'
+import { api, type SessionInfo, type UserInfo } from '@/api/client'
 import type { Period, Semester } from '@/types'
 
 const store = useScheduleStore()
+const route = useRoute()
+const router = useRouter()
+
+// ================= Tab 导航 =================
+type TabKey = 'semester' | 'period' | 'reminder' | 'weather' | 'data' | 'account' | 'users'
+
+const TABS: { key: TabKey; label: string; adminOnly?: boolean }[] = [
+  { key: 'semester', label: '学期' },
+  { key: 'period', label: '节次' },
+  { key: 'reminder', label: '提醒' },
+  { key: 'weather', label: '天气' },
+  { key: 'data', label: '数据' },
+  { key: 'account', label: '账号' },
+  { key: 'users', label: '用户管理', adminOnly: true },
+]
+
+const activeTab = ref<TabKey>('semester')
+
+onMounted(() => {
+  const t = route.query.tab as TabKey | undefined
+  if (t && TABS.some((x) => x.key === t)) activeTab.value = t
+  void loadSessions()
+  if (store.currentUser?.role === 'admin') void loadUsers()
+})
+
+function switchTab(t: TabKey): void {
+  activeTab.value = t
+  void router.replace({ query: { ...route.query, tab: t } })
+}
+
+const visibleTabs = computed(() => TABS.filter((t) => !t.adminOnly || store.currentUser?.role === 'admin'))
 
 // ================= 学期管理 =================
 const editingId = ref<number | null>(null)
@@ -371,40 +404,226 @@ async function onRestoreFile(e: Event): Promise<void> {
   }
 }
 
-// ================= 访问口令 =================
-const passphrase = ref('')
-const passBusy = ref(false)
-const passError = ref('')
+// ================= 账号（个人信息 / 已登录设备） =================
+const sessions = ref<SessionInfo[]>([])
+const sessionsBusy = ref(false)
+const changePass = reactive({ old: '', next: '' })
+const changePassBusy = ref(false)
+const changePassError = ref('')
 
-async function toggleAccess(): Promise<void> {
-  passError.value = ''
-  const target = !store.settings.accessEnabled
-  if (target) {
-    if (passphrase.value.length < 4 || passphrase.value.length > 20) {
-      passError.value = '口令长度须为 4–20 位'
-      return
-    }
-  } else {
-    if (!passphrase.value) {
-      passError.value = '请输入当前口令以关闭'
-      return
-    }
-  }
-  passBusy.value = true
+async function loadSessions(): Promise<void> {
   try {
-    if (target) {
-      await store.enableAccess(passphrase.value)
-      toast('访问口令已开启', 'success')
-    } else {
-      await store.disableAccess(passphrase.value)
-      toast('访问口令已关闭', 'success')
-    }
-    passphrase.value = ''
-  } catch (e) {
-    passError.value = e instanceof Error ? e.message : '操作失败，请重试'
-  } finally {
-    passBusy.value = false
+    const res = await api.listSessions()
+    sessions.value = res.sessions
+  } catch {
+    sessions.value = []
   }
+}
+
+async function revokeSession(id: number): Promise<void> {
+  const ok = await confirm({
+    title: '撤销设备',
+    desc: '该设备将被登出，且此账号在所有设备上的"记住我"状态一并撤销。',
+    danger: true,
+    confirmText: '撤销',
+  })
+  if (!ok) return
+  try {
+    await api.revokeSession(id)
+    await loadSessions()
+    toast('已撤销该设备', 'success')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '撤销失败，请重试', 'error')
+  }
+}
+
+async function changePassword(): Promise<void> {
+  changePassError.value = ''
+  if (!changePass.old || !changePass.next) {
+    changePassError.value = '请填写旧密码与新密码'
+    return
+  }
+  if (changePass.next.length < 6) {
+    changePassError.value = '新密码长度须为 6–64 位'
+    return
+  }
+  changePassBusy.value = true
+  try {
+    // 校验旧密码：用登录接口验证（成功后重新登录）
+    await api.login(store.currentUser!.username, changePass.old, false)
+    // 管理员重置自己的密码（走用户管理接口）
+    await api.resetUserPassword(store.currentUser!.id, changePass.next)
+    changePass.old = ''
+    changePass.next = ''
+    toast('密码已修改，请重新登录', 'success')
+    await store.logout()
+  } catch (e) {
+    changePassError.value = e instanceof Error ? e.message : '修改失败，请重试'
+  } finally {
+    changePassBusy.value = false
+  }
+}
+
+// ================= 用户管理（admin） =================
+const users = ref<UserInfo[]>([])
+const signupBusy = ref(false)
+const showNewUser = ref(false)
+const newUser = reactive({ username: '', password: '', role: 'user' as 'admin' | 'user' })
+const newUserError = ref('')
+const newUserBusy = ref(false)
+const resetTarget = ref<UserInfo | null>(null)
+const resetPassword = ref('')
+const resetBusy = ref(false)
+const resetError = ref('')
+const deleteTarget = ref<UserInfo | null>(null)
+const deleteTransfer = ref<string>('')
+const deleteBusy = ref(false)
+const deleteError = ref('')
+
+async function loadUsers(): Promise<void> {
+  try {
+    const res = await api.listUsers()
+    users.value = res.users
+  } catch {
+    users.value = []
+  }
+}
+
+async function toggleSignup(): Promise<void> {
+  signupBusy.value = true
+  try {
+    const res = await api.setSignupEnabled(!store.signupEnabled)
+    store.signupEnabled = res.enabled
+    toast(res.enabled ? '已开放注册' : '已关闭注册', 'success')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '操作失败，请重试', 'error')
+  } finally {
+    signupBusy.value = false
+  }
+}
+
+function openNewUser(): void {
+  Object.assign(newUser, { username: '', password: '', role: 'user' as const })
+  newUserError.value = ''
+  showNewUser.value = true
+}
+
+async function createUser(): Promise<void> {
+  newUserError.value = ''
+  if (!/^[\w\u4e00-\u9fa5-]{2,20}$/.test(newUser.username.trim())) {
+    newUserError.value = '用户名须为 2-20 位字母/数字/中文/下划线/连字符'
+    return
+  }
+  if (newUser.password.length < 6) {
+    newUserError.value = '密码长度须为 6–64 位'
+    return
+  }
+  newUserBusy.value = true
+  try {
+    await api.createUser({ username: newUser.username.trim(), password: newUser.password, role: newUser.role })
+    showNewUser.value = false
+    await loadUsers()
+    toast('用户已创建', 'success')
+  } catch (e) {
+    newUserError.value = e instanceof Error ? e.message : '创建失败，请重试'
+  } finally {
+    newUserBusy.value = false
+  }
+}
+
+async function toggleUserDisabled(u: UserInfo): Promise<void> {
+  const ok = await confirm({
+    title: u.disabled ? '启用用户' : '禁用用户',
+    desc: u.disabled
+      ? `将恢复用户「${u.username}」的登录权限。`
+      : `将禁用用户「${u.username}」，其全部会话立即失效，数据保留。`,
+    danger: !u.disabled,
+    confirmText: u.disabled ? '启用' : '禁用',
+  })
+  if (!ok) return
+  try {
+    await api.updateUser(u.id, { disabled: !u.disabled })
+    await loadUsers()
+    toast(u.disabled ? '已启用' : '已禁用', 'success')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '操作失败，请重试', 'error')
+  }
+}
+
+async function toggleUserRole(u: UserInfo): Promise<void> {
+  const next = u.role === 'admin' ? 'user' : 'admin'
+  const ok = await confirm({
+    title: next === 'admin' ? '设为管理员' : '取消管理员',
+    desc: next === 'admin'
+      ? `将「${u.username}」设为管理员（拥有全部权限与用户管理能力）。`
+      : `将「${u.username}」降为普通用户。`,
+    danger: next !== 'admin',
+    confirmText: next === 'admin' ? '设为管理员' : '降为普通用户',
+  })
+  if (!ok) return
+  try {
+    await api.updateUser(u.id, { role: next })
+    await loadUsers()
+    toast('角色已更新', 'success')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '操作失败，请重试', 'error')
+  }
+}
+
+function openReset(u: UserInfo): void {
+  resetTarget.value = u
+  resetPassword.value = ''
+  resetError.value = ''
+}
+
+async function submitReset(): Promise<void> {
+  if (!resetTarget.value) return
+  resetError.value = ''
+  if (resetPassword.value.length < 6) {
+    resetError.value = '密码长度须为 6–64 位'
+    return
+  }
+  resetBusy.value = true
+  try {
+    const target = resetTarget.value
+    if (!target) return
+    await api.resetUserPassword(target.id, resetPassword.value)
+    resetTarget.value = null
+    toast(`已重置「${target.username}」的密码`, 'success')
+  } catch (e) {
+    resetError.value = e instanceof Error ? e.message : '重置失败，请重试'
+  } finally {
+    resetBusy.value = false
+  }
+}
+
+function openDelete(u: UserInfo): void {
+  deleteTarget.value = u
+  deleteTransfer.value = ''
+  deleteError.value = ''
+}
+
+async function submitDelete(): Promise<void> {
+  if (!deleteTarget.value) return
+  deleteError.value = ''
+  deleteBusy.value = true
+  try {
+    const transferTo = deleteTransfer.value === '' ? null : Number(deleteTransfer.value)
+    await api.deleteUser(deleteTarget.value.id, transferTo)
+    deleteTarget.value = null
+    await loadUsers()
+    toast('用户已删除', 'success')
+  } catch (e) {
+    deleteError.value = e instanceof Error ? e.message : '删除失败，请重试'
+  } finally {
+    deleteBusy.value = false
+  }
+}
+
+function formatTime(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 </script>
 
@@ -412,8 +631,24 @@ async function toggleAccess(): Promise<void> {
   <div class="page settings-view">
     <h2 class="settings-head reveal">设置</h2>
 
+    <!-- Tab 导航（桌面横向滚动 / 移动可滑动） -->
+    <nav class="settings-tabs reveal" role="tablist" aria-label="设置分区">
+      <button
+        v-for="t in visibleTabs"
+        :key="t.key"
+        class="settings-tab"
+        :class="{ active: activeTab === t.key }"
+        type="button"
+        role="tab"
+        :aria-selected="activeTab === t.key"
+        @click="switchTab(t.key)"
+      >
+        {{ t.label }}
+      </button>
+    </nav>
+
     <!-- 学期管理 -->
-    <div class="panel reveal">
+    <div v-show="activeTab === 'semester'" class="panel reveal">
       <div class="panel-head">
         <h3>学期</h3>
         <button class="btn-add" type="button" @click="openNewSemester">＋ 新建学期</button>
@@ -480,7 +715,7 @@ async function toggleAccess(): Promise<void> {
     </div>
 
     <!-- 节次时间模板（竖排双列卡片：左列前半节次、右列后半节次） -->
-    <div class="panel reveal">
+    <div v-show="activeTab === 'period'" class="panel reveal">
       <div class="panel-head">
         <h3>节次时间模板</h3>
         <button class="btn-mini" type="button" @click="openNewPeriodCard">＋ 添加节次</button>
@@ -554,7 +789,7 @@ async function toggleAccess(): Promise<void> {
     </div>
 
     <!-- 单双周过滤 -->
-    <div class="panel reveal">
+    <div v-show="activeTab === 'reminder'" class="panel reveal">
       <div class="row">
         <span class="row-main">
           <span class="row-title">单双周过滤</span>
@@ -572,7 +807,7 @@ async function toggleAccess(): Promise<void> {
     </div>
 
     <!-- 提醒设置 -->
-    <div class="panel reveal">
+    <div v-show="activeTab === 'reminder'" class="panel reveal">
       <div class="panel-head">
         <h3>提醒</h3>
         <span class="panel-note">默认关闭；页面未打开时不产生提醒</span>
@@ -672,7 +907,7 @@ async function toggleAccess(): Promise<void> {
     </div>
 
     <!-- 天气设置（和风天气） -->
-    <div class="panel reveal">
+    <div v-show="activeTab === 'weather'" class="panel reveal">
       <div class="panel-head">
         <h3>天气</h3>
         <span class="panel-note">默认关闭；启用后在周课表侧栏与今日页显示实时天气</span>
@@ -732,7 +967,7 @@ async function toggleAccess(): Promise<void> {
     </div>
 
     <!-- 数据管理 -->
-    <div class="panel reveal">
+    <div v-show="activeTab === 'data'" class="panel reveal">
       <div class="panel-head">
         <h3>数据管理</h3>
         <span class="panel-note">导出 JSON 备份 / 导入 JSON 恢复</span>
@@ -754,44 +989,165 @@ async function toggleAccess(): Promise<void> {
       </div>
     </div>
 
-    <!-- 访问口令 -->
-    <div class="panel reveal">
+    <!-- 账号（个人信息 / 修改密码 / 已登录设备） -->
+    <div v-show="activeTab === 'account'" class="panel reveal">
       <div class="panel-head">
-        <h3>访问口令</h3>
-        <span class="panel-note">可选的单用户轻量防护；口令以哈希存储，无找回机制</span>
+        <h3>账号</h3>
+        <span class="panel-note">{{ store.currentUser?.username }} · {{ store.currentUser?.role === 'admin' ? '管理员' : '普通用户' }}</span>
       </div>
       <div class="row">
         <span class="row-main">
-          <span class="row-title">启用访问口令</span>
-          <span class="row-meta">{{ store.settings.accessEnabled ? '已开启：未认证会话进入应用前需输入口令' : '已关闭' }}</span>
+          <span class="row-title">修改密码</span>
+          <span class="row-meta">修改后所有设备将退出登录</span>
+        </span>
+      </div>
+      <div class="sub-row">
+        <label class="edit-field">
+          <span class="edit-field__label">当前密码</span>
+          <input v-model="changePass.old" class="date-input" type="password" placeholder="当前密码" maxlength="64" />
+        </label>
+        <label class="edit-field">
+          <span class="edit-field__label">新密码</span>
+          <input v-model="changePass.next" class="date-input" type="password" placeholder="6–64 位新密码" maxlength="64" />
+        </label>
+      </div>
+      <p v-if="changePassError" class="edit-error" role="alert">{{ changePassError }}</p>
+      <div class="edit-actions">
+        <button class="btn-mini btn-mini--primary" type="button" :disabled="changePassBusy" @click="changePassword">
+          {{ changePassBusy ? '修改中…' : '修改密码' }}
+        </button>
+      </div>
+
+      <div class="row row--wrap" style="margin-top: var(--spacing-lg)">
+        <span class="row-main">
+          <span class="row-title">已登录设备</span>
+          <span class="row-meta">撤销设备会同时清除此账号在所有设备上的"记住我"状态</span>
+        </span>
+      </div>
+      <div v-for="s in sessions" :key="s.id" class="row">
+        <span class="row-main">
+          <span class="row-title">{{ s.deviceName || '未知设备' }}</span>
+          <span class="row-meta num">{{ s.ip || '—' }} · 最近活动 {{ formatTime(s.lastUsedAt) }} · {{ s.type === 'remember' ? '记住我' : '会话' }}</span>
+        </span>
+        <button class="btn-mini btn-mini--danger" type="button" :disabled="sessionsBusy" @click="revokeSession(s.id)">撤销</button>
+      </div>
+      <div v-if="!sessions.length" class="sp-empty">暂无会话记录</div>
+    </div>
+
+    <!-- 用户管理（admin 专属） -->
+    <div v-show="activeTab === 'users'" class="panel reveal">
+      <div class="panel-head">
+        <h3>用户管理</h3>
+        <button class="btn-add" type="button" @click="openNewUser">＋ 创建用户</button>
+      </div>
+
+      <div class="row row--wrap">
+        <span class="row-main">
+          <span class="row-title">开放注册</span>
+          <span class="row-meta">{{ store.signupEnabled ? '已开放：登录页显示注册入口，任何人可注册普通用户' : '已关闭：仅管理员可创建账号' }}</span>
         </span>
         <input
           class="switch"
           type="checkbox"
           role="switch"
-          aria-label="启用访问口令"
-          :checked="store.settings.accessEnabled"
-          @change="toggleAccess"
+          aria-label="开放注册"
+          :checked="store.signupEnabled"
+          :disabled="signupBusy"
+          @change="toggleSignup"
         />
       </div>
-      <div v-if="true" class="sub-row">
-        <label class="edit-field edit-field--grow">
-          <span class="edit-field__label">{{ store.settings.accessEnabled ? '输入当前口令以关闭' : '设置口令（4–20 位）' }}</span>
-          <input v-model="passphrase" class="date-input" type="password" :placeholder="store.settings.accessEnabled ? '当前口令' : '4–20 位口令'" maxlength="20" />
-        </label>
+
+      <div v-if="showNewUser" class="new-semester">
+        <div class="edit-fields">
+          <label class="edit-field">
+            <span class="edit-field__label">用户名</span>
+            <input v-model="newUser.username" class="date-input" type="text" placeholder="2-20 位字母/数字/中文" maxlength="20" />
+          </label>
+          <label class="edit-field">
+            <span class="edit-field__label">密码</span>
+            <input v-model="newUser.password" class="date-input" type="password" placeholder="6–64 位" maxlength="64" />
+          </label>
+          <label class="edit-field">
+            <span class="edit-field__label">角色</span>
+            <div class="select-wrap">
+              <AppSelect v-model="newUser.role" :options="[{ value: 'user', label: '普通用户' }, { value: 'admin', label: '管理员' }]" aria-label="角色" />
+            </div>
+          </label>
+        </div>
+        <p v-if="newUserError" class="edit-error" role="alert">{{ newUserError }}</p>
+        <div class="edit-actions">
+          <button class="btn-mini" type="button" :disabled="newUserBusy" @click="createUser">{{ newUserBusy ? '创建中…' : '创建' }}</button>
+          <button class="btn-mini" type="button" :disabled="newUserBusy" @click="showNewUser = false">取消</button>
+        </div>
       </div>
-      <p v-if="passError" class="edit-error" role="alert">{{ passError }}</p>
+
+      <div v-for="u in users" :key="u.id" class="row">
+        <span class="row-main">
+          <span class="row-title">
+            {{ u.username }}
+            <span v-if="u.role === 'admin'" class="chip">管理员</span>
+            <span v-if="u.disabled" class="chip chip--danger">已禁用</span>
+            <span v-if="u.id === store.currentUser?.id" class="chip">当前</span>
+          </span>
+          <span class="row-meta num">创建于 {{ formatTime(u.createdAt) }} · 最后登录 {{ formatTime(u.lastLoginAt) }}</span>
+        </span>
+        <button v-if="u.id !== store.currentUser?.id" class="btn-mini" type="button" @click="toggleUserRole(u)">
+          {{ u.role === 'admin' ? '降为普通' : '设为管理员' }}
+        </button>
+        <button v-if="u.id !== store.currentUser?.id" class="btn-mini" type="button" @click="toggleUserDisabled(u)">
+          {{ u.disabled ? '启用' : '禁用' }}
+        </button>
+        <button v-if="u.id !== store.currentUser?.id" class="btn-mini" type="button" @click="openReset(u)">重置密码</button>
+        <button v-if="u.id !== store.currentUser?.id" class="btn-mini btn-mini--danger" type="button" @click="openDelete(u)">删除</button>
+      </div>
+    </div>
+
+    <!-- 重置密码弹窗 -->
+    <div v-if="resetTarget" class="modal-mask" @mousedown.self="resetTarget = null">
+      <div class="modal" role="dialog" aria-modal="true" aria-label="重置密码">
+        <h3 class="modal-title">重置「{{ resetTarget.username }}」的密码</h3>
+        <label class="field">
+          <span class="field__label">新密码（6–64 位）</span>
+          <input v-model="resetPassword" class="date-input" type="password" maxlength="64" />
+        </label>
+        <p v-if="resetError" class="edit-error" role="alert">{{ resetError }}</p>
+        <div class="edit-actions">
+          <button class="btn-mini" type="button" :disabled="resetBusy" @click="resetTarget = null">取消</button>
+          <button class="btn-mini btn-mini--primary" type="button" :disabled="resetBusy" @click="submitReset">
+            {{ resetBusy ? '重置中…' : '确认重置' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 删除用户弹窗（数据归属选择） -->
+    <div v-if="deleteTarget" class="modal-mask" @mousedown.self="deleteTarget = null">
+      <div class="modal" role="dialog" aria-modal="true" aria-label="删除用户">
+        <h3 class="modal-title">删除用户「{{ deleteTarget.username }}」</h3>
+        <p class="modal-desc">该用户的学期、课程、考试、作业数据将如何处理？</p>
+        <label class="field">
+          <span class="field__label">数据归属</span>
+          <div class="select-wrap">
+            <AppSelect
+              :model-value="deleteTransfer"
+              :options="[{ value: '', label: '一并删除该用户全部数据' }, ...users.filter((x) => x.id !== deleteTarget!.id).map((x) => ({ value: String(x.id), label: `转移给 ${x.username}` }))]"
+              aria-label="数据归属"
+              @update:model-value="(v: string | number | null) => deleteTransfer = v === null ? '' : String(v)"
+            />
+          </div>
+        </label>
+        <p v-if="deleteError" class="edit-error" role="alert">{{ deleteError }}</p>
+        <div class="edit-actions">
+          <button class="btn-mini" type="button" :disabled="deleteBusy" @click="deleteTarget = null">取消</button>
+          <button class="btn-mini btn-mini--danger" type="button" :disabled="deleteBusy" @click="submitDelete">
+            {{ deleteBusy ? '删除中…' : '确认删除' }}
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- 外观 -->
-    <div class="panel reveal">
-      <div class="row">
-        <span class="row-main">
-          <span class="row-title">外观</span>
-          <span class="row-meta">固定清新浅色极简（本期无主题切换）</span>
-        </span>
-      </div>
-    </div>
+    <div v-show="activeTab === 'semester'" class="panel reveal" style="display: none"></div>
   </div>
 </template>
 
@@ -805,6 +1161,83 @@ async function toggleAccess(): Promise<void> {
 .settings-head {
   font-size: var(--font-size-2xl);
   margin-bottom: var(--spacing-lg);
+}
+
+/* Tab 导航 */
+.settings-tabs {
+  display: flex;
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-lg);
+  padding-bottom: var(--spacing-sm);
+  border-bottom: 1px solid var(--color-border-default);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.settings-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.settings-tab {
+  flex: none;
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard),
+    background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.settings-tab:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-body);
+}
+
+.settings-tab.active {
+  background: var(--color-brand-subtle);
+  color: var(--color-brand);
+  font-weight: var(--font-weight-medium);
+}
+
+/* 弹窗（重置密码 / 删除用户） */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-index-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.42);
+  padding: var(--spacing-lg);
+}
+
+.modal {
+  width: min(400px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  background: var(--color-bg-surface);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-pop);
+  padding: var(--spacing-xl);
+}
+
+.modal-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.modal-desc {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.chip--danger {
+  color: var(--color-feedback-error);
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--color-danger-line, #fecaca);
 }
 
 .panel {

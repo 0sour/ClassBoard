@@ -1,7 +1,7 @@
 // ============================================================
-// ClassBoard · 设置模块（setting 表 key-value，见技术文档 3.2.9）
+// ClassBoard · 设置模块（user_setting 表 key-value，按用户隔离）
 // ============================================================
-import { db, getSetting, setSetting, deleteSetting } from './db.js'
+import { db } from './db.js'
 
 export const DEFAULT_SETTINGS = {
   showOddEvenFilter: true,
@@ -11,27 +11,29 @@ export const DEFAULT_SETTINGS = {
   weather: { enabled: false, apiKey: '', location: '' },
 }
 
-function readJson(key, fallback) {
-  const raw = getSetting(key)
-  if (raw === undefined) return fallback
+function readJson(userId, key, fallback) {
+  const row = db
+    .prepare('SELECT value FROM user_setting WHERE user_id = ? AND key = ?')
+    .get(userId, key)
+  if (!row) return fallback
   try {
-    return JSON.parse(raw)
+    return JSON.parse(row.value)
   } catch {
     return fallback
   }
 }
 
-export function readSettings() {
+export function readSettings(userId) {
   return {
-    showOddEvenFilter: readJson('show_odd_even_filter', DEFAULT_SETTINGS.showOddEvenFilter),
-    reminder: { ...DEFAULT_SETTINGS.reminder, ...readJson('reminder', {}) },
-    labReminder: { ...DEFAULT_SETTINGS.labReminder, ...readJson('lab_reminder', {}) },
-    homeworkReminder: { ...DEFAULT_SETTINGS.homeworkReminder, ...readJson('homework_reminder', {}) },
-    weather: { ...DEFAULT_SETTINGS.weather, ...readJson('weather', {}) },
+    showOddEvenFilter: readJson(userId, 'show_odd_even_filter', DEFAULT_SETTINGS.showOddEvenFilter),
+    reminder: { ...DEFAULT_SETTINGS.reminder, ...readJson(userId, 'reminder', {}) },
+    labReminder: { ...DEFAULT_SETTINGS.labReminder, ...readJson(userId, 'lab_reminder', {}) },
+    homeworkReminder: { ...DEFAULT_SETTINGS.homeworkReminder, ...readJson(userId, 'homework_reminder', {}) },
+    weather: { ...DEFAULT_SETTINGS.weather, ...readJson(userId, 'weather', {}) },
   }
 }
 
-export function writeSettings(patch) {
+export function writeSettings(userId, patch) {
   for (const [key, value] of Object.entries(patch)) {
     const storeKey = {
       showOddEvenFilter: 'show_odd_even_filter',
@@ -40,37 +42,28 @@ export function writeSettings(patch) {
       homeworkReminder: 'homework_reminder',
       weather: 'weather',
     }[key]
-    if (storeKey) setSetting(storeKey, JSON.stringify(value))
+    if (storeKey) {
+      db.prepare(
+        'INSERT INTO user_setting (user_id, key, value) VALUES (?, ?, ?) ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value',
+      ).run(userId, storeKey, JSON.stringify(value))
+    }
   }
-  return readSettings()
+  return readSettings(userId)
 }
 
-/** 口令是否已开启 */
-export function isAccessEnabled() {
-  return getSetting('access_hash') !== undefined
-}
-
-/** 读取口令哈希（scrypt，格式：salt:hash 以 16 进制存储） */
-export function getAccessHash() {
-  return getSetting('access_hash')
-}
-
-export function setAccessHash(value) {
-  setSetting('access_hash', value)
-}
-
-export function clearAccessHash() {
-  deleteSetting('access_hash')
-}
-
-/** 幂等：仅首次启动时写入默认设置 */
+/** 幂等：首次启动（无任何用户设置）时写入默认设置 */
 export function ensureDefaultSettings() {
-  const count = db.prepare('SELECT COUNT(*) AS n FROM setting').get().n
+  const count = db.prepare('SELECT COUNT(*) AS n FROM user_setting').get().n
   if (count === 0) {
-    setSetting('show_odd_even_filter', JSON.stringify(DEFAULT_SETTINGS.showOddEvenFilter))
-    setSetting('reminder', JSON.stringify(DEFAULT_SETTINGS.reminder))
-    setSetting('lab_reminder', JSON.stringify(DEFAULT_SETTINGS.labReminder))
-    setSetting('homework_reminder', JSON.stringify(DEFAULT_SETTINGS.homeworkReminder))
-    setSetting('weather', JSON.stringify(DEFAULT_SETTINGS.weather))
+    const admin = db.prepare("SELECT id FROM user WHERE role = 'admin' ORDER BY id LIMIT 1").get()
+    if (!admin) return
+    const ins = db.prepare(
+      'INSERT OR IGNORE INTO user_setting (user_id, key, value) VALUES (?, ?, ?)',
+    )
+    ins.run(admin.id, 'show_odd_even_filter', JSON.stringify(DEFAULT_SETTINGS.showOddEvenFilter))
+    ins.run(admin.id, 'reminder', JSON.stringify(DEFAULT_SETTINGS.reminder))
+    ins.run(admin.id, 'lab_reminder', JSON.stringify(DEFAULT_SETTINGS.labReminder))
+    ins.run(admin.id, 'homework_reminder', JSON.stringify(DEFAULT_SETTINGS.homeworkReminder))
+    ins.run(admin.id, 'weather', JSON.stringify(DEFAULT_SETTINGS.weather))
   }
 }

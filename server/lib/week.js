@@ -76,11 +76,11 @@ export function isCourseVisible(weekType, weekList, weekNumber, filter = true) {
   return weekList.includes(weekNumber)
 }
 
-/** 当前学期的完整行（未设置时为 null） */
-export function getCurrentSemester() {
-  const id = getCurrentSemesterIdRaw()
+/** 当前学期的完整行（按用户；未设置时为 null） */
+export function getCurrentSemester(userId) {
+  const id = getCurrentSemesterIdRaw(userId)
   if (id === null) return null
-  const row = db.prepare('SELECT * FROM semester WHERE id = ?').get(id)
+  const row = db.prepare('SELECT * FROM semester WHERE id = ? AND user_id = ?').get(id, userId)
   return row ? rowToSemester(row) : null
 }
 

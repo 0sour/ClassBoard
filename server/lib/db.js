@@ -2,6 +2,7 @@
 // ClassBoard · 数据访问层（better-sqlite3）
 // ============================================================
 import Database from 'better-sqlite3'
+import { randomBytes, scryptSync } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -78,6 +79,80 @@ CREATE TABLE IF NOT EXISTS setting (
 );
 `)
 
+// ============================================================
+// 多用户迁移：user / session / user_setting 表 + 业务表 user_id 列
+// 幂等：已存在则跳过；现有数据归入自动创建的 admin 用户
+// ============================================================
+const hasUserTable = db
+  .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user'")
+  .get()
+if (!hasUserTable) {
+  db.exec(`
+    CREATE TABLE user (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+      disabled INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      last_login_at TEXT
+    );
+
+    CREATE TABLE session (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      type TEXT NOT NULL CHECK (type IN ('access', 'remember')),
+      device_name TEXT NOT NULL DEFAULT '',
+      ip TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      last_used_at TEXT NOT NULL
+    );
+
+    CREATE TABLE user_setting (
+      user_id INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      PRIMARY KEY (user_id, key)
+    );
+
+    ALTER TABLE semester ADD COLUMN user_id INTEGER;
+    ALTER TABLE period_template ADD COLUMN user_id INTEGER;
+    ALTER TABLE course ADD COLUMN user_id INTEGER;
+    ALTER TABLE exam ADD COLUMN user_id INTEGER;
+    ALTER TABLE homework ADD COLUMN user_id INTEGER;
+  `)
+  // 现有数据归入 admin（先建 admin 再回填 user_id）
+  const adminHash = hashPassphraseForMigration()
+  const info = db
+    .prepare('INSERT INTO user (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)')
+    .run('admin', adminHash, 'admin', new Date().toISOString())
+  const adminId = info.lastInsertRowid
+  for (const t of ['semester', 'period_template', 'course', 'exam', 'homework']) {
+    db.prepare(`UPDATE ${t} SET user_id = ? WHERE user_id IS NULL`).run(adminId)
+  }
+  // 全局设置迁移为 admin 的用户设置（current_semester_id 与业务设置）
+  const globalSettings = db.prepare('SELECT key, value FROM setting').all()
+  const insUserSetting = db.prepare(
+    'INSERT OR IGNORE INTO user_setting (user_id, key, value) VALUES (?, ?, ?)',
+  )
+  for (const s of globalSettings) {
+    if (s.key === 'access_hash') continue // 口令哈希不迁移（被账号体系取代）
+    insUserSetting.run(adminId, s.key, s.value)
+  }
+  console.log('[migrate] 多用户迁移完成：admin 用户 id=' + adminId)
+}
+
+/** 迁移用：生成 admin 初始密码哈希（随机 16 位，打印到日志，首次登录后应修改） */
+function hashPassphraseForMigration() {
+  const pass = randomBytes(8).toString('hex')
+  const salt = randomBytes(16)
+  const hash = scryptSync(pass, salt, 32).toString('hex')
+  console.log('[migrate] admin 初始密码：' + pass + '（请登录后立即修改）')
+  return `${salt.toString('hex')}:${hash}`
+}
+
 /** 默认节次模板（创建学期时自动生成，含晚自习，见技术文档 4.3.1） */
 export const DEFAULT_PERIODS = [
   ['08:00', '08:45'],
@@ -112,10 +187,24 @@ export function deleteSetting(key) {
   db.prepare('DELETE FROM setting WHERE key = ?').run(key)
 }
 
-/** 当前学期 id（未设置时为 null） */
-export function getCurrentSemesterId() {
-  const v = getSetting('current_semester_id')
-  return v ? Number(v) : null
+/** 当前学期 id（按用户；未设置时为 null） */
+export function getCurrentSemesterId(userId) {
+  const row = db
+    .prepare('SELECT value FROM user_setting WHERE user_id = ? AND key = ?')
+    .get(userId, 'current_semester_id')
+  return row ? Number(row.value) : null
+}
+
+/** 设置当前学期（按用户） */
+export function setCurrentSemesterId(userId, id) {
+  db.prepare(
+    'INSERT INTO user_setting (user_id, key, value) VALUES (?, ?, ?) ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value',
+  ).run(userId, 'current_semester_id', String(id))
+}
+
+/** 删除当前学期设置（按用户） */
+export function clearCurrentSemesterId(userId) {
+  db.prepare('DELETE FROM user_setting WHERE user_id = ? AND key = ?').run(userId, 'current_semester_id')
 }
 
 /** 学期行 → API 对象 */

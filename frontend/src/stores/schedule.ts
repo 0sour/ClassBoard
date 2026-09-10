@@ -4,7 +4,7 @@
 // ============================================================
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { api, type ScheduleResponse, type SettingsPayload, type WeatherData } from '@/api/client'
+import { api, type ScheduleResponse, type SettingsPayload, type UserInfo, type WeatherData } from '@/api/client'
 import { MOCK_COURSES, MOCK_PERIODS, MOCK_SEMESTER } from '@/data/mock'
 import type { Course, Exam, Homework, Period, Semester, Weekday, WeekType } from '@/types'
 import { pickCourseColor } from '@/utils/course'
@@ -196,16 +196,22 @@ export const useScheduleStore = defineStore('schedule', () => {
   // 远端数据加载（mock 兜底）
   // ============================================================
 
+  /** 当前登录用户（null=未登录） */
+  const currentUser = ref<UserInfo | null>(null)
+  /** 注册开关（登录页显示注册入口） */
+  const signupEnabled = ref(false)
+
   /** 启动：拉取 context（学期/当前学期/节次/设置），失败则保持 mock */
   async function bootstrap(): Promise<void> {
     try {
       const ctx = await api.getContext()
       if (ctx.accessRequired) {
-        // 访问口令已开启且未登录：标记后由 App 层展示口令页
+        // 未登录：标记后由 App 层展示登录页
         accessRequired.value = true
         return
       }
       accessRequired.value = false
+      currentUser.value = ctx.user ?? null
       semesters.value = ctx.semesters
       currentSemesterId.value = ctx.currentSemesterId ?? (ctx.semesters[0]?.id ?? null)
       periods.value = ctx.periods
@@ -219,6 +225,42 @@ export const useScheduleStore = defineStore('schedule', () => {
       await refreshWeather()
     } catch {
       remote.value = false
+    }
+  }
+
+  /** 登录（成功后重新 bootstrap） */
+  async function login(username: string, password: string, remember: boolean): Promise<void> {
+    const res = await api.login(username, password, remember)
+    currentUser.value = res.user
+    await afterAccessVerified()
+  }
+
+  /** 注册（成功后重新 bootstrap） */
+  async function register(username: string, password: string): Promise<void> {
+    const res = await api.register(username, password)
+    currentUser.value = res.user
+    await afterAccessVerified()
+  }
+
+  /** 登出 */
+  async function logout(): Promise<void> {
+    try {
+      await api.logout()
+    } catch {
+      // 忽略登出失败
+    }
+    currentUser.value = null
+    accessRequired.value = true
+    remote.value = false
+  }
+
+  /** 拉取注册开关 */
+  async function refreshSignupEnabled(): Promise<void> {
+    try {
+      const res = await api.getSignupEnabled()
+      signupEnabled.value = res.enabled
+    } catch {
+      signupEnabled.value = false
     }
   }
 
@@ -684,6 +726,12 @@ export const useScheduleStore = defineStore('schedule', () => {
     loadMatters,
     updateSettings,
     setShowOddEvenFilter,
+    currentUser,
+    signupEnabled,
+    login,
+    register,
+    logout,
+    refreshSignupEnabled,
     verifyAccess,
     enableAccess,
     disableAccess,

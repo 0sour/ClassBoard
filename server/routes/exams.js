@@ -1,5 +1,5 @@
 // ============================================================
-// ClassBoard · 考试路由（技术文档 4.3.3 #21-#24）
+// ClassBoard · 考试路由（技术文档 4.3.3 #21-#24，多用户按 user_id 隔离）
 // ============================================================
 import { Router } from 'express'
 import { db, getCurrentSemesterId, toExam } from '../lib/db.js'
@@ -8,19 +8,25 @@ import { validateExam } from '../lib/validate.js'
 
 export const examsRouter = Router()
 
-function defaultSemesterId(body) {
+function defaultSemesterId(body, userId) {
   if (body.semesterId !== undefined && body.semesterId !== null) return Number(body.semesterId)
-  return getCurrentSemesterId()
+  return getCurrentSemesterId(userId)
+}
+
+function ownedSemester(semesterId, userId) {
+  const sem = db.prepare('SELECT id FROM semester WHERE id = ? AND user_id = ?').get(semesterId, userId)
+  if (!sem) throw notFound('学期不存在')
+  return sem
 }
 
 examsRouter.get(
   '/',
   wrap(async (req, res) => {
-    const semesterId = req.query.semesterId !== undefined ? Number(req.query.semesterId) : getCurrentSemesterId()
+    const semesterId = req.query.semesterId !== undefined ? Number(req.query.semesterId) : getCurrentSemesterId(req.user.id)
     if (semesterId === null) return res.json([])
     const rows = db
-      .prepare('SELECT * FROM exam WHERE semester_id = ? ORDER BY datetime DESC')
-      .all(semesterId)
+      .prepare('SELECT * FROM exam WHERE semester_id = ? AND user_id = ? ORDER BY datetime DESC')
+      .all(semesterId, req.user.id)
     res.json(rows.map(toExam))
   }),
 )
@@ -28,17 +34,16 @@ examsRouter.get(
 examsRouter.post(
   '/',
   wrap(async (req, res) => {
-    const semesterId = defaultSemesterId(req.body)
+    const semesterId = defaultSemesterId(req.body, req.user.id)
     if (semesterId === null) throw badRequest('未设置当前学期，请先创建或切换学期')
-    const sem = db.prepare('SELECT id FROM semester WHERE id = ?').get(semesterId)
-    if (!sem) throw notFound('学期不存在')
+    ownedSemester(semesterId, req.user.id)
     const e = validateExam(req.body)
-    if (e.courseId !== null && !db.prepare('SELECT id FROM course WHERE id = ?').get(e.courseId)) {
+    if (e.courseId !== null && !db.prepare('SELECT id FROM course WHERE id = ? AND user_id = ?').get(e.courseId, req.user.id)) {
       throw badRequest('课程不存在', [{ field: 'courseId', message: '课程不存在' }])
     }
     const info = db
-      .prepare('INSERT INTO exam (semester_id, course_id, name, datetime, location, remark) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(semesterId, e.courseId, e.name, e.datetime, e.location, e.remark)
+      .prepare('INSERT INTO exam (semester_id, user_id, course_id, name, datetime, location, remark) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(semesterId, req.user.id, e.courseId, e.name, e.datetime, e.location, e.remark)
     res.status(201).json(toExam(db.prepare('SELECT * FROM exam WHERE id = ?').get(info.lastInsertRowid)))
   }),
 )
@@ -47,10 +52,10 @@ examsRouter.put(
   '/:id',
   wrap(async (req, res) => {
     const id = Number(req.params.id)
-    const row = db.prepare('SELECT * FROM exam WHERE id = ?').get(id)
+    const row = db.prepare('SELECT * FROM exam WHERE id = ? AND user_id = ?').get(id, req.user.id)
     if (!row) throw notFound('考试不存在')
     const e = validateExam(req.body)
-    if (e.courseId !== null && !db.prepare('SELECT id FROM course WHERE id = ?').get(e.courseId)) {
+    if (e.courseId !== null && !db.prepare('SELECT id FROM course WHERE id = ? AND user_id = ?').get(e.courseId, req.user.id)) {
       throw badRequest('课程不存在', [{ field: 'courseId', message: '课程不存在' }])
     }
     db.prepare('UPDATE exam SET course_id = ?, name = ?, datetime = ?, location = ?, remark = ? WHERE id = ?').run(
@@ -63,7 +68,7 @@ examsRouter.put(
 examsRouter.delete(
   '/:id',
   wrap(async (req, res) => {
-    const info = db.prepare('DELETE FROM exam WHERE id = ?').run(Number(req.params.id))
+    const info = db.prepare('DELETE FROM exam WHERE id = ? AND user_id = ?').run(Number(req.params.id), req.user.id)
     if (!info.changes) throw notFound('考试不存在')
     res.status(204).end()
   }),

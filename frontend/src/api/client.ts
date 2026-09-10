@@ -39,8 +39,10 @@ export interface ContextResponse {
   currentSemesterId: number | null
   periods: Period[]
   settings: SettingsPayload
-  /** 访问口令已开启时返回 true（前端需跳口令页） */
+  /** 未登录时返回 true（前端需跳登录页） */
   accessRequired?: boolean
+  /** 当前登录用户（已登录时返回） */
+  user?: UserInfo
 }
 
 export interface ScheduleWeek {
@@ -239,4 +241,58 @@ export const api = {
 
   disableAccess: (passphrase: string) =>
     request<{ ok: true }>('/access/disable', { method: 'POST', body: JSON.stringify({ passphrase }) }),
+
+  // ---- 多用户认证 ----
+  login: (username: string, password: string, remember: boolean) =>
+    request<{ ok: true; user: UserInfo }>('/access/login', { method: 'POST', body: JSON.stringify({ username, password, remember }) }),
+
+  register: (username: string, password: string) =>
+    request<{ ok: true; user: UserInfo }>('/access/register', { method: 'POST', body: JSON.stringify({ username, password }) }),
+
+  logout: () => request<void>('/access/logout', { method: 'POST' }),
+
+  getMe: () => request<{ user: UserInfo }>('/access/me'),
+
+  getSignupEnabled: () => request<{ enabled: boolean }>('/access/signup-enabled'),
+
+  listSessions: () => request<{ sessions: SessionInfo[] }>('/access/sessions'),
+
+  revokeSession: (id: number) => request<void>(`/access/sessions/${id}`, { method: 'DELETE' }),
+
+  // ---- 用户管理（admin） ----
+  listUsers: () => request<{ users: UserInfo[] }>('/users'),
+
+  createUser: (body: { username: string; password: string; role: 'admin' | 'user' }) =>
+    request<{ user: UserInfo }>('/users', { method: 'POST', body: JSON.stringify(body) }),
+
+  updateUser: (id: number, body: { role?: 'admin' | 'user'; disabled?: boolean }) =>
+    request<{ user: UserInfo }>(`/users/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+  resetUserPassword: (id: number, password: string) =>
+    request<{ ok: true }>(`/users/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ password }) }),
+
+  deleteUser: (id: number, transferTo?: number | null) =>
+    request<void>(`/users/${id}`, { method: 'DELETE', body: JSON.stringify({ transferTo: transferTo ?? null }) }),
+
+  setSignupEnabled: (enabled: boolean) =>
+    request<{ enabled: boolean }>('/users/signup', { method: 'PUT', body: JSON.stringify({ enabled }) }),
+}
+
+export interface UserInfo {
+  id: number
+  username: string
+  role: 'admin' | 'user'
+  disabled: boolean
+  createdAt: string
+  lastLoginAt: string | null
+}
+
+export interface SessionInfo {
+  id: number
+  type: 'access' | 'remember'
+  deviceName: string
+  ip: string
+  createdAt: string
+  expiresAt: string
+  lastUsedAt: string
 }

@@ -18,7 +18,7 @@ importRouter.post(
     const { mode, semesterId, rows } = req.body ?? {}
     if (!['append', 'overwrite'].includes(mode)) throw badRequest('mode 须为 append 或 overwrite')
     if (!Number.isInteger(semesterId)) throw badRequest('semesterId 取值无效')
-    const sem = db.prepare('SELECT id FROM semester WHERE id = ?').get(semesterId)
+    const sem = db.prepare('SELECT id FROM semester WHERE id = ? AND user_id = ?').get(semesterId, req.user.id)
     if (!sem) throw notFound('学期不存在')
     if (!Array.isArray(rows) || rows.length === 0) throw badRequest('rows 不能为空')
     if (rows.length > MAX_ROWS) {
@@ -46,15 +46,15 @@ importRouter.post(
 
     const run = db.transaction(() => {
       if (mode === 'overwrite') {
-        db.prepare('DELETE FROM course WHERE semester_id = ?').run(semesterId)
+        db.prepare('DELETE FROM course WHERE semester_id = ? AND user_id = ?').run(semesterId, req.user.id)
       }
       const insert = db.prepare(
-        `INSERT INTO course (semester_id, type, name, teacher, location, color, week_type, week_list, weekday, start_period, end_period, remark)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO course (semester_id, user_id, type, name, teacher, location, color, week_type, week_list, weekday, start_period, end_period, remark)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       for (const c of validated) {
         insert.run(
-          semesterId, c.type, c.name, c.teacher, c.location, c.color, c.weekType,
+          semesterId, req.user.id, c.type, c.name, c.teacher, c.location, c.color, c.weekType,
           c.weekList ? JSON.stringify(c.weekList) : null,
           c.weekday, c.startPeriod, c.endPeriod, c.remark,
         )

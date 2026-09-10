@@ -33,15 +33,16 @@ function vHw(h){if(!h)return false;return vNum(h.id,1)&&vNum(h.semesterId,1)&&vS
 backupRouter.get(
   '/',
   wrap(async (req, res) => {
+    const uid = req.user.id
     const payload = {
       version: 2,
       exportedAt: new Date().toISOString(),
-      semesters: db.prepare('SELECT * FROM semester ORDER BY id ASC').all().map(toSemester),
-      periods: db.prepare('SELECT * FROM period_template ORDER BY semester_id ASC, period_index ASC').all().map(toPeriod),
-      courses: db.prepare('SELECT * FROM course ORDER BY id ASC').all().map(toCourse),
-      exams: db.prepare('SELECT * FROM exam ORDER BY id ASC').all().map(toExam),
-      homework: db.prepare('SELECT * FROM homework ORDER BY id ASC').all().map(toHomework),
-      settings: readSettings(),
+      semesters: db.prepare('SELECT * FROM semester WHERE user_id = ? ORDER BY id ASC').all(uid).map(toSemester),
+      periods: db.prepare('SELECT * FROM period_template WHERE user_id = ? ORDER BY semester_id ASC, period_index ASC').all(uid).map(toPeriod),
+      courses: db.prepare('SELECT * FROM course WHERE user_id = ? ORDER BY id ASC').all(uid).map(toCourse),
+      exams: db.prepare('SELECT * FROM exam WHERE user_id = ? ORDER BY id ASC').all(uid).map(toExam),
+      homework: db.prepare('SELECT * FROM homework WHERE user_id = ? ORDER BY id ASC').all(uid).map(toHomework),
+      settings: readSettings(uid),
       // 口令哈希不导出（安全要求）
     }
     const d = new Date()
@@ -80,59 +81,54 @@ backupRouter.post(
       db.exec('DELETE FROM homework; DELETE FROM exam; DELETE FROM course; DELETE FROM period_template; DELETE FROM semester;')
       // 恢复外键由事务自动管理
       const insSem = db.prepare(
-        'INSERT INTO semester (id, name, start_date, end_date, week_start_day, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO semester (id, name, start_date, end_date, week_start_day, updated_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
       )
       for (const s of data.semesters ?? []) {
         if (!vSem(s)) continue
-        insSem.run(s.id, s.name, s.startDate, s.endDate, s.weekStartDay, new Date().toISOString())
+        insSem.run(s.id, s.name, s.startDate, s.endDate, s.weekStartDay, new Date().toISOString(), req.user.id)
       }
       const insPeriod = db.prepare(
-        'INSERT INTO period_template (id, semester_id, period_index, start_time, end_time) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO period_template (id, semester_id, user_id, period_index, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)',
       )
       for (const p of data.periods ?? []) {
         if (!vPeriod(p)) continue
-        insPeriod.run(p.id, p.semesterId, p.index, p.startTime, p.endTime)
+        insPeriod.run(p.id, p.semesterId, req.user.id, p.index, p.startTime, p.endTime)
       }
       const insCourse = db.prepare(
-        `INSERT INTO course (id, semester_id, type, name, teacher, location, color, week_type, week_list, weekday, start_period, end_period, remark)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO course (id, semester_id, user_id, type, name, teacher, location, color, week_type, week_list, weekday, start_period, end_period, remark)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       for (const c of data.courses ?? []) {
         if (!vCourse(c)) continue
         insCourse.run(
-          c.id, c.semesterId, c.type, c.name, c.teacher, c.location, c.color, c.weekType,
+          c.id, c.semesterId, req.user.id, c.type, c.name, c.teacher, c.location, c.color, c.weekType,
           c.weekList ? JSON.stringify(c.weekList) : null,
           c.weekday, c.startPeriod, c.endPeriod, c.remark,
         )
       }
       const insExam = db.prepare(
-        'INSERT INTO exam (id, semester_id, course_id, name, datetime, location, remark) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO exam (id, semester_id, user_id, course_id, name, datetime, location, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       )
       for (const e of data.exams ?? []) {
         if (!vExam(e)) continue
-        insExam.run(e.id, e.semesterId, e.courseId, e.name, e.datetime, e.location, e.remark)
+        insExam.run(e.id, e.semesterId, req.user.id, e.courseId, e.name, e.datetime, e.location, e.remark)
       }
       const insHw = db.prepare(
-        'INSERT INTO homework (id, semester_id, course_id, name, due_at, done, remark) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO homework (id, semester_id, user_id, course_id, name, due_at, done, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       )
       for (const h of data.homework ?? []) {
         if (!vHw(h)) continue
-        insHw.run(h.id, h.semesterId, h.courseId, h.name, h.dueAt, h.done ? 1 : 0, h.remark)
+        insHw.run(h.id, h.semesterId, req.user.id, h.courseId, h.name, h.dueAt, h.done ? 1 : 0, h.remark)
       }
       // 恢复设置（不恢复口令哈希）
       const sets = data.settings ?? {}
-      db.prepare('INSERT OR REPLACE INTO setting (key, value) VALUES (?, ?)').run(
-        'show_odd_even_filter', JSON.stringify(sets.showOddEvenFilter ?? true),
+      const insSetting = db.prepare(
+        'INSERT OR REPLACE INTO user_setting (user_id, key, value) VALUES (?, ?, ?)',
       )
-      db.prepare('INSERT OR REPLACE INTO setting (key, value) VALUES (?, ?)').run(
-        'reminder', JSON.stringify(sets.reminder ?? { enabled: false, mode: 'every', advanceMinutes: 10 }),
-      )
-      db.prepare('INSERT OR REPLACE INTO setting (key, value) VALUES (?, ?)').run(
-        'lab_reminder', JSON.stringify(sets.labReminder ?? { enabled: false, mode: 'every', advanceMinutes: 10 }),
-      )
-      db.prepare('INSERT OR REPLACE INTO setting (key, value) VALUES (?, ?)').run(
-        'homework_reminder', JSON.stringify(sets.homeworkReminder ?? { enabled: false, advanceDays: 2 }),
-      )
+      insSetting.run(req.user.id, 'show_odd_even_filter', JSON.stringify(sets.showOddEvenFilter ?? true))
+      insSetting.run(req.user.id, 'reminder', JSON.stringify(sets.reminder ?? { enabled: false, mode: 'every', advanceMinutes: 10 }))
+      insSetting.run(req.user.id, 'lab_reminder', JSON.stringify(sets.labReminder ?? { enabled: false, mode: 'every', advanceMinutes: 10 }))
+      insSetting.run(req.user.id, 'homework_reminder', JSON.stringify(sets.homeworkReminder ?? { enabled: false, advanceDays: 2 }))
     })
     restore()
 

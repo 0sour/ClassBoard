@@ -35,6 +35,13 @@ function switchView(name: 'week' | 'day'): void {
 const showImportDropdown = ref(false)
 const showImportWizard = ref(false)
 const showCourseEditor = ref(false)
+const showUserMenu = ref(false)
+
+/** 退出登录 */
+function onLogout(): void {
+  showUserMenu.value = false
+  void store.logout()
+}
 
 /** 点击外部关闭导入下拉（与提醒菜单一致：文档级 mousedown 监听，无遮罩，见 UI 4.9 约定） */
 function onDocMouseDown(e: MouseEvent): void {
@@ -207,6 +214,29 @@ const reminders = computed(() => {
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13" /><path d="M3 6h.01M3 12h.01M3 18h.01" /></svg>
       </button>
+      <!-- 用户菜单：用户名 + 登出 -->
+      <div class="user-wrap">
+        <button
+          class="user-btn"
+          type="button"
+          aria-label="用户菜单"
+          aria-haspopup="menu"
+          :aria-expanded="showUserMenu"
+          @click="showUserMenu = !showUserMenu"
+        >
+          <span class="user-avatar">{{ store.currentUser?.username?.slice(0, 1).toUpperCase() ?? '?' }}</span>
+          <span v-if="isDesktop" class="user-name">{{ store.currentUser?.username }}</span>
+        </button>
+        <div class="user-menu" v-if="showUserMenu" role="menu" aria-label="用户">
+          <div class="user-menu__head">
+            <span class="user-menu__name">{{ store.currentUser?.username }}</span>
+            <span class="user-menu__role">{{ store.currentUser?.role === 'admin' ? '管理员' : '用户' }}</span>
+          </div>
+          <button type="button" role="menuitem" @click="$router.push('/settings?tab=account')">账号设置</button>
+          <button type="button" role="menuitem" @click="onLogout">退出登录</button>
+        </div>
+        <div class="menu-backdrop" v-if="showUserMenu" @click="showUserMenu = false"></div>
+      </div>
       <button
         class="btn-icon"
         :class="{ active: isSettings }"
@@ -518,6 +548,99 @@ const reminders = computed(() => {
   position: fixed;
   inset: 0;
   z-index: calc(var(--z-index-modal) - 1);
+}
+
+/* ============ 用户菜单 ============ */
+.user-wrap {
+  position: relative;
+}
+
+.user-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: var(--radius-full);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.user-btn:hover {
+  background: var(--color-bg-hover);
+}
+
+.user-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  background: var(--color-brand);
+  color: var(--color-text-inverse);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+}
+
+.user-name {
+  font-size: var(--font-size-md);
+  color: var(--color-text-body);
+  max-width: 80px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.user-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 200px;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  padding: var(--spacing-xs);
+  z-index: var(--z-index-modal);
+}
+
+.user-menu__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-md);
+  border-bottom: 1px solid var(--color-border-default);
+  margin-bottom: var(--spacing-xs);
+}
+
+.user-menu__name {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.user-menu__role {
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-brand);
+  background: var(--color-brand-subtle);
+  border-radius: var(--radius-full);
+  padding: 2px 7px;
+}
+
+.user-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
+  color: var(--color-text-body);
+}
+
+.user-menu button:hover {
+  background: var(--color-bg-hover);
 }
 
 @media (min-width: 768px) {
