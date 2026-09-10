@@ -21,7 +21,7 @@ db.pragma('busy_timeout = 3000')
 db.exec(`
 CREATE TABLE IF NOT EXISTS semester (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
   start_date TEXT NOT NULL,
   end_date TEXT NOT NULL,
   week_start_day INTEGER NOT NULL CHECK (week_start_day IN (1, 7)),
@@ -185,6 +185,33 @@ const hasKindColumn = db
 if (!hasKindColumn) {
   db.exec("ALTER TABLE template ADD COLUMN kind TEXT NOT NULL DEFAULT 'unit'")
   console.log('[migrate] 模板表加 kind 列')
+}
+
+// 学期名称唯一性：全局 UNIQUE → 按用户唯一（多用户下不同用户可同名学期）
+// SQLite 无法直接改约束，重建表迁移
+const semUnique = db
+  .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='semester'")
+  .get()
+if (semUnique && /name TEXT NOT NULL UNIQUE/.test(semUnique.sql)) {
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    CREATE TABLE semester_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL,
+      week_start_day INTEGER NOT NULL CHECK (week_start_day IN (1, 7)),
+      updated_at TEXT NOT NULL,
+      user_id INTEGER,
+      UNIQUE (name, user_id)
+    );
+    INSERT INTO semester_new (id, name, start_date, end_date, week_start_day, updated_at, user_id)
+      SELECT id, name, start_date, end_date, week_start_day, updated_at, user_id FROM semester;
+    DROP TABLE semester;
+    ALTER TABLE semester_new RENAME TO semester;
+    PRAGMA foreign_keys = ON;
+  `)
+  console.log('[migrate] semester 表重建：name 唯一性改为按用户')
 }
 
 /** 迁移用：生成 admin 初始密码哈希（随机 16 位，打印到日志，首次登录后应修改） */
