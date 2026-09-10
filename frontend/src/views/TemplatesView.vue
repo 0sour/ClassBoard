@@ -604,8 +604,44 @@ function weekLabel(r: ImportRow): string {
           </button>
         </div>
 
-        <!-- 周课表网格预览：7 天 × 12 节，同格堆叠显示不同周次的课程 -->
-        <div class="tpl-grid-preview" aria-label="课程预览网格">
+        <!-- 课程模板：单门课程信息卡片（紧凑展示） -->
+        <div v-if="previewing.kind === 'course'" class="tpl-course-preview">
+          <div v-for="r in (previewing.content as ImportRow[])" :key="r.name" class="tpl-course-card">
+            <div class="tpl-course-card__head">
+              <span class="tpl-course-card__name">{{ r.name }}</span>
+              <span class="chip" :class="r.type === 'lab' ? 'chip--lab' : ''">{{ r.type === 'lab' ? '实验课' : '理论课' }}</span>
+            </div>
+            <div class="tpl-course-card__grid">
+              <div class="tpl-course-card__item">
+                <span class="tpl-course-card__label">星期</span>
+                <span class="tpl-course-card__value">{{ WEEKDAY_LABELS[r.weekday - 1] }}</span>
+              </div>
+              <div class="tpl-course-card__item">
+                <span class="tpl-course-card__label">节次</span>
+                <span class="tpl-course-card__value num">第 {{ r.startPeriod }}{{ r.endPeriod > r.startPeriod ? `–${r.endPeriod}` : '' }} 节</span>
+              </div>
+              <div class="tpl-course-card__item">
+                <span class="tpl-course-card__label">周次</span>
+                <span class="tpl-course-card__value">{{ weekLabelOf(r) }}</span>
+              </div>
+              <div class="tpl-course-card__item">
+                <span class="tpl-course-card__label">教师</span>
+                <span class="tpl-course-card__value">{{ r.teacher || '—' }}</span>
+              </div>
+              <div class="tpl-course-card__item">
+                <span class="tpl-course-card__label">地点</span>
+                <span class="tpl-course-card__value">{{ r.location || '—' }}</span>
+              </div>
+              <div v-if="r.remark" class="tpl-course-card__item">
+                <span class="tpl-course-card__label">备注</span>
+                <span class="tpl-course-card__value">{{ r.remark }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 组合模板：周课表网格预览（7 天 × 12 节，同格堆叠显示不同周次的课程） -->
+        <div v-else class="tpl-grid-preview" aria-label="课程预览网格">
           <div class="tpl-grid-preview__grid">
             <div class="tpl-grid-preview__head p-h">节次</div>
             <div v-for="wd in 7" :key="'h' + wd" class="tpl-grid-preview__head">{{ WEEKDAY_LABELS[wd - 1] }}</div>
@@ -1544,6 +1580,60 @@ function weekLabel(r: ImportRow): string {
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-bold);
   color: var(--color-text-primary);
+}
+
+/* 课程模板预览：单门课程信息卡片 */
+.tpl-course-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.tpl-course-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg);
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+}
+
+.tpl-course-card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.tpl-course-card__name {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  flex: 1;
+  min-width: 0;
+}
+
+.tpl-course-card__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--spacing-md);
+}
+
+.tpl-course-card__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tpl-course-card__label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.tpl-course-card__value {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-body);
 }
 
 /* 周课表网格预览 */
