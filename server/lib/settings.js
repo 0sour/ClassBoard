@@ -23,13 +23,19 @@ function readJson(userId, key, fallback) {
   }
 }
 
+/** 天气设置全局共享：存 admin 名下，所有用户读取同一份（普通用户不配置 API Key） */
+function getAdminId() {
+  return db.prepare("SELECT id FROM user WHERE role = 'admin' ORDER BY id LIMIT 1").get()?.id ?? null
+}
+
 export function readSettings(userId) {
+  const weatherUserId = userId
   return {
     showOddEvenFilter: readJson(userId, 'show_odd_even_filter', DEFAULT_SETTINGS.showOddEvenFilter),
     reminder: { ...DEFAULT_SETTINGS.reminder, ...readJson(userId, 'reminder', {}) },
     labReminder: { ...DEFAULT_SETTINGS.labReminder, ...readJson(userId, 'lab_reminder', {}) },
     homeworkReminder: { ...DEFAULT_SETTINGS.homeworkReminder, ...readJson(userId, 'homework_reminder', {}) },
-    weather: { ...DEFAULT_SETTINGS.weather, ...readJson(userId, 'weather', {}) },
+    weather: { ...DEFAULT_SETTINGS.weather, ...readJson(weatherUserId, 'weather', {}) },
   }
 }
 
@@ -43,9 +49,11 @@ export function writeSettings(userId, patch) {
       weather: 'weather',
     }[key]
     if (storeKey) {
+      // 天气设置全局共享：写入 admin 名下
+      const targetUserId = storeKey === 'weather' ? getAdminId() ?? userId : userId
       db.prepare(
         'INSERT INTO user_setting (user_id, key, value) VALUES (?, ?, ?) ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value',
-      ).run(userId, storeKey, JSON.stringify(value))
+      ).run(targetUserId, storeKey, JSON.stringify(value))
     }
   }
   return readSettings(userId)

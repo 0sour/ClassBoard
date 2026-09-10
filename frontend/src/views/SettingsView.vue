@@ -906,7 +906,7 @@ function formatTime(iso: string | null): string {
       </div>
     </div>
 
-    <!-- 天气设置（和风天气） -->
+    <!-- 天气设置（和风天气；API Key 全局共享，仅管理员可配置） -->
     <div v-show="activeTab === 'weather'" class="panel reveal">
       <div class="panel-head">
         <h3>天气</h3>
@@ -936,7 +936,7 @@ function formatTime(iso: string | null): string {
             @update:model-value="(v: string) => store.settings.weather.location = v"
           />
         </label>
-        <label class="edit-field">
+        <label v-if="store.currentUser?.role === 'admin'" class="edit-field">
           <span class="edit-field__label">和风天气 API Key</span>
           <span class="key-input-wrap">
             <input
@@ -957,7 +957,8 @@ function formatTime(iso: string | null): string {
             </button>
           </span>
         </label>
-        <p class="weather-hint">数据经本机服务端代理获取（隐藏 Key），30 分钟缓存；免费版包含实时天气、3 天预报、空气与预警。申请地址：https://dev.qweather.com</p>
+        <p v-if="store.currentUser?.role !== 'admin'" class="weather-hint">天气由管理员统一配置，所有用户共享同一份天气设置。</p>
+        <p v-else class="weather-hint">数据经本机服务端代理获取（隐藏 Key），30 分钟缓存；免费版包含实时天气、3 天预报、空气与预警。申请地址：https://dev.qweather.com</p>
       </div>
       <div v-if="store.settings.weather.enabled" class="edit-actions">
         <button class="btn-mini btn-mini--primary" type="button" :disabled="weatherBusy" @click="saveWeatherSettings">
