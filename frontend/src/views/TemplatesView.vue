@@ -12,7 +12,6 @@ const store = useScheduleStore()
 
 const templates = ref<TemplateInfo[]>([])
 const loading = ref(false)
-const category = ref('')
 const keyword = ref('')
 /** 类型 Tab：course=课程模板（勾选批量导入）/ unit=组合模板（一键导入） */
 const kindTab = ref<'course' | 'unit'>('course')
@@ -150,16 +149,9 @@ const filteredTemplates = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   return templates.value.filter((t) => {
     if (t.kind !== kindTab.value) return false
-    if (category.value && t.category !== category.value) return false
     if (kw && !t.name.toLowerCase().includes(kw) && !t.description.toLowerCase().includes(kw)) return false
     return true
   })
-})
-
-const categoryCounts = computed(() => {
-  const map: Record<string, number> = {}
-  for (const t of templates.value) map[t.category] = (map[t.category] ?? 0) + 1
-  return map
 })
 
 // ================= 导入 =================
@@ -488,21 +480,8 @@ function weekLabel(r: ImportRow): string {
       >组合模板<span class="tpl-kind-count">{{ templates.filter((t) => t.kind === 'unit').length }}</span></button>
     </div>
 
-    <!-- 工具栏：分类 Tab + 搜索 -->
+    <!-- 工具栏：搜索 -->
     <div class="tpl-toolbar reveal">
-      <div class="tpl-cats">
-        <button class="tpl-cat" :class="{ active: category === '' }" type="button" @click="category = ''">全部</button>
-        <button
-          v-for="c in CATEGORIES"
-          :key="c"
-          class="tpl-cat"
-          :class="{ active: category === c }"
-          type="button"
-          @click="category = category === c ? '' : c"
-        >
-          {{ c }}<span v-if="categoryCounts[c]" class="tpl-cat-count">{{ categoryCounts[c] }}</span>
-        </button>
-      </div>
       <input v-model="keyword" class="tpl-search" type="search" placeholder="搜索模板名称…" aria-label="搜索模板" />
     </div>
 
