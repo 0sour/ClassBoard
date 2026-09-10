@@ -84,7 +84,7 @@ async function doBatchImport(): Promise<void> {
   importBusy.value = true
   importError.value = ''
   try {
-    const res = await api.importTemplate(0, {
+    const res = await api.importTemplateBatch({
       semesterId: importSemesterId.value,
       mode: importMode.value,
       templateIds: [...selectedIds.value],
@@ -571,15 +571,29 @@ const semesterOptions = computed(() =>
   store.semesters.map((s) => ({ value: s.id, label: s.name })),
 )
 
-/** 预览：模板课程行 → 按星期分组（预览弹窗与导入弹窗共用；unit 展开引用） */
+/** 预览：模板课程行 → 按星期分组（预览弹窗与导入弹窗共用；unit 展开引用或快照） */
 const previewByWeekday = computed(() => {
   const t = previewing.value ?? importing.value
   if (!t) return []
-  const rows = t.kind === 'course' ? (t.content as ImportRow[]) : []
+  const rows = resolvePreviewRows(t)
   const map: Record<number, ImportRow[]> = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [] }
   for (const r of rows) map[r.weekday]?.push(r)
   return [1, 2, 3, 4, 5, 6, 7].map((wd) => ({ weekday: wd, rows: map[wd] }))
 })
+
+/** 解析模板为课程行数组（course 直接返回；unit 快照返回课程行；unit 引用展开课程模板） */
+function resolvePreviewRows(t: TemplateInfo): ImportRow[] {
+  if (t.kind === 'course') return t.content as ImportRow[]
+  const content = t.content
+  // 快照（课程行数组）
+  if (content.length > 0 && typeof content[0] !== 'number') return content as ImportRow[]
+  // 引用（id 数组）→ 从已加载的课程模板展开
+  const ids = content as number[]
+  return ids.flatMap((id) => {
+    const ref = templates.value.find((x) => x.id === id)
+    return ref && ref.kind === 'course' ? (ref.content as ImportRow[]) : []
+  })
+}
 
 /** 周课表网格预览：7 天 × 12 节，同一格堆叠显示该时段全部课程（含周次标签） */
 const GRID_PERIODS = 12

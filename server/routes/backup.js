@@ -46,6 +46,7 @@ backupRouter.get(
       // 模板全局共享（admin 维护），随备份导出
       templates: db.prepare('SELECT * FROM template ORDER BY id ASC').all().map((t) => ({
         id: t.id,
+        kind: t.kind,
         name: t.name,
         category: t.category,
         description: t.description,
@@ -144,12 +145,12 @@ backupRouter.post(
       if (req.user.role === 'admin' && Array.isArray(data.templates)) {
         db.prepare('DELETE FROM template').run()
         const insTpl = db.prepare(
-          'INSERT INTO template (id, name, category, description, version, content, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO template (id, kind, name, category, description, version, content, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         )
         for (const t of data.templates) {
           if (!t || !t.name || !Array.isArray(t.content)) continue
           insTpl.run(
-            t.id, t.name, t.category ?? '', t.description ?? '', t.version ?? 1,
+            t.id, t.kind === 'course' ? 'course' : 'unit', t.name, t.category ?? '', t.description ?? '', t.version ?? 1,
             JSON.stringify(t.content), req.user.id, t.createdAt ?? new Date().toISOString(), t.updatedAt ?? new Date().toISOString(),
           )
         }

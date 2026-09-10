@@ -290,8 +290,11 @@ export const api = {
 
   deleteTemplate: (id: number) => request<void>(`/templates/${id}`, { method: 'DELETE' }),
 
-  importTemplate: (id: number, body: { semesterId: number; mode: 'append' | 'overwrite' | 'dedupe'; templateIds?: number[] }) =>
+  importTemplate: (id: number, body: { semesterId: number; mode: 'append' | 'overwrite' | 'dedupe' }) =>
     request<{ count: number; skipped: number; templateCount: number }>(`/templates/${id}/import`, { method: 'POST', body: JSON.stringify(body) }),
+
+  importTemplateBatch: (body: { semesterId: number; mode: 'append' | 'overwrite' | 'dedupe'; templateIds: number[] }) =>
+    request<{ count: number; skipped: number; templateCount: number }>('/templates/import-batch', { method: 'POST', body: JSON.stringify(body) }),
 }
 
 export interface TemplateInfo {

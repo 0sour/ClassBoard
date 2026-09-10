@@ -185,45 +185,132 @@ templatesRouter.delete(
   '/:id',
   requireAdmin,
   wrap(async (req, res) => {
-    const info = db.prepare('DELETE FROM template WHERE id = ?').run(Number(req.params.id))
-    if (!info.changes) throw notFound('模板不存在')
+    const id = Number(req.params.id)
+    const row = db.prepare('SELECT * FROM template WHERE id = ?').get(id)
+    if (!row) throw notFound('模板不存在')
+    const del = db.transaction(() => {
+      // 删除课程模板时，从引用它的组合模板中移除该 id（避免残留失效引用）
+      if (row.kind === 'course') {
+        const units = db.prepare("SELECT * FROM template WHERE kind = 'unit'").all()
+        const update = db.prepare('UPDATE template SET content = ?, version = version + 1, updated_at = ? WHERE id = ?')
+        for (const u of units) {
+          const content = JSON.parse(u.content)
+          // 仅处理引用形态（id 数组）；快照形态（课程行数组）不受影响
+          if (content.length > 0 && typeof content[0] === 'number' && content.includes(id)) {
+            const next = content.filter((x) => x !== id)
+            update.run(JSON.stringify(next), new Date().toISOString(), u.id)
+          }
+        }
+      }
+      db.prepare('DELETE FROM template WHERE id = ?').run(id)
+    })
+    del()
     res.status(204).end()
   }),
 )
 
+/** 批量导入多个课程模板（所有登录用户；复制快照到目标学期）
+ * body: { semesterId, mode, templateIds: number[] } */
+templatesRouter.post(
+  '/import-batch',
+  wrap(async (req, res) => {
+    const { semesterId, mode, templateIds } = req.body ?? {}
+    if (!['append', 'overwrite', 'dedupe'].includes(mode)) throw badRequest('mode 须为 append / overwrite / dedupe')
+    if (!Number.isInteger(semesterId)) throw badRequest('semesterId 取值无效')
+    if (!Array.isArray(templateIds) || templateIds.length === 0) throw badRequest('templateIds 不能为空')
+    const sem = db.prepare('SELECT id FROM semester WHERE id = ? AND user_id = ?').get(semesterId, req.user.id)
+    if (!sem) throw notFound('学期不存在')
+
+    const ids = templateIds.map(Number)
+    const placeholders = ids.map(() => '?').join(',')
+    const refs = db.prepare(`SELECT * FROM template WHERE id IN (${placeholders})`).all(...ids)
+    const found = new Set(refs.map((r) => r.id))
+    const missing = ids.filter((id) => !found.has(id))
+    if (missing.length) throw badRequest(`模板不存在：id=${missing.join(',')}`)
+    const badKind = refs.find((r) => r.kind !== 'course')
+    if (badKind) throw badRequest(`批量导入仅支持课程模板：${badKind.name}`)
+
+    const rows = refs.flatMap((r) => JSON.parse(r.content))
+    const periodCount = db
+      .prepare('SELECT COUNT(*) AS n FROM period_template WHERE semester_id = ?')
+      .get(semesterId).n
+
+    const validated = []
+    const errors = []
+    rows.forEach((r, i) => {
+      try {
+        const c = validateCourse(r)
+        if (c.endPeriod > periodCount) {
+          errors.push({ row: i + 1, message: `节次 ${c.endPeriod} 超出目标学期节次模板（共 ${periodCount} 节）` })
+          return
+        }
+        validated.push(c)
+      } catch (e) {
+        errors.push({ row: i + 1, message: e.message })
+      }
+    })
+    if (errors.length) throw badRequest('模板存在无效行', errors)
+
+    const existing = db
+      .prepare('SELECT name, weekday, start_period AS startPeriod, end_period AS endPeriod FROM course WHERE semester_id = ? AND user_id = ?')
+      .all(semesterId, req.user.id)
+    const dupKey = (c) => `${c.name}|${c.weekday}|${c.startPeriod}-${c.endPeriod}`
+    const existingKeys = new Set(existing.map(dupKey))
+
+    const run = db.transaction(() => {
+      if (mode === 'overwrite') {
+        db.prepare('DELETE FROM course WHERE semester_id = ? AND user_id = ?').run(semesterId, req.user.id)
+      }
+      const insert = db.prepare(
+        `INSERT INTO course (semester_id, user_id, type, name, teacher, location, color, week_type, week_list, weekday, start_period, end_period, remark)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      let added = 0
+      let skipped = 0
+      for (const c of validated) {
+        if (mode === 'dedupe' && existingKeys.has(dupKey(c))) {
+          skipped++
+          continue
+        }
+        insert.run(
+          semesterId, req.user.id, c.type, c.name, c.teacher, c.location, c.color, c.weekType,
+          c.weekList ? JSON.stringify(c.weekList) : null,
+          c.weekday, c.startPeriod, c.endPeriod, c.remark,
+        )
+        added++
+        existingKeys.add(dupKey(c))
+      }
+      return { added, skipped }
+    })
+    const { added, skipped } = run()
+
+    const insLog = db.prepare(
+      `INSERT INTO import_log (template_id, template_version, semester_id, user_id, mode, count, imported_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    for (const t of refs) {
+      insLog.run(t.id, t.version, semesterId, req.user.id, mode, added, new Date().toISOString())
+    }
+
+    res.json({ count: added, skipped, templateCount: refs.length })
+  }),
+)
+
 /** 导入模板（所有登录用户；复制快照到目标学期）
- * body: { semesterId, mode, templateIds?: number[] }
- * templateIds 缺省时导入单个模板（:id）；提供时批量导入多个课程模板 */
+ * body: { semesterId, mode } */
 templatesRouter.post(
   '/:id/import',
   wrap(async (req, res) => {
-    const { semesterId, mode, templateIds } = req.body ?? {}
+    const { semesterId, mode } = req.body ?? {}
     if (!['append', 'overwrite', 'dedupe'].includes(mode)) throw badRequest('mode 须为 append / overwrite / dedupe')
     if (!Number.isInteger(semesterId)) throw badRequest('semesterId 取值无效')
     const sem = db.prepare('SELECT id FROM semester WHERE id = ? AND user_id = ?').get(semesterId, req.user.id)
     if (!sem) throw notFound('学期不存在')
 
-    // 收集要导入的模板行
-    let rows = []
-    let logTargets = []
-    if (Array.isArray(templateIds) && templateIds.length > 0) {
-      const ids = templateIds.map(Number)
-      const placeholders = ids.map(() => '?').join(',')
-      const refs = db.prepare(`SELECT * FROM template WHERE id IN (${placeholders})`).all(...ids)
-      const found = new Set(refs.map((r) => r.id))
-      const missing = ids.filter((id) => !found.has(id))
-      if (missing.length) throw badRequest(`模板不存在：id=${missing.join(',')}`)
-      for (const r of refs) {
-        if (r.kind !== 'course') throw badRequest(`批量导入仅支持课程模板：${r.name}`)
-        rows.push(...JSON.parse(r.content))
-        logTargets.push(r)
-      }
-    } else {
-      const row = db.prepare('SELECT * FROM template WHERE id = ?').get(Number(req.params.id))
-      if (!row) throw notFound('模板不存在')
-      rows = resolveTemplateRows(row)
-      logTargets = [row]
-    }
+    const row = db.prepare('SELECT * FROM template WHERE id = ?').get(Number(req.params.id))
+    if (!row) throw notFound('模板不存在')
+    const rows = resolveTemplateRows(row)
+    const logTargets = [row]
 
     // 目标学期节次行数（节次越界校验）
     const periodCount = db
