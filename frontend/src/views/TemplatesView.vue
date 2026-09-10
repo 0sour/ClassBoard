@@ -221,8 +221,8 @@ const weekChips = computed(() => Array.from({ length: MAX_WEEKS }, (_, i) => i +
 
 function weekLabelOf(r: ImportRow): string {
   if (r.weekType === 'all') return '每周'
-  if (r.weekType === 'odd') return '单周'
-  if (r.weekType === 'even') return '双周'
+  if (r.weekType === 'odd') return r.weekList?.length ? `单周（第 ${r.weekList.join(',')} 周）` : '单周'
+  if (r.weekType === 'even') return r.weekList?.length ? `双周（第 ${r.weekList.join(',')} 周）` : '双周'
   return r.weekList?.length ? `第 ${r.weekList.join(',')} 周` : '每周'
 }
 
@@ -334,7 +334,7 @@ async function saveCourseForm(): Promise<void> {
       teacher: courseForm.teacher.trim(),
       location: courseForm.location.trim(),
       weekType: courseForm.weekType,
-      weekList: courseForm.weekType === 'custom' ? [...courseForm.weekList].sort((a, b) => a - b) : null,
+      weekList: courseForm.weekType === 'all' ? null : [...courseForm.weekList].sort((a, b) => a - b),
       weekday: courseForm.weekday as 1 | 2 | 3 | 4 | 5 | 6 | 7,
       startPeriod: courseForm.startPeriod,
       endPeriod: courseForm.endPeriod,
@@ -607,15 +607,15 @@ function spanOf(weekday: number, period: number): { start: number; end: number }
 /** 周次标签（网格内显示） */
 function weekTag(r: ImportRow): string {
   if (r.weekType === 'all') return '每周'
-  if (r.weekType === 'odd') return '单周'
-  if (r.weekType === 'even') return '双周'
+  if (r.weekType === 'odd') return r.weekList?.length ? `单周·${r.weekList.join(',')}` : '单周'
+  if (r.weekType === 'even') return r.weekList?.length ? `双周·${r.weekList.join(',')}` : '双周'
   return r.weekList?.length ? `第${r.weekList.join(',')}周` : ''
 }
 
 function weekLabel(r: ImportRow): string {
   if (r.weekType === 'all') return '每周'
-  if (r.weekType === 'odd') return '单周'
-  if (r.weekType === 'even') return '双周'
+  if (r.weekType === 'odd') return r.weekList?.length ? `单周（第 ${r.weekList.join(',')} 周）` : '单周'
+  if (r.weekType === 'even') return r.weekList?.length ? `双周（第 ${r.weekList.join(',')} 周）` : '双周'
   return r.weekList ? `第${r.weekList.join(',')}周` : '每周'
 }
 </script>
@@ -1023,8 +1023,10 @@ function weekLabel(r: ImportRow): string {
               </div>
             </fieldset>
 
-            <div v-if="courseForm.weekType === 'custom'" class="field field--full">
-              <span class="field__label">选择周次（1–{{ MAX_WEEKS }} 周）</span>
+            <div v-if="courseForm.weekType === 'custom' || courseForm.weekType === 'odd' || courseForm.weekType === 'even'" class="field field--full">
+              <span class="field__label">
+                {{ courseForm.weekType === 'custom' ? '选择周次（1–' + MAX_WEEKS + ' 周）' : '周数范围（选填，不选则为全学期' + (courseForm.weekType === 'odd' ? '单周' : '双周') + '）' }}
+              </span>
               <div class="week-custom">
                 <button
                   v-for="w in weekChips"

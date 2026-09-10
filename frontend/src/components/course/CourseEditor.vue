@@ -186,7 +186,7 @@ async function submit(keepOpen = false): Promise<void> {
         location: form.location.trim(),
         color: form.color,
         weekType: form.weekType,
-        weekList: form.weekType === 'custom' ? [...form.weekList].sort((a, b) => a - b) : null,
+        weekList: form.weekType === 'all' ? null : [...form.weekList].sort((a, b) => a - b),
         weekday: form.weekday,
         startPeriod: form.startPeriod,
         endPeriod: form.endPeriod,
@@ -238,7 +238,7 @@ async function submit(keepOpen = false): Promise<void> {
         teacher: form.teacher.trim(),
         location: form.location.trim(),
         weekType: form.weekType,
-        weekList: form.weekType === 'custom' ? [...form.weekList].sort((a, b) => a - b) : null,
+        weekList: form.weekType === 'all' ? null : [...form.weekList].sort((a, b) => a - b),
         weekday: form.weekday,
         startPeriod: form.startPeriod,
         endPeriod: form.endPeriod,
@@ -410,8 +410,10 @@ async function submit(keepOpen = false): Promise<void> {
                 </div>
               </fieldset>
 
-              <div v-if="form.weekType === 'custom'" class="field field--full">
-                <span class="field__label">选择周次（1–{{ maxWeeks }} 周）</span>
+              <div v-if="form.weekType === 'custom' || form.weekType === 'odd' || form.weekType === 'even'" class="field field--full">
+                <span class="field__label">
+                  {{ form.weekType === 'custom' ? '选择周次（1–' + maxWeeks + ' 周）' : '周数范围（选填，不选则为全学期' + (form.weekType === 'odd' ? '单周' : '双周') + '）' }}
+                </span>
                 <div class="week-custom">
                   <button
                     v-for="w in weekChips"

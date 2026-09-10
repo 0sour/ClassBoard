@@ -83,9 +83,13 @@ export function isVisibleInWeek(
     case 'all':
       return true
     case 'odd':
-      return isOddWeek(weekNumber)
+      // 单周 + 可选周数范围（如 8-14 周单周 → weekList=[8,10,12,14]）
+      if (!isOddWeek(weekNumber)) return false
+      return weekList === null || weekList.length === 0 || weekList.includes(weekNumber)
     case 'even':
-      return !isOddWeek(weekNumber)
+      // 双周 + 可选周数范围
+      if (isOddWeek(weekNumber)) return false
+      return weekList === null || weekList.length === 0 || weekList.includes(weekNumber)
     case 'custom':
       return weekList !== null && weekList.includes(weekNumber)
   }

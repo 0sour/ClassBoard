@@ -340,11 +340,15 @@ export function parseWeeks(spec: string): { weekType: WeekType; weekList: number
   // 全学期（1-16 全周）→ all
   const full = unique.length === 16 && unique[0] === 1 && unique[15] === 16
   if (full) return { weekType: 'all', weekList: null }
-  // 全学期奇偶（1-16 内全部单/双周）→ odd/even
+  // 全学期奇偶（1-16 内全部单/双周）→ odd/even（无范围）
   const ALL_ODD = [1, 3, 5, 7, 9, 11, 13, 15]
   const ALL_EVEN = [2, 4, 6, 8, 10, 12, 14, 16]
   if (unique.length === 8 && unique.every((w, i) => w === ALL_ODD[i])) return { weekType: 'odd', weekList: null }
   if (unique.length === 8 && unique.every((w, i) => w === ALL_EVEN[i])) return { weekType: 'even', weekList: null }
+  // 单段奇偶 + 范围（如 1-15周(单) → odd + [1,3,5,7,9,11,13,15]；8-14周(单) → odd + [9,11,13]）
+  if (segs.length === 1 && (isOdd || isEven)) {
+    return { weekType: isOdd ? 'odd' : 'even', weekList: unique }
+  }
   return { weekType: 'custom', weekList: unique }
 }
 
