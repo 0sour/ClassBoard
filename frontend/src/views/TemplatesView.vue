@@ -1347,9 +1347,8 @@ function weekLabel(r: ImportRow): string {
   color: var(--color-text-tertiary);
 }
 
-/* 从学期勾选课程另存 */
+/* 从学期勾选课程另存（宽度规则在 .modal 之后定义，见下方变体区） */
 .tpl-save-modal {
-  width: min(560px, 100%);
   max-height: 85vh;
   overflow-y: auto;
   /* 自定义滚动条（设计规范：细条 + 圆角 thumb） */
@@ -1391,6 +1390,8 @@ function weekLabel(r: ImportRow): string {
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-md);
   overflow: hidden;
+  /* flex 容器内禁止收缩：内容超高时列表滚动而非压缩卡片（否则卡片挤成一条） */
+  flex-shrink: 0;
 }
 
 .tpl-save-group-head {
@@ -1507,9 +1508,8 @@ function weekLabel(r: ImportRow): string {
   color: var(--color-text-tertiary);
 }
 
-/* 课程模板完整表单（借鉴手动导入课程 CourseEditor） */
+/* 课程模板完整表单（借鉴手动导入课程 CourseEditor；宽度规则在 .modal 之后定义） */
 .tpl-course-modal {
-  width: min(560px, 100%);
   max-height: 85vh;
   overflow-y: auto;
   /* 自定义滚动条（设计规范：细条 + 圆角 thumb，与课表网格一致） */
@@ -1889,15 +1889,24 @@ function weekLabel(r: ImportRow): string {
   padding: var(--spacing-xl);
 }
 
+/* 变体宽度须在 .modal 之后定义（同特异性按顺序覆盖） */
 .tpl-import-modal {
   width: min(520px, 100%);
 }
 
-/* 预览弹窗 */
 .tpl-preview-modal {
   width: min(720px, 100%);
 }
 
+.tpl-save-modal {
+  width: min(560px, 100%);
+}
+
+.tpl-course-modal {
+  width: min(560px, 100%);
+}
+
+/* 预览弹窗 */
 .tpl-preview-head {
   display: flex;
   align-items: flex-start;
