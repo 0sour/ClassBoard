@@ -5,7 +5,7 @@
 // 列表/详情/导入：所有登录用户；创建/编辑/删除：仅 admin
 // ============================================================
 import { Router } from 'express'
-import { db } from '../lib/db.js'
+import { db, setCurrentSemesterId } from '../lib/db.js'
 import { badRequest, notFound, wrap } from '../lib/errors.js'
 import { requireAdmin } from '../lib/access.js'
 import { validateCourse } from '../lib/validate.js'
@@ -79,8 +79,34 @@ function validateUnitContent(content) {
   })
 }
 
-/** 解析模板为课程行数组（unit 展开引用或快照） */
+/** 校验学期模板内容：{ name, startDate, endDate, weekStartDay, periods: [{startTime, endTime}] } */
+function validateSemesterTemplate(content) {
+  if (!content || typeof content !== 'object') throw badRequest('学期模板内容无效')
+  const name = String(content.name ?? '').trim()
+  if (!name || name.length > 50) throw badRequest('学期名称须为 1-50 位')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(content.startDate ?? ''))) throw badRequest('开始日期格式须为 YYYY-MM-DD')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(content.endDate ?? ''))) throw badRequest('结束日期格式须为 YYYY-MM-DD')
+  if (String(content.endDate) < String(content.startDate)) throw badRequest('结束日期不能早于开始日期')
+  const weekStartDay = Number(content.weekStartDay)
+  if (weekStartDay !== 1 && weekStartDay !== 7) throw badRequest('每周起始日须为 1（周一）或 7（周日）')
+  const periods = content.periods
+  if (!Array.isArray(periods) || periods.length === 0) throw badRequest('节次时间模板不能为空')
+  if (periods.length > 30) throw badRequest('节次数量超过 30 上限')
+  const validatedPeriods = periods.map((p, i) => {
+    const start = String(p?.startTime ?? '')
+    const end = String(p?.endTime ?? '')
+    if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) {
+      throw badRequest(`第 ${i + 1} 节时间格式须为 HH:mm`)
+    }
+    if (end <= start) throw badRequest(`第 ${i + 1} 节结束时间须晚于开始时间`)
+    return { startTime: start, endTime: end }
+  })
+  return { name, startDate: content.startDate, endDate: content.endDate, weekStartDay, periods: validatedPeriods }
+}
+
+/** 解析模板为课程行数组（course 直接返回；unit 展开引用或快照；semester 返回空） */
 function resolveTemplateRows(row) {
+  if (row.kind === 'semester') return []
   const content = JSON.parse(row.content)
   if (row.kind === 'course') return content
   // 快照（课程行数组）直接返回
@@ -123,10 +149,13 @@ templatesRouter.post(
   requireAdmin,
   wrap(async (req, res) => {
     const { kind, name, category, description, content } = req.body ?? {}
-    const tkind = kind === 'course' ? 'course' : 'unit'
+    const tkind = ['course', 'unit', 'semester'].includes(kind) ? kind : 'unit'
     const tname = String(name ?? '').trim()
     if (!tname || tname.length > 50) throw badRequest('模板名称须为 1-50 位')
-    const validated = tkind === 'course' ? validateCourseTemplate(content) : validateUnitContent(content)
+    const validated =
+      tkind === 'course' ? validateCourseTemplate(content)
+      : tkind === 'semester' ? validateSemesterTemplate(content)
+      : validateUnitContent(content)
     const info = db
       .prepare(
         `INSERT INTO template (kind, name, category, description, version, content, created_by, created_at, updated_at)
@@ -155,14 +184,16 @@ templatesRouter.put(
     const row = db.prepare('SELECT * FROM template WHERE id = ?').get(id)
     if (!row) throw notFound('模板不存在')
     const { kind, name, category, description, content } = req.body ?? {}
-    const tkind = kind === 'course' ? 'course' : row.kind
+    const tkind = ['course', 'unit', 'semester'].includes(kind) ? kind : row.kind
     const tname = String(name ?? row.name).trim()
     if (!tname || tname.length > 50) throw badRequest('模板名称须为 1-50 位')
     const validated =
       content !== undefined
         ? tkind === 'course'
           ? validateCourseTemplate(content)
-          : validateUnitContent(content)
+          : tkind === 'semester'
+            ? validateSemesterTemplate(content)
+            : validateUnitContent(content)
         : JSON.parse(row.content)
     db.prepare(
       `UPDATE template SET kind = ?, name = ?, category = ?, description = ?, content = ?, version = version + 1, updated_at = ?
@@ -297,18 +328,45 @@ templatesRouter.post(
 )
 
 /** 导入模板（所有登录用户；复制快照到目标学期）
- * body: { semesterId, mode } */
+ * body: { semesterId, mode }；学期模板导入时 semesterId 可传 0（自动创建学期） */
 templatesRouter.post(
   '/:id/import',
   wrap(async (req, res) => {
     const { semesterId, mode } = req.body ?? {}
     if (!['append', 'overwrite', 'dedupe'].includes(mode)) throw badRequest('mode 须为 append / overwrite / dedupe')
     if (!Number.isInteger(semesterId)) throw badRequest('semesterId 取值无效')
-    const sem = db.prepare('SELECT id FROM semester WHERE id = ? AND user_id = ?').get(semesterId, req.user.id)
-    if (!sem) throw notFound('学期不存在')
 
     const row = db.prepare('SELECT * FROM template WHERE id = ?').get(Number(req.params.id))
     if (!row) throw notFound('模板不存在')
+
+    // 学期模板：创建学期 + 节次模板（不导入课程，无需目标学期）
+    if (row.kind === 'semester') {
+      const tpl = JSON.parse(row.content)
+      const dup = db.prepare('SELECT id FROM semester WHERE name = ? AND user_id = ?').get(tpl.name, req.user.id)
+      if (dup) throw badRequest(`学期「${tpl.name}」已存在`)
+      const create = db.transaction(() => {
+        const info = db
+          .prepare(
+            `INSERT INTO semester (name, start_date, end_date, week_start_day, updated_at, user_id)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run(tpl.name, tpl.startDate, tpl.endDate, tpl.weekStartDay, new Date().toISOString(), req.user.id)
+        const id = info.lastInsertRowid
+        const insertPeriod = db.prepare(
+          'INSERT INTO period_template (semester_id, user_id, period_index, start_time, end_time) VALUES (?, ?, ?, ?, ?)',
+        )
+        tpl.periods.forEach((p, i) => insertPeriod.run(id, req.user.id, i + 1, p.startTime, p.endTime))
+        setCurrentSemesterId(req.user.id, id)
+        return id
+      })
+      const newSemId = create()
+      db.prepare(
+        `INSERT INTO import_log (template_id, template_version, semester_id, user_id, mode, count, imported_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(row.id, row.version, newSemId, req.user.id, mode, tpl.periods.length, new Date().toISOString())
+      return res.json({ count: 0, skipped: 0, templateCount: 1, semesterId: newSemId, semesterName: tpl.name })
+    }
+
     const rows = resolveTemplateRows(row)
     const logTargets = [row]
 

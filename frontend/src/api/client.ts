@@ -282,29 +282,38 @@ export const api = {
 
   getTemplate: (id: number) => request<{ template: TemplateInfo }>(`/templates/${id}`),
 
-  createTemplate: (body: { kind: 'course' | 'unit'; name: string; category: string; description: string; content: ImportRow[] | number[] }) =>
+  createTemplate: (body: { kind: 'course' | 'unit' | 'semester'; name: string; category: string; description: string; content: ImportRow[] | number[] | SemesterTemplateContent }) =>
     request<{ template: TemplateInfo }>('/templates', { method: 'POST', body: JSON.stringify(body) }),
 
-  updateTemplate: (id: number, body: { kind?: 'course' | 'unit'; name: string; category: string; description: string; content: ImportRow[] | number[] }) =>
+  updateTemplate: (id: number, body: { kind?: 'course' | 'unit' | 'semester'; name: string; category: string; description: string; content: ImportRow[] | number[] | SemesterTemplateContent }) =>
     request<{ template: TemplateInfo }>(`/templates/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   deleteTemplate: (id: number) => request<void>(`/templates/${id}`, { method: 'DELETE' }),
 
   importTemplate: (id: number, body: { semesterId: number; mode: 'append' | 'overwrite' | 'dedupe' }) =>
-    request<{ count: number; skipped: number; templateCount: number }>(`/templates/${id}/import`, { method: 'POST', body: JSON.stringify(body) }),
+    request<{ count: number; skipped: number; templateCount: number; semesterId?: number; semesterName?: string }>(`/templates/${id}/import`, { method: 'POST', body: JSON.stringify(body) }),
 
   importTemplateBatch: (body: { semesterId: number; mode: 'append' | 'overwrite' | 'dedupe'; templateIds: number[] }) =>
     request<{ count: number; skipped: number; templateCount: number }>('/templates/import-batch', { method: 'POST', body: JSON.stringify(body) }),
 }
 
+/** 学期模板内容：学期信息 + 节次时间模板 */
+export interface SemesterTemplateContent {
+  name: string
+  startDate: string
+  endDate: string
+  weekStartDay: 1 | 7
+  periods: { startTime: string; endTime: string }[]
+}
+
 export interface TemplateInfo {
   id: number
-  kind: 'course' | 'unit'
+  kind: 'course' | 'unit' | 'semester'
   name: string
   category: string
   description: string
   version: number
-  content: ImportRow[] | number[]
+  content: ImportRow[] | number[] | SemesterTemplateContent
   createdBy: number
   createdAt: string
   updatedAt: string

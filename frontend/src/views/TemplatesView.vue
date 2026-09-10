@@ -4,7 +4,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import AppSelect from '@/components/common/AppSelect.vue'
-import { api, type TemplateInfo } from '@/api/client'
+import { api, type SemesterTemplateContent, type TemplateInfo } from '@/api/client'
 import type { ImportRow } from '@/utils/pdf'
 import { confirm, toast } from '@/utils/ui'
 
@@ -13,8 +13,8 @@ const store = useScheduleStore()
 const templates = ref<TemplateInfo[]>([])
 const loading = ref(false)
 const keyword = ref('')
-/** 类型 Tab：course=课程模板（勾选批量导入）/ unit=组合模板（一键导入） */
-const kindTab = ref<'course' | 'unit'>('course')
+/** 类型 Tab：course=课程模板（勾选批量导入）/ unit=组合模板（一键导入）/ semester=学期模板 */
+const kindTab = ref<'course' | 'unit' | 'semester'>('course')
 /** 课程模板勾选（批量导入） */
 const selectedIds = ref<Set<number>>(new Set())
 
@@ -43,7 +43,7 @@ function previewToImport(): void {
 }
 
 /** 切换类型 Tab 时清空勾选 */
-function switchKind(k: 'course' | 'unit'): void {
+function switchKind(k: 'course' | 'unit' | 'semester'): void {
   kindTab.value = k
   selectedIds.value = new Set()
 }
@@ -105,7 +105,7 @@ async function doBatchImport(): Promise<void> {
 // 管理员编辑状态（course=单门课程行 / unit=引用课程模板 id 列表）
 const showEditor = ref(false)
 const editingId = ref<number | null>(null)
-const editingKind = ref<'course' | 'unit'>('course')
+const editingKind = ref<'course' | 'unit' | 'semester'>('course')
 const form = reactive({ name: '', category: '', description: '' })
 const formError = ref('')
 const formBusy = ref(false)
@@ -157,6 +157,127 @@ function toggleCourseSessionWeek(s: CourseSession, w: number): void {
 
 const courseFormError = ref('')
 const courseFormBusy = ref(false)
+
+// 学期模板表单（学期信息 + 节次时间模板）
+const showSemesterForm = ref(false)
+const semesterForm = reactive({
+  name: '',
+  startDate: '',
+  endDate: '',
+  weekStartDay: 1 as 1 | 7,
+  periods: [] as { startTime: string; endTime: string }[],
+})
+const semesterFormError = ref('')
+const semesterFormBusy = ref(false)
+
+function blankSemesterPeriod(): { startTime: string; endTime: string } {
+  return { startTime: '08:00', endTime: '08:45' }
+}
+
+function openSemesterCreate(): void {
+  editingId.value = null
+  Object.assign(semesterForm, {
+    name: '', startDate: '', endDate: '', weekStartDay: 1 as const,
+    periods: [blankSemesterPeriod()],
+  })
+  semesterFormError.value = ''
+  showSemesterForm.value = true
+}
+
+function openSemesterEdit(t: TemplateInfo): void {
+  editingId.value = t.id
+  const c = t.content as SemesterTemplateContent
+  Object.assign(semesterForm, {
+    name: c.name, startDate: c.startDate, endDate: c.endDate, weekStartDay: c.weekStartDay,
+    periods: c.periods.map((p) => ({ ...p })),
+  })
+  semesterFormError.value = ''
+  showSemesterForm.value = true
+}
+
+function addSemesterPeriod(): void {
+  semesterForm.periods.push(blankSemesterPeriod())
+}
+
+function removeSemesterPeriod(i: number): void {
+  semesterForm.periods.splice(i, 1)
+}
+
+async function saveSemesterForm(): Promise<void> {
+  semesterFormError.value = ''
+  if (!semesterForm.name.trim()) {
+    semesterFormError.value = '请填写学期名称'
+    return
+  }
+  if (!semesterForm.startDate || !semesterForm.endDate) {
+    semesterFormError.value = '请填写开始与结束日期'
+    return
+  }
+  if (semesterForm.endDate < semesterForm.startDate) {
+    semesterFormError.value = '结束日期不能早于开始日期'
+    return
+  }
+  if (semesterForm.periods.length === 0) {
+    semesterFormError.value = '请至少添加一节'
+    return
+  }
+  for (const [i, p] of semesterForm.periods.entries()) {
+    if (!p.startTime || !p.endTime) {
+      semesterFormError.value = `第 ${i + 1} 节时间未填写完整`
+      return
+    }
+    if (p.endTime <= p.startTime) {
+      semesterFormError.value = `第 ${i + 1} 节结束时间须晚于开始时间`
+      return
+    }
+  }
+  semesterFormBusy.value = true
+  try {
+    const body = {
+      kind: 'semester' as const,
+      name: form.name.trim() || semesterForm.name.trim(),
+      category: '',
+      description: form.description,
+      content: {
+        name: semesterForm.name.trim(),
+        startDate: semesterForm.startDate,
+        endDate: semesterForm.endDate,
+        weekStartDay: semesterForm.weekStartDay,
+        periods: semesterForm.periods.map((p) => ({ ...p })),
+      },
+    }
+    if (editingId.value === null) {
+      await api.createTemplate(body)
+      toast('学期模板已创建', 'success')
+    } else {
+      await api.updateTemplate(editingId.value, body)
+      toast('学期模板已更新（版本 +1）', 'success')
+    }
+    showSemesterForm.value = false
+    await load()
+  } catch (e) {
+    semesterFormError.value = e instanceof Error ? e.message : '保存失败，请重试'
+  } finally {
+    semesterFormBusy.value = false
+  }
+}
+
+/** 学期模板导入：创建学期 + 节次（无需目标学期） */
+async function importSemesterTemplate(t: TemplateInfo): Promise<void> {
+  importBusy.value = true
+  importError.value = ''
+  try {
+    const res = await api.importTemplate(t.id, { semesterId: 0, mode: 'dedupe' })
+    importResult.value = { count: res.count ?? 0, skipped: res.skipped ?? 0 }
+    toast(`已创建学期「${res.semesterName ?? t.name}」`, 'success')
+    await store.bootstrap()
+    await load()
+  } catch (e) {
+    importError.value = e instanceof Error ? e.message : '导入失败，请重试'
+  } finally {
+    importBusy.value = false
+  }
+}
 
 onMounted(() => void load())
 
@@ -581,10 +702,11 @@ const previewByWeekday = computed(() => {
   return [1, 2, 3, 4, 5, 6, 7].map((wd) => ({ weekday: wd, rows: map[wd] }))
 })
 
-/** 解析模板为课程行数组（course 直接返回；unit 快照返回课程行；unit 引用展开课程模板） */
+/** 解析模板为课程行数组（course 直接返回；unit 快照返回课程行；unit 引用展开课程模板；semester 返回空） */
 function resolvePreviewRows(t: TemplateInfo): ImportRow[] {
   if (t.kind === 'course') return t.content as ImportRow[]
-  const content = t.content
+  if (t.kind === 'semester') return []
+  const content = t.content as ImportRow[] | number[]
   // 快照（课程行数组）
   if (content.length > 0 && typeof content[0] !== 'number') return content as ImportRow[]
   // 引用（id 数组）→ 从已加载的课程模板展开
@@ -645,7 +767,8 @@ function weekLabel(r: ImportRow): string {
       <div v-if="store.currentUser?.role === 'admin'" class="tpl-admin-actions">
         <button class="btn-mini" type="button" @click="openSaveFromSemester">从学期另存</button>
         <button class="btn-mini" type="button" @click="openCreate('course')">＋ 新建课程模板</button>
-        <button class="btn-add" type="button" @click="openCreate('unit')">＋ 新建组合模板</button>
+        <button class="btn-mini" type="button" @click="openCreate('unit')">＋ 新建组合模板</button>
+        <button class="btn-add" type="button" @click="openSemesterCreate">＋ 新建学期模板</button>
       </div>
     </div>
 
@@ -659,6 +782,10 @@ function weekLabel(r: ImportRow): string {
         class="tpl-kind-tab" :class="{ active: kindTab === 'unit' }" type="button" role="tab"
         :aria-selected="kindTab === 'unit'" @click="switchKind('unit')"
       >组合模板<span class="tpl-kind-count">{{ templates.filter((t) => t.kind === 'unit').length }}</span></button>
+      <button
+        class="tpl-kind-tab" :class="{ active: kindTab === 'semester' }" type="button" role="tab"
+        :aria-selected="kindTab === 'semester'" @click="switchKind('semester')"
+      >学期模板<span class="tpl-kind-count">{{ templates.filter((t) => t.kind === 'semester').length }}</span></button>
     </div>
 
     <!-- 工具栏：搜索 -->
@@ -681,9 +808,9 @@ function weekLabel(r: ImportRow): string {
     <!-- 模板卡片网格 -->
     <div v-if="loading" class="tpl-empty reveal">加载中…</div>
     <div v-else-if="!filteredTemplates.length" class="tpl-empty reveal">
-      <p>暂无{{ kindTab === 'course' ? '课程' : '组合' }}模板</p>
+      <p>暂无{{ kindTab === 'course' ? '课程' : kindTab === 'unit' ? '组合' : '学期' }}模板</p>
       <p v-if="store.currentUser?.role === 'admin'" class="tpl-empty-hint">
-        {{ kindTab === 'course' ? '点击右上角"新建课程模板"创建单门课程模板' : '点击右上角"新建组合模板"，从课程模板勾选组成' }}
+        {{ kindTab === 'course' ? '点击右上角"新建课程模板"创建单门课程模板' : kindTab === 'unit' ? '点击右上角"新建组合模板"，从课程模板勾选组成' : '点击右上角"新建学期模板"，配置学期信息与节次时间' }}
       </p>
       <p v-else class="tpl-empty-hint">请联系管理员创建班级课程模板</p>
     </div>
@@ -698,13 +825,20 @@ function weekLabel(r: ImportRow): string {
         </div>
         <p v-if="t.description" class="tpl-card__desc">{{ t.description }}</p>
         <div class="tpl-card__meta num">
-          {{ t.content.length }} 门课 · v{{ t.version }}
+          <template v-if="t.kind === 'semester'">
+            {{ (t.content as SemesterTemplateContent).periods.length }} 节 · v{{ t.version }}
+          </template>
+          <template v-else>
+            {{ (t.content as ImportRow[] | number[]).length }} 门课 · v{{ t.version }}
+          </template>
           <span v-if="t.importCount" class="tpl-card__used">已导入 {{ t.importCount }} 次</span>
         </div>
         <div class="tpl-card__actions" @click.stop>
-          <button class="btn-mini btn-mini--primary" type="button" @click="openImport(t)">一键导入</button>
+          <button v-if="t.kind === 'semester'" class="btn-mini btn-mini--primary" type="button" @click="importSemesterTemplate(t)">一键创建学期</button>
+          <button v-else class="btn-mini btn-mini--primary" type="button" @click="openImport(t)">一键导入</button>
           <template v-if="store.currentUser?.role === 'admin'">
-            <button class="btn-mini" type="button" @click="openEdit(t)">编辑</button>
+            <button v-if="t.kind === 'semester'" class="btn-mini" type="button" @click="openSemesterEdit(t)">编辑</button>
+            <button v-else class="btn-mini" type="button" @click="openEdit(t)">编辑</button>
             <button class="btn-mini btn-mini--danger" type="button" @click="remove(t)">删除</button>
           </template>
         </div>
@@ -719,7 +853,12 @@ function weekLabel(r: ImportRow): string {
             <h3 class="modal-title">{{ previewing.name }}</h3>
             <span class="tpl-preview-meta num">
               <span v-if="previewing.category" class="chip">{{ previewing.category }}</span>
-              {{ previewing.content.length }} 门课 · v{{ previewing.version }}
+              <template v-if="previewing.kind === 'semester'">
+                {{ (previewing.content as SemesterTemplateContent).periods.length }} 节 · v{{ previewing.version }}
+              </template>
+              <template v-else>
+                {{ (previewing.content as ImportRow[] | number[]).length }} 门课 · v{{ previewing.version }}
+              </template>
               <span v-if="previewing.importCount" class="tpl-card__used">已导入 {{ previewing.importCount }} 次</span>
             </span>
             <span v-if="previewing.description" class="tpl-preview-desc">{{ previewing.description }}</span>
@@ -729,8 +868,45 @@ function weekLabel(r: ImportRow): string {
           </button>
         </div>
 
+        <!-- 学期模板：学期信息 + 节次时间卡片 -->
+        <div v-if="previewing.kind === 'semester'" class="tpl-course-preview">
+          <div class="tpl-course-card">
+            <div class="tpl-course-card__head">
+              <span class="tpl-course-card__name">{{ (previewing.content as SemesterTemplateContent).name }}</span>
+              <span class="chip">学期模板</span>
+            </div>
+            <div class="tpl-course-card__grid">
+              <div class="tpl-course-card__item">
+                <span class="tpl-course-card__label">开始日期</span>
+                <span class="tpl-course-card__value num">{{ (previewing.content as SemesterTemplateContent).startDate }}</span>
+              </div>
+              <div class="tpl-course-card__item">
+                <span class="tpl-course-card__label">结束日期</span>
+                <span class="tpl-course-card__value num">{{ (previewing.content as SemesterTemplateContent).endDate }}</span>
+              </div>
+              <div class="tpl-course-card__item">
+                <span class="tpl-course-card__label">每周起始日</span>
+                <span class="tpl-course-card__value">{{ (previewing.content as SemesterTemplateContent).weekStartDay === 1 ? '周一' : '周日' }}</span>
+              </div>
+              <div class="tpl-course-card__item">
+                <span class="tpl-course-card__label">节次数</span>
+                <span class="tpl-course-card__value num">{{ (previewing.content as SemesterTemplateContent).periods.length }} 节</span>
+              </div>
+            </div>
+            <div class="tpl-sem-periods">
+              <span class="tpl-course-card__label">节次时间</span>
+              <div class="tpl-sem-period-list">
+                <div v-for="(p, i) in (previewing.content as SemesterTemplateContent).periods" :key="i" class="tpl-sem-period num">
+                  <span class="tpl-sem-period-idx">第 {{ i + 1 }} 节</span>
+                  <span class="tpl-sem-period-time">{{ p.startTime }} – {{ p.endTime }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 课程模板：单门课程信息卡片（紧凑展示） -->
-        <div v-if="previewing.kind === 'course'" class="tpl-course-preview">
+        <div v-else-if="previewing.kind === 'course'" class="tpl-course-preview">
           <div v-for="r in (previewing.content as ImportRow[])" :key="r.name" class="tpl-course-card">
             <div class="tpl-course-card__head">
               <span class="tpl-course-card__name">{{ r.name }}</span>
@@ -1106,6 +1282,71 @@ function weekLabel(r: ImportRow): string {
           <button class="btn-mini" type="button" :disabled="courseFormBusy" @click="showCourseForm = false">取消</button>
           <button class="btn-mini btn-mini--primary" type="button" :disabled="courseFormBusy" @click="saveCourseForm">
             {{ courseFormBusy ? '保存中…' : '保存为课程模板' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 学期模板表单弹窗（学期信息 + 节次时间模板） -->
+    <div v-if="showSemesterForm" class="modal-mask" @mousedown.self="showSemesterForm = false">
+      <div class="modal tpl-semester-modal" role="dialog" aria-modal="true" :aria-label="editingId === null ? '新建学期模板' : '编辑学期模板'">
+        <div class="modal-head">
+          <h3 class="m-title">{{ editingId === null ? '新建学期模板' : '编辑学期模板' }}</h3>
+          <button class="modal-close" type="button" aria-label="关闭" @click="showSemesterForm = false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div class="form-grid">
+          <label class="field field--full">
+            <span class="field__label">学期名称</span>
+            <input v-model="semesterForm.name" class="text-input" type="text" placeholder="如：2026-2027 学年第一学期" maxlength="50" />
+          </label>
+          <label class="field">
+            <span class="field__label">开始日期</span>
+            <input v-model="semesterForm.startDate" class="text-input" type="date" />
+          </label>
+          <label class="field">
+            <span class="field__label">结束日期</span>
+            <input v-model="semesterForm.endDate" class="text-input" type="date" />
+          </label>
+          <fieldset class="field field--full">
+            <legend class="field__label">每周起始日</legend>
+            <div class="seg">
+              <label class="seg-item" :class="{ checked: semesterForm.weekStartDay === 1 }">
+                <input v-model="semesterForm.weekStartDay" type="radio" value="1" name="sem-week-start" />
+                <span class="seg-item__dot"></span>
+                <span>周一</span>
+              </label>
+              <label class="seg-item" :class="{ checked: semesterForm.weekStartDay === 7 }">
+                <input v-model="semesterForm.weekStartDay" type="radio" value="7" name="sem-week-start" />
+                <span class="seg-item__dot"></span>
+                <span>周日</span>
+              </label>
+            </div>
+          </fieldset>
+        </div>
+
+        <!-- 节次时间模板 -->
+        <div class="tpl-rows-head">
+          <span class="field__label">节次时间（{{ semesterForm.periods.length }} 节）</span>
+          <button class="btn-mini btn-mini--primary" type="button" @click="addSemesterPeriod">＋ 添加节次</button>
+        </div>
+        <div class="tpl-sem-form-list">
+          <div v-for="(p, i) in semesterForm.periods" :key="i" class="tpl-sem-form-row">
+            <span class="tpl-sem-form-idx num">第 {{ i + 1 }} 节</span>
+            <input v-model="p.startTime" class="text-input tpl-sem-form-time" type="time" :aria-label="`第 ${i + 1} 节开始时间`" />
+            <span class="tpl-period-dash">–</span>
+            <input v-model="p.endTime" class="text-input tpl-sem-form-time" type="time" :aria-label="`第 ${i + 1} 节结束时间`" />
+            <button class="session-del" type="button" :aria-label="`删除第 ${i + 1} 节`" @click="removeSemesterPeriod(i)">×</button>
+          </div>
+        </div>
+
+        <p v-if="semesterFormError" class="edit-error" role="alert">{{ semesterFormError }}</p>
+        <div class="edit-actions">
+          <button class="btn-mini" type="button" :disabled="semesterFormBusy" @click="showSemesterForm = false">取消</button>
+          <button class="btn-mini btn-mini--primary" type="button" :disabled="semesterFormBusy" @click="saveSemesterForm">
+            {{ semesterFormBusy ? '保存中…' : '保存为学期模板' }}
           </button>
         </div>
       </div>
@@ -2021,6 +2262,92 @@ function weekLabel(r: ImportRow): string {
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-medium);
   color: var(--color-text-body);
+}
+
+/* 学期模板：节次时间列表 */
+.tpl-sem-periods {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--color-border-default);
+  padding-top: var(--spacing-md);
+}
+
+.tpl-sem-period-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px 12px;
+}
+
+.tpl-sem-period {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: var(--color-bg-surface);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-body);
+}
+
+.tpl-sem-period-idx {
+  color: var(--color-text-tertiary);
+  flex: none;
+}
+
+.tpl-sem-period-time {
+  font-weight: var(--font-weight-medium);
+}
+
+/* 学期模板表单 */
+.tpl-semester-modal {
+  width: min(560px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+.tpl-semester-modal::-webkit-scrollbar {
+  width: 8px;
+}
+
+.tpl-semester-modal::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-full);
+}
+
+.tpl-semester-modal::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tpl-sem-form-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.tpl-sem-form-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--color-bg-page);
+  border-radius: var(--radius-sm);
+}
+
+.tpl-sem-form-idx {
+  width: 48px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  flex: none;
+}
+
+.tpl-sem-form-time {
+  width: 110px;
+  flex: none;
 }
 
 /* 周课表网格预览 */
