@@ -210,7 +210,6 @@ async function doImport(): Promise<void> {
   }
 }
 
-const CATEGORIES = ['理论课', '实验课', '混合', '学期', '节次']
 const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 const MAX_WEEKS = 30
 
@@ -882,17 +881,6 @@ function weekLabel(r: ImportRow): string {
           <label class="field">
             <span class="field__label">模板名称</span>
             <input v-model="form.name" class="date-input" type="text" placeholder="如：24集成2基础课程" maxlength="50" />
-          </label>
-          <label class="field">
-            <span class="field__label">分类</span>
-            <div class="select-wrap">
-              <AppSelect
-                :model-value="form.category"
-                :options="[{ value: '', label: '未分类' }, ...CATEGORIES.map((c) => ({ value: c, label: c }))]"
-                aria-label="分类"
-                @update:model-value="(v: string | number | null) => form.category = v === null ? '' : String(v)"
-              />
-            </div>
           </label>
           <label class="field">
             <span class="field__label">描述（选填）</span>
