@@ -1201,39 +1201,7 @@ function formatTime(iso: string | null): string {
   font-weight: var(--font-weight-medium);
 }
 
-/* 弹窗（重置密码 / 删除用户） */
-.modal-mask {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-index-modal);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(15, 23, 42, 0.42);
-  padding: var(--spacing-lg);
-}
-
-.modal {
-  width: min(400px, 100%);
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-md);
-  background: var(--color-bg-surface);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-pop);
-  padding: var(--spacing-xl);
-}
-
-.modal-title {
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-bold);
-  color: var(--color-text-primary);
-}
-
-.modal-desc {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-}
+/* 弹窗（重置密码 / 删除用户）——基础样式在全局 style.css */
 
 .chip--danger {
   color: var(--color-feedback-error);
@@ -1262,11 +1230,6 @@ function formatTime(iso: string | null): string {
   font-size: var(--font-size-md);
   color: var(--color-text-tertiary);
   font-weight: var(--font-weight-medium);
-}
-
-.panel-note {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-tertiary);
 }
 
 .row {
@@ -1311,60 +1274,6 @@ function formatTime(iso: string | null): string {
   border-top: 1px solid var(--color-border-default);
 }
 
-.chip {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-inverse);
-  background: var(--color-brand);
-  border-radius: var(--radius-full);
-  padding: 2px 10px;
-}
-
-.btn-mini {
-  padding: 4px 14px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  color: var(--color-brand);
-  background: var(--color-bg-surface);
-  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
-}
-
-.btn-mini:hover {
-  background: var(--color-bg-hover);
-}
-
-.btn-mini:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-mini--primary {
-  background: var(--color-brand);
-  border-color: var(--color-brand);
-  color: var(--color-text-inverse);
-}
-
-.btn-mini--primary:hover {
-  background: var(--color-brand-hover);
-}
-
-.btn-mini--danger {
-  color: var(--color-feedback-error);
-}
-
-.btn-add {
-  padding: 4px 14px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  color: var(--color-brand);
-  background: var(--color-bg-surface);
-}
-
-.btn-add:hover {
-  background: var(--color-brand-subtle);
-}
-
 .edit-fields {
   display: flex;
   flex-wrap: wrap;
@@ -1390,19 +1299,7 @@ function formatTime(iso: string | null): string {
 
 /* 天气设置：文本输入框 + 提示 */
 .text-input {
-  height: 34px;
   min-width: 220px;
-  padding: 0 var(--spacing-sm);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-surface);
-  color: var(--color-text-body);
-  font-size: var(--font-size-sm);
-}
-
-.text-input:focus {
-  outline: none;
-  border-color: var(--color-brand);
 }
 
 .weather-hint {
@@ -1451,34 +1348,6 @@ function formatTime(iso: string | null): string {
 .key-eye svg {
   width: 16px;
   height: 16px;
-}
-
-.date-input {
-  height: 34px;
-  padding: 0 var(--spacing-sm);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-surface);
-  color: var(--color-text-body);
-  font-size: var(--font-size-sm);
-}
-
-.date-input:focus {
-  outline: none;
-  border-color: var(--color-brand);
-  box-shadow: 0 0 0 2px var(--color-brand-subtle);
-}
-
-.edit-error {
-  margin-top: var(--spacing-sm);
-  font-size: var(--font-size-sm);
-  color: var(--color-feedback-error);
-}
-
-.edit-actions {
-  display: flex;
-  gap: var(--spacing-sm);
-  margin-top: var(--spacing-sm);
 }
 
 .new-semester {
@@ -1673,9 +1542,5 @@ function formatTime(iso: string | null): string {
 
 .hidden-input {
   display: none;
-}
-
-.select-wrap {
-  min-width: 150px;
 }
 </style>
