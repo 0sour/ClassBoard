@@ -327,27 +327,25 @@ const previewByWeekday = computed(() => {
 /** 周课表网格预览：7 天 × 12 节，同一格堆叠显示该时段全部课程（含周次标签） */
 const GRID_PERIODS = 12
 
-/** 某天某节的所有课程（含跨节次课程在起始节次渲染） */
+/** 某天某节显示的课程：仅起始于该节的课（跨行课只在起始节显示，非起始节跳过） */
 function coursesAt(weekday: number, period: number): ImportRow[] {
   const day = previewByWeekday.value.find((d) => d.weekday === weekday)
   if (!day) return []
   return day.rows.filter((r) => r.startPeriod === period)
 }
 
-/** 起始节次格的跨行范围：仅单门课时按课程跨行合并；多门课堆叠时不跨行（各自显示） */
+/** 该位置是否跳过渲染：无起始课（被跨行课覆盖的中间/结束节次，由起始格显示） */
+function shouldSkip(weekday: number, period: number): boolean {
+  return coursesAt(weekday, period).length === 0
+}
+
+/** 起始节次格的跨行范围：仅单门跨行课程时合并；多门课堆叠不跨行 */
 function spanOf(weekday: number, period: number): { start: number; end: number } | null {
   const courses = coursesAt(weekday, period)
   if (courses.length !== 1) return null
   const c = courses[0]
   if (c.endPeriod <= c.startPeriod) return null
   return { start: c.startPeriod, end: c.endPeriod }
-}
-
-/** 该位置是否被跨节次课程覆盖（非起始节次 → 跳过渲染） */
-function coveredBySpan(weekday: number, period: number): boolean {
-  const day = previewByWeekday.value.find((d) => d.weekday === weekday)
-  if (!day) return false
-  return day.rows.some((r) => r.startPeriod < period && period <= r.endPeriod)
 }
 
 /** 周次标签（网格内显示） */
@@ -452,10 +450,13 @@ function weekLabel(r: ImportRow): string {
               <div class="tpl-grid-preview__period">{{ p }}</div>
               <template v-for="wd in 7" :key="'c' + wd + '-' + p">
                 <div
-                  v-if="!coveredBySpan(wd, p)"
+                  v-if="!shouldSkip(wd, p)"
                   class="tpl-grid-preview__cell"
                   :class="{ 'has-course': coursesAt(wd, p).length > 0 }"
-                  :style="spanOf(wd, p) ? { gridRow: `${spanOf(wd, p)!.start + 1} / ${spanOf(wd, p)!.end + 2}` } : undefined"
+                  :style="{
+                    gridColumn: String(wd + 1),
+                    ...(spanOf(wd, p) ? { gridRow: `${spanOf(wd, p)!.start + 1} / ${spanOf(wd, p)!.end + 2}` } : {}),
+                  }"
                 >
                   <div
                     v-for="r in coursesAt(wd, p)"
