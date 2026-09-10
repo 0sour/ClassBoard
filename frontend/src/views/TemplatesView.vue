@@ -14,6 +14,10 @@ const templates = ref<TemplateInfo[]>([])
 const loading = ref(false)
 const category = ref('')
 const keyword = ref('')
+/** 类型 Tab：course=课程模板（勾选批量导入）/ unit=组合模板（一键导入） */
+const kindTab = ref<'course' | 'unit'>('course')
+/** 课程模板勾选（批量导入） */
+const selectedIds = ref<Set<number>>(new Set())
 
 // 导入流程状态
 const importing = ref<TemplateInfo | null>(null)
@@ -39,13 +43,75 @@ function previewToImport(): void {
   openImport(t)
 }
 
-// 管理员编辑状态（图形化课程行编辑器）
+/** 切换类型 Tab 时清空勾选 */
+function switchKind(k: 'course' | 'unit'): void {
+  kindTab.value = k
+  selectedIds.value = new Set()
+}
+
+/** 勾选/取消课程模板 */
+function toggleSelect(t: TemplateInfo): void {
+  const next = new Set(selectedIds.value)
+  if (next.has(t.id)) next.delete(t.id)
+  else next.add(t.id)
+  selectedIds.value = next
+}
+
+/** 全选/取消当前过滤列表 */
+function toggleSelectAll(): void {
+  const visible = filteredTemplates.value
+  const allSelected = visible.every((t) => selectedIds.value.has(t.id))
+  const next = new Set(selectedIds.value)
+  if (allSelected) for (const t of visible) next.delete(t.id)
+  else for (const t of visible) next.add(t.id)
+  selectedIds.value = next
+}
+
+/** 批量导入所选课程模板 */
+function openBatchImport(): void {
+  if (selectedIds.value.size === 0) return
+  importing.value = null
+  importSemesterId.value = store.currentSemesterId
+  importMode.value = 'dedupe'
+  importError.value = ''
+  importResult.value = null
+  batchImporting.value = true
+}
+
+const batchImporting = ref(false)
+
+async function doBatchImport(): Promise<void> {
+  if (selectedIds.value.size === 0 || importSemesterId.value === null) return
+  importBusy.value = true
+  importError.value = ''
+  try {
+    const res = await api.importTemplate(0, {
+      semesterId: importSemesterId.value,
+      mode: importMode.value,
+      templateIds: [...selectedIds.value],
+    })
+    importResult.value = { count: res.count, skipped: res.skipped }
+    selectedIds.value = new Set()
+    batchImporting.value = false
+    await store.refreshSchedule()
+    await store.loadCourses()
+    await load()
+  } catch (e) {
+    importError.value = e instanceof Error ? e.message : '导入失败，请重试'
+  } finally {
+    importBusy.value = false
+  }
+}
+
+// 管理员编辑状态（course=单门课程行 / unit=引用课程模板 id 列表）
 const showEditor = ref(false)
 const editingId = ref<number | null>(null)
+const editingKind = ref<'course' | 'unit'>('course')
 const form = reactive({ name: '', category: '', description: '' })
 const formError = ref('')
 const formBusy = ref(false)
 const rows = ref<ImportRow[]>([])
+const unitIds = ref<number[]>([])
 const showRowEditor = ref(false)
 const rowEditingIndex = ref<number | null>(null)
 const rowForm = reactive({
@@ -83,6 +149,7 @@ async function load(): Promise<void> {
 const filteredTemplates = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   return templates.value.filter((t) => {
+    if (t.kind !== kindTab.value) return false
     if (category.value && t.category !== category.value) return false
     if (kw && !t.name.toLowerCase().includes(kw) && !t.description.toLowerCase().includes(kw)) return false
     return true
@@ -141,20 +208,39 @@ function weekLabelOf(r: ImportRow): string {
   return r.weekList?.length ? `第 ${r.weekList.join(',')} 周` : '每周'
 }
 
-function openCreate(): void {
+function openCreate(kind: 'course' | 'unit'): void {
   editingId.value = null
+  editingKind.value = kind
   Object.assign(form, { name: '', category: '', description: '' })
   rows.value = []
+  unitIds.value = []
   formError.value = ''
   showEditor.value = true
 }
 
 function openEdit(t: TemplateInfo): void {
   editingId.value = t.id
+  editingKind.value = t.kind
   Object.assign(form, { name: t.name, category: t.category, description: t.description })
-  rows.value = t.content.map((r) => ({ ...r, weekList: r.weekList ? [...r.weekList] : null }))
+  if (t.kind === 'course') {
+    rows.value = (t.content as ImportRow[]).map((r) => ({ ...r, weekList: r.weekList ? [...r.weekList] : null }))
+    unitIds.value = []
+  } else {
+    rows.value = []
+    unitIds.value = [...(t.content as number[])]
+  }
   formError.value = ''
   showEditor.value = true
+}
+
+/** 组合模板：可引用的课程模板列表 */
+const courseTemplates = computed(() => templates.value.filter((t) => t.kind === 'course'))
+
+/** 组合模板：勾选/取消引用的课程模板 */
+function toggleUnitRef(id: number): void {
+  const i = unitIds.value.indexOf(id)
+  if (i >= 0) unitIds.value.splice(i, 1)
+  else unitIds.value.push(id)
 }
 
 /** 打开课程行编辑表单（新增或编辑） */
@@ -224,16 +310,26 @@ async function save(): Promise<void> {
     formError.value = '请填写模板名称'
     return
   }
-  if (rows.value.length === 0) {
+  if (editingKind.value === 'course' && rows.value.length === 0) {
     formError.value = '请至少添加一门课程'
+    return
+  }
+  if (editingKind.value === 'unit' && unitIds.value.length === 0) {
+    formError.value = '请至少勾选一门课程模板'
     return
   }
   formBusy.value = true
   try {
-    const body = { name: form.name.trim(), category: form.category, description: form.description, content: rows.value }
+    const body = {
+      kind: editingKind.value,
+      name: form.name.trim(),
+      category: form.category,
+      description: form.description,
+      content: editingKind.value === 'course' ? rows.value : unitIds.value,
+    }
     if (editingId.value === null) {
       await api.createTemplate(body)
-      toast('模板已创建', 'success')
+      toast(editingKind.value === 'course' ? '课程模板已创建' : '组合模板已创建', 'success')
     } else {
       await api.updateTemplate(editingId.value, body)
       toast('模板已更新（版本 +1）', 'success')
@@ -296,6 +392,7 @@ async function saveFromSemester(): Promise<void> {
       remark: c.remark,
     }))
     await api.createTemplate({
+      kind: 'unit',
       name: saveFromName.value.trim(),
       category: '混合',
       description: `从学期「${store.semesters.find((s) => s.id === saveFromSemesterId.value)?.name ?? ''}」另存`,
@@ -315,12 +412,13 @@ const semesterOptions = computed(() =>
   store.semesters.map((s) => ({ value: s.id, label: s.name })),
 )
 
-/** 预览：模板课程行 → 按星期分组（预览弹窗与导入弹窗共用） */
+/** 预览：模板课程行 → 按星期分组（预览弹窗与导入弹窗共用；unit 展开引用） */
 const previewByWeekday = computed(() => {
   const t = previewing.value ?? importing.value
   if (!t) return []
+  const rows = t.kind === 'course' ? (t.content as ImportRow[]) : []
   const map: Record<number, ImportRow[]> = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [] }
-  for (const r of t.content) map[r.weekday]?.push(r)
+  for (const r of rows) map[r.weekday]?.push(r)
   return [1, 2, 3, 4, 5, 6, 7].map((wd) => ({ weekday: wd, rows: map[wd] }))
 })
 
@@ -373,8 +471,21 @@ function weekLabel(r: ImportRow): string {
       </div>
       <div v-if="store.currentUser?.role === 'admin'" class="tpl-admin-actions">
         <button class="btn-mini" type="button" @click="openSaveFromSemester">从学期另存</button>
-        <button class="btn-add" type="button" @click="openCreate">＋ 新建模板</button>
+        <button class="btn-mini" type="button" @click="openCreate('course')">＋ 新建课程模板</button>
+        <button class="btn-add" type="button" @click="openCreate('unit')">＋ 新建组合模板</button>
       </div>
+    </div>
+
+    <!-- 类型 Tab：课程模板（勾选批量导入）/ 组合模板（一键导入） -->
+    <div class="tpl-kind-tabs reveal" role="tablist" aria-label="模板类型">
+      <button
+        class="tpl-kind-tab" :class="{ active: kindTab === 'course' }" type="button" role="tab"
+        :aria-selected="kindTab === 'course'" @click="switchKind('course')"
+      >课程模板<span class="tpl-kind-count">{{ templates.filter((t) => t.kind === 'course').length }}</span></button>
+      <button
+        class="tpl-kind-tab" :class="{ active: kindTab === 'unit' }" type="button" role="tab"
+        :aria-selected="kindTab === 'unit'" @click="switchKind('unit')"
+      >组合模板<span class="tpl-kind-count">{{ templates.filter((t) => t.kind === 'unit').length }}</span></button>
     </div>
 
     <!-- 工具栏：分类 Tab + 搜索 -->
@@ -395,16 +506,33 @@ function weekLabel(r: ImportRow): string {
       <input v-model="keyword" class="tpl-search" type="search" placeholder="搜索模板名称…" aria-label="搜索模板" />
     </div>
 
+    <!-- 课程模板：全选 + 批量导入栏 -->
+    <div v-if="kindTab === 'course' && filteredTemplates.length" class="tpl-batch-bar reveal">
+      <label class="tpl-batch-all">
+        <input type="checkbox" :checked="filteredTemplates.every((t) => selectedIds.has(t.id))" @change="toggleSelectAll" />
+        <span>全选当前列表</span>
+      </label>
+      <span class="tpl-batch-count num">已选 {{ selectedIds.size }} 门</span>
+      <button class="btn-mini btn-mini--primary" type="button" :disabled="selectedIds.size === 0" @click="openBatchImport">
+        批量导入所选
+      </button>
+    </div>
+
     <!-- 模板卡片网格 -->
     <div v-if="loading" class="tpl-empty reveal">加载中…</div>
     <div v-else-if="!filteredTemplates.length" class="tpl-empty reveal">
-      <p>暂无模板</p>
-      <p v-if="store.currentUser?.role === 'admin'" class="tpl-empty-hint">点击右上角"新建模板"创建，或"从学期另存"把现有课表存为模板</p>
+      <p>暂无{{ kindTab === 'course' ? '课程' : '组合' }}模板</p>
+      <p v-if="store.currentUser?.role === 'admin'" class="tpl-empty-hint">
+        {{ kindTab === 'course' ? '点击右上角"新建课程模板"创建单门课程模板' : '点击右上角"新建组合模板"，从课程模板勾选组成' }}
+      </p>
       <p v-else class="tpl-empty-hint">请联系管理员创建班级课程模板</p>
     </div>
     <div v-else class="tpl-grid reveal">
-      <div v-for="t in filteredTemplates" :key="t.id" class="tpl-card" role="button" tabindex="0" :aria-label="`预览模板 ${t.name}`" @click="openPreview(t)" @keydown.enter="openPreview(t)">
+      <div v-for="t in filteredTemplates" :key="t.id" class="tpl-card" :class="{ selected: selectedIds.has(t.id) }" role="button" tabindex="0" :aria-label="`预览模板 ${t.name}`" @click="openPreview(t)" @keydown.enter="openPreview(t)">
         <div class="tpl-card__head">
+          <span v-if="kindTab === 'course'" class="tpl-check" @click.stop="toggleSelect(t)">
+            <input type="checkbox" :checked="selectedIds.has(t.id)" :aria-label="`选择 ${t.name}`" @change="toggleSelect(t)" />
+          </span>
           <span class="tpl-card__name">{{ t.name }}</span>
           <span v-if="t.category" class="chip">{{ t.category }}</span>
         </div>
@@ -480,13 +608,13 @@ function weekLabel(r: ImportRow): string {
       </div>
     </div>
 
-    <!-- 导入弹窗 -->
-    <div v-if="importing" class="modal-mask" @mousedown.self="importing = null">
-      <div class="modal tpl-import-modal" role="dialog" aria-modal="true" :aria-label="`导入模板 ${importing.name}`">
-        <h3 class="modal-title">导入「{{ importing.name }}」</h3>
+    <!-- 导入弹窗（单模板 / 批量） -->
+    <div v-if="importing || batchImporting" class="modal-mask" @mousedown.self="importing = null; batchImporting = false">
+      <div class="modal tpl-import-modal" role="dialog" aria-modal="true" :aria-label="batchImporting ? '批量导入课程模板' : `导入模板 ${importing?.name}`">
+        <h3 class="modal-title">{{ batchImporting ? `批量导入所选课程模板（${selectedIds.size} 门）` : `导入「${importing?.name}」` }}</h3>
 
-        <!-- 预览 -->
-        <div class="tpl-preview">
+        <!-- 预览（单模板） -->
+        <div v-if="!batchImporting" class="tpl-preview">
           <div v-for="(d, i) in previewByWeekday" :key="d.weekday" class="tpl-preview-day">
             <span class="tpl-preview-wd">{{ WEEKDAY_LABELS[i] }}</span>
             <div v-if="d.rows.length" class="tpl-preview-rows">
@@ -539,8 +667,8 @@ function weekLabel(r: ImportRow): string {
           <p v-if="importMode === 'overwrite'" class="tpl-warn">⚠ 覆盖将删除目标学期现有全部课程，此操作不可撤销！</p>
           <p v-if="importError" class="edit-error" role="alert">{{ importError }}</p>
           <div class="edit-actions">
-            <button class="btn-mini" type="button" :disabled="importBusy" @click="importing = null">取消</button>
-            <button class="btn-mini btn-mini--primary" type="button" :disabled="importBusy || importSemesterId === null" @click="doImport">
+            <button class="btn-mini" type="button" :disabled="importBusy" @click="importing = null; batchImporting = false">取消</button>
+            <button class="btn-mini btn-mini--primary" type="button" :disabled="importBusy || importSemesterId === null" @click="batchImporting ? doBatchImport() : doImport()">
               {{ importBusy ? '导入中…' : '确认导入' }}
             </button>
           </div>
@@ -564,10 +692,10 @@ function weekLabel(r: ImportRow): string {
       </div>
     </div>
 
-    <!-- 创建/编辑弹窗（admin，图形化课程行编辑器） -->
+    <!-- 创建/编辑弹窗（admin；course=课程行编辑器 / unit=勾选课程模板） -->
     <div v-if="showEditor" class="modal-mask" @mousedown.self="showEditor = false">
       <div class="modal tpl-editor" role="dialog" aria-modal="true" :aria-label="editingId === null ? '新建模板' : '编辑模板'">
-        <h3 class="modal-title">{{ editingId === null ? '新建模板' : '编辑模板' }}</h3>
+        <h3 class="modal-title">{{ editingId === null ? (editingKind === 'course' ? '新建课程模板' : '新建组合模板') : '编辑模板' }}</h3>
         <div class="tpl-editor-fields">
           <label class="field">
             <span class="field__label">模板名称</span>
@@ -590,28 +718,48 @@ function weekLabel(r: ImportRow): string {
           </label>
         </div>
 
-        <!-- 课程行列表 -->
-        <div class="tpl-rows-head">
-          <span class="field__label">课程列表（{{ rows.length }} 门）</span>
-          <button class="btn-mini btn-mini--primary" type="button" @click="openRowEditor(null)">＋ 添加课程</button>
-        </div>
-        <div v-if="rows.length" class="tpl-rows">
-          <div v-for="(r, i) in rows" :key="i" class="tpl-row">
-            <div class="tpl-row-main">
-              <span class="tpl-row-name">
-                {{ r.name }}
-                <span class="chip" :class="r.type === 'lab' ? 'chip--lab' : ''">{{ r.type === 'lab' ? '实验' : '理论' }}</span>
-              </span>
-              <span class="tpl-row-meta num">
-                {{ WEEKDAY_LABELS[r.weekday - 1] }} · 第 {{ r.startPeriod }}{{ r.endPeriod > r.startPeriod ? `–${r.endPeriod}` : '' }} 节 · {{ weekLabelOf(r) }}
-                <template v-if="r.teacher || r.location"> · {{ r.teacher }}{{ r.location ? ` / ${r.location}` : '' }}</template>
-              </span>
-            </div>
-            <button class="btn-mini" type="button" @click="openRowEditor(i)">编辑</button>
-            <button class="btn-mini btn-mini--danger" type="button" @click="removeRow(i)">删除</button>
+        <!-- course：课程行列表 -->
+        <template v-if="editingKind === 'course'">
+          <div class="tpl-rows-head">
+            <span class="field__label">课程列表（{{ rows.length }} 门）</span>
+            <button class="btn-mini btn-mini--primary" type="button" @click="openRowEditor(null)">＋ 添加课程</button>
           </div>
-        </div>
-        <div v-else class="tpl-rows-empty">还没有课程，点击"添加课程"开始</div>
+          <div v-if="rows.length" class="tpl-rows">
+            <div v-for="(r, i) in rows" :key="i" class="tpl-row">
+              <div class="tpl-row-main">
+                <span class="tpl-row-name">
+                  {{ r.name }}
+                  <span class="chip" :class="r.type === 'lab' ? 'chip--lab' : ''">{{ r.type === 'lab' ? '实验' : '理论' }}</span>
+                </span>
+                <span class="tpl-row-meta num">
+                  {{ WEEKDAY_LABELS[r.weekday - 1] }} · 第 {{ r.startPeriod }}{{ r.endPeriod > r.startPeriod ? `–${r.endPeriod}` : '' }} 节 · {{ weekLabelOf(r) }}
+                  <template v-if="r.teacher || r.location"> · {{ r.teacher }}{{ r.location ? ` / ${r.location}` : '' }}</template>
+                </span>
+              </div>
+              <button class="btn-mini" type="button" @click="openRowEditor(i)">编辑</button>
+              <button class="btn-mini btn-mini--danger" type="button" @click="removeRow(i)">删除</button>
+            </div>
+          </div>
+          <div v-else class="tpl-rows-empty">还没有课程，点击"添加课程"开始</div>
+        </template>
+
+        <!-- unit：勾选课程模板组成 -->
+        <template v-else>
+          <div class="tpl-rows-head">
+            <span class="field__label">包含课程模板（{{ unitIds.length }} 门）</span>
+            <span class="tpl-unit-hint">从下方课程模板勾选，管理员修改课程模板后组合自动生效</span>
+          </div>
+          <div v-if="courseTemplates.length" class="tpl-unit-list">
+            <label v-for="ct in courseTemplates" :key="ct.id" class="tpl-unit-item" :class="{ checked: unitIds.includes(ct.id) }">
+              <input type="checkbox" :checked="unitIds.includes(ct.id)" @change="toggleUnitRef(ct.id)" />
+              <span class="tpl-unit-main">
+                <span class="tpl-unit-name">{{ ct.name }}</span>
+                <span class="tpl-unit-meta num">{{ (ct.content as ImportRow[])[0]?.name }} · {{ WEEKDAY_LABELS[((ct.content as ImportRow[])[0]?.weekday ?? 1) - 1] }} 第 {{ (ct.content as ImportRow[])[0]?.startPeriod }} 节</span>
+              </span>
+            </label>
+          </div>
+          <div v-else class="tpl-rows-empty">还没有课程模板，请先在"课程模板"页创建</div>
+        </template>
 
         <p v-if="formError" class="edit-error" role="alert">{{ formError }}</p>
         <div class="edit-actions">
@@ -803,6 +951,147 @@ function weekLabel(r: ImportRow): string {
   flex-direction: column;
   gap: var(--spacing-sm);
   margin-bottom: var(--spacing-lg);
+}
+
+/* 类型 Tab */
+.tpl-kind-tabs {
+  display: flex;
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-md);
+  padding-bottom: var(--spacing-sm);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.tpl-kind-tab {
+  padding: 6px 16px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard),
+    background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.tpl-kind-tab:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-body);
+}
+
+.tpl-kind-tab.active {
+  background: var(--color-brand-subtle);
+  color: var(--color-brand);
+  font-weight: var(--font-weight-medium);
+}
+
+.tpl-kind-count {
+  font-size: 10px;
+  margin-left: 4px;
+  opacity: 0.7;
+}
+
+/* 批量导入栏 */
+.tpl-batch-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-md);
+}
+
+.tpl-batch-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-body);
+  cursor: pointer;
+}
+
+.tpl-batch-all input {
+  accent-color: var(--color-brand);
+}
+
+.tpl-batch-count {
+  flex: 1;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+/* 课程模板勾选 */
+.tpl-check {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+.tpl-check input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--color-brand);
+  cursor: pointer;
+}
+
+.tpl-card.selected {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 2px var(--color-brand-subtle);
+}
+
+/* 组合模板：勾选课程模板列表 */
+.tpl-unit-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.tpl-unit-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.tpl-unit-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard),
+    background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.tpl-unit-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.tpl-unit-item.checked {
+  border-color: var(--color-brand);
+  background: var(--color-brand-subtle);
+}
+
+.tpl-unit-item input {
+  accent-color: var(--color-brand);
+}
+
+.tpl-unit-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tpl-unit-name {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-body);
+}
+
+.tpl-unit-meta {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
 }
 
 .tpl-cats {

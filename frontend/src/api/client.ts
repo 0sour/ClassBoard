@@ -282,25 +282,26 @@ export const api = {
 
   getTemplate: (id: number) => request<{ template: TemplateInfo }>(`/templates/${id}`),
 
-  createTemplate: (body: { name: string; category: string; description: string; content: ImportRow[] }) =>
+  createTemplate: (body: { kind: 'course' | 'unit'; name: string; category: string; description: string; content: ImportRow[] | number[] }) =>
     request<{ template: TemplateInfo }>('/templates', { method: 'POST', body: JSON.stringify(body) }),
 
-  updateTemplate: (id: number, body: { name: string; category: string; description: string; content: ImportRow[] }) =>
+  updateTemplate: (id: number, body: { kind?: 'course' | 'unit'; name: string; category: string; description: string; content: ImportRow[] | number[] }) =>
     request<{ template: TemplateInfo }>(`/templates/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   deleteTemplate: (id: number) => request<void>(`/templates/${id}`, { method: 'DELETE' }),
 
-  importTemplate: (id: number, body: { semesterId: number; mode: 'append' | 'overwrite' | 'dedupe' }) =>
-    request<{ count: number; skipped: number; templateVersion: number }>(`/templates/${id}/import`, { method: 'POST', body: JSON.stringify(body) }),
+  importTemplate: (id: number, body: { semesterId: number; mode: 'append' | 'overwrite' | 'dedupe'; templateIds?: number[] }) =>
+    request<{ count: number; skipped: number; templateCount: number }>(`/templates/${id}/import`, { method: 'POST', body: JSON.stringify(body) }),
 }
 
 export interface TemplateInfo {
   id: number
+  kind: 'course' | 'unit'
   name: string
   category: string
   description: string
   version: number
-  content: ImportRow[]
+  content: ImportRow[] | number[]
   createdBy: number
   createdAt: string
   updatedAt: string

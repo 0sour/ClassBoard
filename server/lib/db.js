@@ -178,6 +178,15 @@ if (!hasTemplateTable) {
   console.log('[migrate] 模板表迁移完成')
 }
 
+// 模板类型列：course=单门课程模板 / unit=组合模板（引用课程模板 id 数组）
+const hasKindColumn = db
+  .prepare("SELECT name FROM pragma_table_info('template') WHERE name = 'kind'")
+  .get()
+if (!hasKindColumn) {
+  db.exec("ALTER TABLE template ADD COLUMN kind TEXT NOT NULL DEFAULT 'unit'")
+  console.log('[migrate] 模板表加 kind 列')
+}
+
 /** 迁移用：生成 admin 初始密码哈希（随机 16 位，打印到日志，首次登录后应修改） */
 function hashPassphraseForMigration() {
   const pass = randomBytes(8).toString('hex')
