@@ -273,7 +273,8 @@ async function importSemesterTemplate(t: TemplateInfo): Promise<void> {
     await store.bootstrap()
     await load()
   } catch (e) {
-    importError.value = e instanceof Error ? e.message : '导入失败，请重试'
+    const msg = e instanceof Error ? e.message : '导入失败，请重试'
+    toast(msg, 'error')
   } finally {
     importBusy.value = false
   }
