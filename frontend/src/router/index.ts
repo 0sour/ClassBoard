@@ -20,6 +20,12 @@ const router = createRouter({
       meta: { title: '周课表', tab: 'week' },
     },
     {
+      path: '/templates',
+      name: 'templates',
+      component: () => import('@/views/TemplatesView.vue'),
+      meta: { title: '模板市场', tab: 'templates' },
+    },
+    {
       path: '/day',
       name: 'day',
       component: () => import('@/views/DayView.vue'),

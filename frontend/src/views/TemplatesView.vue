@@ -1,0 +1,828 @@
+<script setup lang="ts">
+// 模板市场：模板浏览/搜索/一键导入 + 管理员管理（创建/编辑/删除/另存为模板）
+// 与周课表/今天并排的独立页面
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useScheduleStore } from '@/stores/schedule'
+import AppSelect from '@/components/common/AppSelect.vue'
+import { api, type TemplateInfo } from '@/api/client'
+import type { ImportRow } from '@/utils/pdf'
+import { confirm, toast } from '@/utils/ui'
+
+const store = useScheduleStore()
+
+const templates = ref<TemplateInfo[]>([])
+const loading = ref(false)
+const category = ref('')
+const keyword = ref('')
+
+// 导入流程状态
+const importing = ref<TemplateInfo | null>(null)
+const importSemesterId = ref<number | null>(null)
+const importMode = ref<'dedupe' | 'append' | 'overwrite'>('dedupe')
+const importBusy = ref(false)
+const importError = ref('')
+const importResult = ref<{ count: number; skipped: number } | null>(null)
+
+// 管理员编辑状态
+const showEditor = ref(false)
+const editingId = ref<number | null>(null)
+const form = reactive({ name: '', category: '', description: '', content: '' as string })
+const formError = ref('')
+const formBusy = ref(false)
+const showSaveFromSemester = ref(false)
+const saveFromSemesterId = ref<number | null>(null)
+const saveFromName = ref('')
+const saveFromBusy = ref(false)
+
+const CATEGORIES = ['理论课', '实验课', '混合', '学期', '节次']
+
+onMounted(() => void load())
+
+async function load(): Promise<void> {
+  loading.value = true
+  try {
+    const res = await api.listTemplates()
+    templates.value = res.templates
+  } catch {
+    templates.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+const filteredTemplates = computed(() => {
+  const kw = keyword.value.trim().toLowerCase()
+  return templates.value.filter((t) => {
+    if (category.value && t.category !== category.value) return false
+    if (kw && !t.name.toLowerCase().includes(kw) && !t.description.toLowerCase().includes(kw)) return false
+    return true
+  })
+})
+
+const categoryCounts = computed(() => {
+  const map: Record<string, number> = {}
+  for (const t of templates.value) map[t.category] = (map[t.category] ?? 0) + 1
+  return map
+})
+
+// ================= 导入 =================
+function openImport(t: TemplateInfo): void {
+  importing.value = t
+  importSemesterId.value = store.currentSemesterId
+  importMode.value = 'dedupe'
+  importError.value = ''
+  importResult.value = null
+}
+
+async function doImport(): Promise<void> {
+  if (!importing.value || importSemesterId.value === null) return
+  importBusy.value = true
+  importError.value = ''
+  try {
+    const res = await api.importTemplate(importing.value.id, {
+      semesterId: importSemesterId.value,
+      mode: importMode.value,
+    })
+    importResult.value = { count: res.count, skipped: res.skipped }
+    await store.refreshSchedule()
+    await store.loadCourses()
+    await load()
+  } catch (e) {
+    importError.value = e instanceof Error ? e.message : '导入失败，请重试'
+  } finally {
+    importBusy.value = false
+  }
+}
+
+// ================= 管理员管理 =================
+function openCreate(): void {
+  editingId.value = null
+  Object.assign(form, { name: '', category: '', description: '', content: '' })
+  formError.value = ''
+  showEditor.value = true
+}
+
+function openEdit(t: TemplateInfo): void {
+  editingId.value = t.id
+  Object.assign(form, {
+    name: t.name,
+    category: t.category,
+    description: t.description,
+    content: JSON.stringify(t.content, null, 1),
+  })
+  formError.value = ''
+  showEditor.value = true
+}
+
+function parseContent(): ImportRow[] | null {
+  try {
+    const arr = JSON.parse(form.content)
+    if (!Array.isArray(arr) || arr.length === 0) {
+      formError.value = '课程内容须为非空 JSON 数组'
+      return null
+    }
+    return arr
+  } catch {
+    formError.value = '课程内容不是合法 JSON'
+    return null
+  }
+}
+
+async function save(): Promise<void> {
+  formError.value = ''
+  if (!form.name.trim()) {
+    formError.value = '请填写模板名称'
+    return
+  }
+  const content = parseContent()
+  if (!content) return
+  formBusy.value = true
+  try {
+    const body = { name: form.name.trim(), category: form.category, description: form.description, content }
+    if (editingId.value === null) {
+      await api.createTemplate(body)
+      toast('模板已创建', 'success')
+    } else {
+      await api.updateTemplate(editingId.value, body)
+      toast('模板已更新（版本 +1）', 'success')
+    }
+    showEditor.value = false
+    await load()
+  } catch (e) {
+    formError.value = e instanceof Error ? e.message : '保存失败，请重试'
+  } finally {
+    formBusy.value = false
+  }
+}
+
+async function remove(t: TemplateInfo): Promise<void> {
+  const ok = await confirm({
+    title: '删除模板',
+    desc: `将删除模板「${t.name}」。已导入该模板的课程不受影响（快照复制）。`,
+    danger: true,
+    confirmText: '删除',
+  })
+  if (!ok) return
+  try {
+    await api.deleteTemplate(t.id)
+    await load()
+    toast('模板已删除', 'success')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '删除失败，请重试', 'error')
+  }
+}
+
+function openSaveFromSemester(): void {
+  saveFromSemesterId.value = store.currentSemesterId
+  saveFromName.value = ''
+  showSaveFromSemester.value = true
+}
+
+async function saveFromSemester(): Promise<void> {
+  if (saveFromSemesterId.value === null) return
+  if (!saveFromName.value.trim()) {
+    toast('请填写模板名称', 'error')
+    return
+  }
+  saveFromBusy.value = true
+  try {
+    const list = await api.listCourses(saveFromSemesterId.value)
+    if (!list.length) {
+      toast('该学期没有课程', 'error')
+      return
+    }
+    const content: ImportRow[] = list.map((c) => ({
+      name: c.name,
+      type: c.type,
+      teacher: c.teacher,
+      location: c.location,
+      weekType: c.weekType,
+      weekList: c.weekList,
+      weekday: c.weekday,
+      startPeriod: c.startPeriod,
+      endPeriod: c.endPeriod,
+      remark: c.remark,
+    }))
+    await api.createTemplate({
+      name: saveFromName.value.trim(),
+      category: '混合',
+      description: `从学期「${store.semesters.find((s) => s.id === saveFromSemesterId.value)?.name ?? ''}」另存`,
+      content,
+    })
+    showSaveFromSemester.value = false
+    await load()
+    toast(`已保存为模板（${content.length} 门课）`, 'success')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '保存失败，请重试', 'error')
+  } finally {
+    saveFromBusy.value = false
+  }
+}
+
+const semesterOptions = computed(() =>
+  store.semesters.map((s) => ({ value: s.id, label: s.name })),
+)
+
+/** 预览：模板课程行 → 按星期分组 */
+const previewByWeekday = computed(() => {
+  if (!importing.value) return []
+  const map: Record<number, ImportRow[]> = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [] }
+  for (const r of importing.value.content) map[r.weekday]?.push(r)
+  return [1, 2, 3, 4, 5, 6, 7].map((wd) => ({ weekday: wd, rows: map[wd] }))
+})
+
+const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+
+function weekLabel(r: ImportRow): string {
+  if (r.weekType === 'all') return '每周'
+  if (r.weekType === 'odd') return '单周'
+  if (r.weekType === 'even') return '双周'
+  return r.weekList ? `第${r.weekList.join(',')}周` : '每周'
+}
+</script>
+
+<template>
+  <div class="page templates-view">
+    <div class="tpl-head">
+      <div class="tpl-head-main">
+        <h2 class="tpl-title">模板市场</h2>
+        <p class="tpl-sub">班级共享课程模板，一键导入到你的课表</p>
+      </div>
+      <div v-if="store.currentUser?.role === 'admin'" class="tpl-admin-actions">
+        <button class="btn-mini" type="button" @click="openSaveFromSemester">从学期另存</button>
+        <button class="btn-add" type="button" @click="openCreate">＋ 新建模板</button>
+      </div>
+    </div>
+
+    <!-- 工具栏：分类 Tab + 搜索 -->
+    <div class="tpl-toolbar reveal">
+      <div class="tpl-cats">
+        <button class="tpl-cat" :class="{ active: category === '' }" type="button" @click="category = ''">全部</button>
+        <button
+          v-for="c in CATEGORIES"
+          :key="c"
+          class="tpl-cat"
+          :class="{ active: category === c }"
+          type="button"
+          @click="category = category === c ? '' : c"
+        >
+          {{ c }}<span v-if="categoryCounts[c]" class="tpl-cat-count">{{ categoryCounts[c] }}</span>
+        </button>
+      </div>
+      <input v-model="keyword" class="tpl-search" type="search" placeholder="搜索模板名称…" aria-label="搜索模板" />
+    </div>
+
+    <!-- 模板卡片网格 -->
+    <div v-if="loading" class="tpl-empty reveal">加载中…</div>
+    <div v-else-if="!filteredTemplates.length" class="tpl-empty reveal">
+      <p>暂无模板</p>
+      <p v-if="store.currentUser?.role === 'admin'" class="tpl-empty-hint">点击右上角"新建模板"创建，或"从学期另存"把现有课表存为模板</p>
+      <p v-else class="tpl-empty-hint">请联系管理员创建班级课程模板</p>
+    </div>
+    <div v-else class="tpl-grid reveal">
+      <div v-for="t in filteredTemplates" :key="t.id" class="tpl-card">
+        <div class="tpl-card__head">
+          <span class="tpl-card__name">{{ t.name }}</span>
+          <span v-if="t.category" class="chip">{{ t.category }}</span>
+        </div>
+        <p v-if="t.description" class="tpl-card__desc">{{ t.description }}</p>
+        <div class="tpl-card__meta num">
+          {{ t.content.length }} 门课 · v{{ t.version }}
+          <span v-if="t.importCount" class="tpl-card__used">已导入 {{ t.importCount }} 次</span>
+        </div>
+        <div class="tpl-card__actions">
+          <button class="btn-mini btn-mini--primary" type="button" @click="openImport(t)">一键导入</button>
+          <template v-if="store.currentUser?.role === 'admin'">
+            <button class="btn-mini" type="button" @click="openEdit(t)">编辑</button>
+            <button class="btn-mini btn-mini--danger" type="button" @click="remove(t)">删除</button>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- 导入弹窗 -->
+    <div v-if="importing" class="modal-mask" @mousedown.self="importing = null">
+      <div class="modal tpl-import-modal" role="dialog" aria-modal="true" :aria-label="`导入模板 ${importing.name}`">
+        <h3 class="modal-title">导入「{{ importing.name }}」</h3>
+
+        <!-- 预览 -->
+        <div class="tpl-preview">
+          <div v-for="(d, i) in previewByWeekday" :key="d.weekday" class="tpl-preview-day">
+            <span class="tpl-preview-wd">{{ WEEKDAY_LABELS[i] }}</span>
+            <div v-if="d.rows.length" class="tpl-preview-rows">
+              <div v-for="r in d.rows" :key="`${r.name}-${r.startPeriod}`" class="tpl-preview-row">
+                <span class="tpl-preview-name">{{ r.name }}</span>
+                <span class="tpl-preview-meta num">第 {{ r.startPeriod }}{{ r.endPeriod > r.startPeriod ? `–${r.endPeriod}` : '' }} 节 · {{ weekLabel(r) }}</span>
+              </div>
+            </div>
+            <div v-else class="tpl-preview-empty">—</div>
+          </div>
+        </div>
+
+        <!-- 确认 -->
+        <template v-if="!importResult">
+          <label class="field">
+            <span class="field__label">目标学期</span>
+            <div class="select-wrap">
+              <AppSelect
+                :model-value="importSemesterId"
+                :options="semesterOptions"
+                aria-label="目标学期"
+                @update:model-value="(v: string | number | null) => importSemesterId = v === null ? null : Number(v)"
+              />
+            </div>
+          </label>
+          <fieldset class="tpl-mode">
+            <legend class="field__label">导入方式</legend>
+            <label class="tpl-mode-item">
+              <input v-model="importMode" type="radio" value="dedupe" name="tpl-mode" />
+              <span class="tpl-mode-main">
+                <span class="tpl-mode-title">去重追加（推荐）</span>
+                <span class="tpl-mode-desc">同名同时间的课程自动跳过，重复导入不产生重复课</span>
+              </span>
+            </label>
+            <label class="tpl-mode-item">
+              <input v-model="importMode" type="radio" value="append" name="tpl-mode" />
+              <span class="tpl-mode-main">
+                <span class="tpl-mode-title">追加</span>
+                <span class="tpl-mode-desc">全部导入，与现有课程共存（可能产生重复）</span>
+              </span>
+            </label>
+            <label class="tpl-mode-item">
+              <input v-model="importMode" type="radio" value="overwrite" name="tpl-mode" />
+              <span class="tpl-mode-main">
+                <span class="tpl-mode-title">覆盖</span>
+                <span class="tpl-mode-desc">清空目标学期全部课程后导入（考试/作业关联置空）</span>
+              </span>
+            </label>
+          </fieldset>
+          <p v-if="importMode === 'overwrite'" class="tpl-warn">⚠ 覆盖将删除目标学期现有全部课程，此操作不可撤销！</p>
+          <p v-if="importError" class="edit-error" role="alert">{{ importError }}</p>
+          <div class="edit-actions">
+            <button class="btn-mini" type="button" :disabled="importBusy" @click="importing = null">取消</button>
+            <button class="btn-mini btn-mini--primary" type="button" :disabled="importBusy || importSemesterId === null" @click="doImport">
+              {{ importBusy ? '导入中…' : '确认导入' }}
+            </button>
+          </div>
+        </template>
+
+        <!-- 结果 -->
+        <template v-else>
+          <div class="tpl-result">
+            <div class="tpl-result-icon">✓</div>
+            <p class="tpl-result-title">导入完成</p>
+            <p class="tpl-result-desc">
+              成功导入 <b>{{ importResult.count }}</b> 门课程
+              <template v-if="importResult.skipped">，跳过 <b>{{ importResult.skipped }}</b> 门重复课程</template>
+            </p>
+          </div>
+          <div class="edit-actions">
+            <button class="btn-mini" type="button" @click="importing = null">关闭</button>
+            <button class="btn-mini btn-mini--primary" type="button" @click="importing = null; importResult = null">再导入一个</button>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- 创建/编辑弹窗（admin） -->
+    <div v-if="showEditor" class="modal-mask" @mousedown.self="showEditor = false">
+      <div class="modal tpl-editor" role="dialog" aria-modal="true" :aria-label="editingId === null ? '新建模板' : '编辑模板'">
+        <h3 class="modal-title">{{ editingId === null ? '新建模板' : '编辑模板' }}</h3>
+        <label class="field">
+          <span class="field__label">模板名称</span>
+          <input v-model="form.name" class="date-input" type="text" placeholder="如：24集成2基础课程" maxlength="50" />
+        </label>
+        <label class="field">
+          <span class="field__label">分类</span>
+          <div class="select-wrap">
+            <AppSelect
+              :model-value="form.category"
+              :options="[{ value: '', label: '未分类' }, ...CATEGORIES.map((c) => ({ value: c, label: c }))]"
+              aria-label="分类"
+              @update:model-value="(v: string | number | null) => form.category = v === null ? '' : String(v)"
+            />
+          </div>
+        </label>
+        <label class="field">
+          <span class="field__label">描述（选填）</span>
+          <input v-model="form.description" class="date-input" type="text" placeholder="适用班级/学期说明" maxlength="200" />
+        </label>
+        <label class="field">
+          <span class="field__label">课程内容（JSON 数组）</span>
+          <textarea
+            v-model="form.content"
+            class="tpl-json"
+            rows="10"
+            spellcheck="false"
+            placeholder='[{"name":"课程名","type":"course","teacher":"","location":"","weekType":"all","weekList":null,"weekday":1,"startPeriod":1,"endPeriod":2,"remark":""}]'
+          ></textarea>
+          <span class="field__hint">字段：name / type(course|lab) / teacher / location / weekType(all|odd|even|custom) / weekList / weekday(1-7) / startPeriod / endPeriod / remark</span>
+        </label>
+        <p v-if="formError" class="edit-error" role="alert">{{ formError }}</p>
+        <div class="edit-actions">
+          <button class="btn-mini" type="button" :disabled="formBusy" @click="showEditor = false">取消</button>
+          <button class="btn-mini btn-mini--primary" type="button" :disabled="formBusy" @click="save">
+            {{ formBusy ? '保存中…' : '保存' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 从学期另存弹窗（admin） -->
+    <div v-if="showSaveFromSemester" class="modal-mask" @mousedown.self="showSaveFromSemester = false">
+      <div class="modal" role="dialog" aria-modal="true" aria-label="从学期另存为模板">
+        <h3 class="modal-title">从学期另存为模板</h3>
+        <label class="field">
+          <span class="field__label">来源学期</span>
+          <div class="select-wrap">
+            <AppSelect
+              :model-value="saveFromSemesterId"
+              :options="semesterOptions"
+              aria-label="来源学期"
+              @update:model-value="(v: string | number | null) => saveFromSemesterId = v === null ? null : Number(v)"
+            />
+          </div>
+        </label>
+        <label class="field">
+          <span class="field__label">模板名称</span>
+          <input v-model="saveFromName" class="date-input" type="text" placeholder="如：24集成2基础课程" maxlength="50" />
+        </label>
+        <div class="edit-actions">
+          <button class="btn-mini" type="button" :disabled="saveFromBusy" @click="showSaveFromSemester = false">取消</button>
+          <button class="btn-mini btn-mini--primary" type="button" :disabled="saveFromBusy" @click="saveFromSemester">
+            {{ saveFromBusy ? '保存中…' : '另存为模板' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.templates-view {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--spacing-lg);
+}
+
+.tpl-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+}
+
+.tpl-title {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.tpl-sub {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
+}
+
+.tpl-admin-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+  flex: none;
+}
+
+.tpl-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-lg);
+}
+
+.tpl-cats {
+  display: flex;
+  gap: var(--spacing-xs);
+  flex-wrap: wrap;
+}
+
+.tpl-cat {
+  padding: 5px 14px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-subtle);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard),
+    color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.tpl-cat.active {
+  background: var(--color-brand-subtle);
+  color: var(--color-brand);
+  font-weight: var(--font-weight-medium);
+}
+
+.tpl-cat-count {
+  font-size: 10px;
+  margin-left: 3px;
+  opacity: 0.7;
+}
+
+.tpl-search {
+  height: 36px;
+  padding: 0 var(--spacing-md);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  font-size: var(--font-size-md);
+  max-width: 360px;
+}
+
+.tpl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--spacing-md);
+}
+
+.tpl-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-lg);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  transition: box-shadow var(--motion-duration-normal) var(--motion-easing-standard),
+    transform var(--motion-duration-normal) var(--motion-easing-standard);
+}
+
+.tpl-card:hover {
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-1px);
+}
+
+.tpl-card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.tpl-card__name {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tpl-card__desc {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  min-height: 1.4em;
+}
+
+.tpl-card__meta {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.tpl-card__used {
+  color: var(--color-brand);
+  margin-left: 6px;
+}
+
+.tpl-card__actions {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-top: auto;
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--color-border-default);
+}
+
+.tpl-empty {
+  padding: var(--spacing-2xl) 0;
+  text-align: center;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.tpl-empty-hint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+/* 弹窗 */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-index-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.45);
+  padding: var(--spacing-lg);
+}
+
+.modal {
+  width: min(400px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  background: var(--color-bg-surface);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-pop);
+  padding: var(--spacing-xl);
+}
+
+.tpl-import-modal {
+  width: min(520px, 100%);
+}
+
+.modal-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.tpl-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  max-height: 240px;
+  overflow-y: auto;
+  padding: var(--spacing-sm);
+  background: var(--color-bg-page);
+  border-radius: var(--radius-md);
+}
+
+.tpl-preview-day {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: flex-start;
+}
+
+.tpl-preview-wd {
+  flex: none;
+  width: 40px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-secondary);
+  padding-top: 4px;
+}
+
+.tpl-preview-rows {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tpl-preview-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 4px 8px;
+  background: var(--color-bg-surface);
+  border-radius: var(--radius-sm);
+}
+
+.tpl-preview-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-body);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tpl-preview-meta {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  flex: none;
+}
+
+.tpl-preview-empty {
+  flex: 1;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  padding-top: 4px;
+}
+
+.tpl-mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  border: none;
+  padding: 0;
+}
+
+.tpl-mode-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.tpl-mode-item:has(input:checked) {
+  border-color: var(--color-brand);
+  background: var(--color-brand-subtle);
+}
+
+.tpl-mode-item input {
+  margin-top: 3px;
+  accent-color: var(--color-brand);
+}
+
+.tpl-mode-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tpl-mode-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-body);
+}
+
+.tpl-mode-desc {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.tpl-warn {
+  font-size: var(--font-size-sm);
+  color: var(--color-feedback-error);
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid var(--color-danger-line, #fecaca);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+}
+
+.tpl-result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xl) 0;
+}
+
+.tpl-result-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background: var(--color-brand-subtle);
+  color: var(--color-brand);
+  font-size: 24px;
+  font-weight: var(--font-weight-heavy);
+}
+
+.tpl-result-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.tpl-result-desc {
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+}
+
+.tpl-editor {
+  width: min(520px, 100%);
+}
+
+.tpl-json {
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  color: var(--color-text-body);
+  resize: vertical;
+}
+
+.field__hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  line-height: 1.5;
+}
+</style>

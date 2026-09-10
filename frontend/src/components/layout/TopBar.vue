@@ -4,7 +4,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import AppSelect from '@/components/common/AppSelect.vue'
 import ImportWizard from '@/components/import/ImportWizard.vue'
-import TemplateImportWizard from '@/components/import/TemplateImportWizard.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
 import { formatMonthDay } from '@/utils/week'
 
@@ -28,14 +27,14 @@ const pageTitle = computed(() => (route.meta.title as string) ?? 'ClassBoard')
 
 const isWeek = computed(() => route.name === 'week')
 const isDay = computed(() => route.name === 'day')
+const isTemplates = computed(() => route.name === 'templates')
 
-function switchView(name: 'week' | 'day'): void {
+function switchView(name: 'week' | 'day' | 'templates'): void {
   router.push({ name })
 }
 
 const showImportDropdown = ref(false)
 const showImportWizard = ref(false)
-const showTemplateWizard = ref(false)
 const showCourseEditor = ref(false)
 const showUserMenu = ref(false)
 
@@ -55,10 +54,9 @@ function onDocMouseDown(e: MouseEvent): void {
 onMounted(() => document.addEventListener('mousedown', onDocMouseDown))
 onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
 
-function onImport(mode: 'pdf' | 'template' | 'manual'): void {
+function onImport(mode: 'pdf' | 'manual'): void {
   showImportDropdown.value = false
   if (mode === 'pdf') showImportWizard.value = true
-  else if (mode === 'template') showTemplateWizard.value = true
   else showCourseEditor.value = true
 }
 
@@ -143,6 +141,17 @@ const reminders = computed(() => {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" /></svg>
         <span>今天</span>
       </button>
+      <button
+        class="seg-btn"
+        :class="{ active: isTemplates }"
+        type="button"
+        role="tab"
+        :aria-selected="isTemplates"
+        @click="switchView('templates')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M3 9h18M9 21V9" /></svg>
+        <span>模板市场</span>
+      </button>
     </div>
 
     <div class="top-actions">
@@ -170,7 +179,6 @@ const reminders = computed(() => {
         </button>
         <div class="import-menu" v-if="showImportDropdown" role="menu">
           <button type="button" role="menuitem" @click="onImport('pdf')">从 PDF 导入</button>
-          <button type="button" role="menuitem" @click="onImport('template')">从模板导入</button>
           <button type="button" role="menuitem" @click="onImport('manual')">手动录入</button>
         </div>
       </div>
@@ -255,9 +263,6 @@ const reminders = computed(() => {
 
   <!-- PDF 导入三步向导 -->
   <ImportWizard :open="showImportWizard" @close="showImportWizard = false" @done="showImportWizard = false" />
-
-  <!-- 模板导入四步向导 -->
-  <TemplateImportWizard :open="showTemplateWizard" @close="showTemplateWizard = false" />
 
   <!-- 手动录入课程 -->
   <CourseEditor :open="showCourseEditor" @close="showCourseEditor = false" @done="showCourseEditor = false" />
