@@ -1381,6 +1381,22 @@ function weekLabel(r: ImportRow): string {
   width: min(560px, 100%);
   max-height: 85vh;
   overflow-y: auto;
+  /* 自定义滚动条（设计规范：细条 + 圆角 thumb，与课表网格一致） */
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+.tpl-course-modal::-webkit-scrollbar {
+  width: 8px;
+}
+
+.tpl-course-modal::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-full);
+}
+
+.tpl-course-modal::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .modal-head {
