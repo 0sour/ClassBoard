@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import WeatherCard from './WeatherCard.vue'
-import { MOCK_PRACTICE } from '@/data/mock'
 import type { Course } from '@/types'
 
 const router = useRouter()
@@ -39,6 +38,24 @@ const labCount = computed(() => store.visibleCourses.filter((c) => c.type === 'l
 /** 待交作业：当前学期未完成（真实接口 /api/homework） */
 const pendingHomework = computed(() => store.homework.filter((h) => !h.done))
 
+/** 实践课程条目（无固定时间语义，见 types.Course.unscheduled） */
+interface PracticeItem {
+  name: string
+  teacher: string
+  weeks: string
+}
+
+/** 实践课程：当前学期中无固定时间的课程（unscheduled），无数据时显示空态 */
+const practiceItems = computed<PracticeItem[]>(() =>
+  store.courses
+    .filter((c) => c.semesterId === store.currentSemesterId && c.unscheduled)
+    .map((c) => ({
+      name: c.name,
+      teacher: c.teacher,
+      weeks: c.remark || '无固定时间',
+    })),
+)
+
 /** 点击统计项跳转 */
 function goToPage(name: string): void {
   router.push({ name })
@@ -47,13 +64,6 @@ function goToPage(name: string): void {
 /** 点击作业条目：emit 事件给父组件打开编辑弹窗 */
 function openHomeworkItem(h: { id: number; name: string; courseId?: number | null }): void {
   emit('openHomework', h)
-}
-
-/** 实践课程条目（无固定时间语义，见 types.Course.unscheduled） */
-interface PracticeItem {
-  name: string
-  teacher: string
-  weeks: string
 }
 
 /** 点击实践课程条目：emit 事件给父组件打开课程详情（mock 数据转为 Course 格式） */
@@ -131,10 +141,11 @@ function openPracticeItem(p: PracticeItem): void {
       </template>
 
       <template v-else>
-        <div v-for="p in MOCK_PRACTICE" :key="p.name" class="sp-item clickable" @click="openPracticeItem(p)">
+        <div v-for="p in practiceItems" :key="p.name" class="sp-item clickable" @click="openPracticeItem(p)">
           <div class="sp-item-title">{{ p.name }}</div>
           <div class="sp-item-meta">{{ p.teacher }} · {{ p.weeks }}</div>
         </div>
+        <div v-if="!practiceItems.length" class="sp-empty">暂无实践课程</div>
       </template>
     </div>
   </aside>
