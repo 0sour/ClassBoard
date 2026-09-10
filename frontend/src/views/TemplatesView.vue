@@ -449,6 +449,53 @@ const saveFromCourses = ref<ImportRow[]>([])
 const saveFromSelected = ref<Set<number>>(new Set())
 const saveFromLoading = ref(false)
 
+/** 按课程名分组（同一门课多个时间段合并显示） */
+const saveFromGroups = computed(() => {
+  const map = new Map<string, { name: string; type: ImportRow['type']; indices: number[] }>()
+  saveFromCourses.value.forEach((c, i) => {
+    const key = c.name
+    if (!map.has(key)) map.set(key, { name: c.name, type: c.type, indices: [] })
+    map.get(key)!.indices.push(i)
+  })
+  return [...map.values()]
+})
+
+/** 组内时间段文本（如「周四 第5–8节 第15周」） */
+function sessionTextOf(c: ImportRow): string {
+  return `${WEEKDAY_LABELS[c.weekday - 1]} · 第 ${c.startPeriod}${c.endPeriod > c.startPeriod ? `–${c.endPeriod}` : ''} 节 · ${weekLabelOf(c)}`
+}
+
+/** 组是否全选 */
+function groupAllSelected(g: { indices: number[] }): boolean {
+  return g.indices.every((i) => saveFromSelected.value.has(i))
+}
+
+/** 切换整组勾选 */
+function toggleSaveFromGroup(g: { indices: number[] }): void {
+  const next = new Set(saveFromSelected.value)
+  const all = groupAllSelected(g)
+  if (all) for (const i of g.indices) next.delete(i)
+  else for (const i of g.indices) next.add(i)
+  saveFromSelected.value = next
+}
+
+/** 切换单个时间段 */
+function toggleSaveFromCourse(i: number): void {
+  const next = new Set(saveFromSelected.value)
+  if (next.has(i)) next.delete(i)
+  else next.add(i)
+  saveFromSelected.value = next
+}
+
+function toggleSaveFromAll(): void {
+  const all = saveFromCourses.value.map((_, i) => i)
+  const allSelected = all.every((i) => saveFromSelected.value.has(i))
+  const next = new Set(saveFromSelected.value)
+  if (allSelected) for (const i of all) next.delete(i)
+  else for (const i of all) next.add(i)
+  saveFromSelected.value = next
+}
+
 function openSaveFromSemester(): void {
   saveFromSemesterId.value = store.currentSemesterId
   saveFromName.value = ''
@@ -486,22 +533,6 @@ async function loadSaveFromCourses(): Promise<void> {
 function onSaveFromSemesterChange(): void {
   saveFromSelected.value = new Set()
   void loadSaveFromCourses()
-}
-
-function toggleSaveFromCourse(i: number): void {
-  const next = new Set(saveFromSelected.value)
-  if (next.has(i)) next.delete(i)
-  else next.add(i)
-  saveFromSelected.value = next
-}
-
-function toggleSaveFromAll(): void {
-  const all = saveFromCourses.value.map((_, i) => i)
-  const allSelected = all.every((i) => saveFromSelected.value.has(i))
-  const next = new Set(saveFromSelected.value)
-  if (allSelected) for (const i of all) next.delete(i)
-  else for (const i of all) next.add(i)
-  saveFromSelected.value = next
 }
 
 async function saveFromSemester(): Promise<void> {
@@ -1095,9 +1126,9 @@ function weekLabel(r: ImportRow): string {
           <input v-model="saveFromName" class="date-input" type="text" placeholder="如：24集成2基础课程" maxlength="50" />
         </label>
 
-        <!-- 课程勾选列表 -->
+        <!-- 课程勾选列表（按课程名分组，同一门课多个时间段合并显示） -->
         <div class="tpl-save-head">
-          <span class="field__label">选择课程（已选 {{ saveFromSelected.size }} / {{ saveFromCourses.length }}）</span>
+          <span class="field__label">选择课程（已选 {{ saveFromSelected.size }} / {{ saveFromCourses.length }} 节）</span>
           <label class="tpl-batch-all">
             <input type="checkbox" :checked="saveFromCourses.length > 0 && saveFromCourses.every((_, i) => saveFromSelected.has(i))" @change="toggleSaveFromAll" />
             <span>全选</span>
@@ -1106,18 +1137,22 @@ function weekLabel(r: ImportRow): string {
         <div v-if="saveFromLoading" class="tpl-rows-empty">加载中…</div>
         <div v-else-if="!saveFromCourses.length" class="tpl-rows-empty">该学期没有课程</div>
         <div v-else class="tpl-save-list">
-          <label v-for="(c, i) in saveFromCourses" :key="i" class="tpl-save-item" :class="{ checked: saveFromSelected.has(i) }">
-            <input type="checkbox" :checked="saveFromSelected.has(i)" @change="toggleSaveFromCourse(i)" />
-            <span class="tpl-save-main">
+          <div v-for="g in saveFromGroups" :key="g.name" class="tpl-save-group">
+            <label class="tpl-save-group-head" :class="{ checked: groupAllSelected(g) }">
+              <input type="checkbox" :checked="groupAllSelected(g)" @change="toggleSaveFromGroup(g)" />
               <span class="tpl-save-name">
-                {{ c.name }}
-                <span class="chip" :class="c.type === 'lab' ? 'chip--lab' : ''">{{ c.type === 'lab' ? '实验' : '理论' }}</span>
+                {{ g.name }}
+                <span class="chip" :class="g.type === 'lab' ? 'chip--lab' : ''">{{ g.type === 'lab' ? '实验' : '理论' }}</span>
               </span>
-              <span class="tpl-save-meta num">
-                {{ WEEKDAY_LABELS[c.weekday - 1] }} · 第 {{ c.startPeriod }}{{ c.endPeriod > c.startPeriod ? `–${c.endPeriod}` : '' }} 节 · {{ weekLabelOf(c) }}
-              </span>
-            </span>
-          </label>
+              <span class="tpl-save-group-count num">{{ g.indices.length }} 节</span>
+            </label>
+            <div class="tpl-save-sessions">
+              <label v-for="i in g.indices" :key="i" class="tpl-save-session" :class="{ checked: saveFromSelected.has(i) }">
+                <input type="checkbox" :checked="saveFromSelected.has(i)" @change="toggleSaveFromCourse(i)" />
+                <span class="tpl-save-meta num">{{ sessionTextOf(saveFromCourses[i]) }}</span>
+              </label>
+            </div>
+          </div>
         </div>
 
         <div class="edit-actions">
@@ -1327,9 +1362,74 @@ function weekLabel(r: ImportRow): string {
 .tpl-save-list {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-xs);
-  max-height: 280px;
+  gap: var(--spacing-sm);
+  max-height: 320px;
   overflow-y: auto;
+}
+
+/* 按课程分组：组头 + 组内时间段 */
+.tpl-save-group {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.tpl-save-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-subtle);
+  cursor: pointer;
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.tpl-save-group-head:hover {
+  background: var(--color-bg-hover);
+}
+
+.tpl-save-group-head.checked {
+  background: var(--color-brand-subtle);
+}
+
+.tpl-save-group-head input {
+  accent-color: var(--color-brand);
+}
+
+.tpl-save-group-count {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  flex: none;
+}
+
+.tpl-save-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--spacing-xs);
+}
+
+.tpl-save-session {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.tpl-save-session:hover {
+  background: var(--color-bg-hover);
+}
+
+.tpl-save-session.checked {
+  background: var(--color-brand-subtle);
+}
+
+.tpl-save-session input {
+  accent-color: var(--color-brand);
 }
 
 .tpl-save-item {
@@ -1859,7 +1959,7 @@ function weekLabel(r: ImportRow): string {
 
 .tpl-course-card__grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: var(--spacing-md);
 }
 
