@@ -282,6 +282,23 @@ templatesRouter.post(
     })
     if (errors.length) throw badRequest('模板存在无效行', errors)
 
+    // 颜色分配：同名复用已有颜色，不同名按 8 色轮询（与手动录入一致）
+    const colorRows = db
+      .prepare('SELECT name, color FROM course WHERE semester_id = ? AND user_id = ?')
+      .all(semesterId, req.user.id)
+    const colorByName = new Map(colorRows.map((c) => [c.name, c.color]))
+    const COLOR_NAMES = ['course-1', 'course-2', 'course-3', 'course-4', 'course-5', 'course-6', 'course-7', 'course-8']
+    let autoCount = colorRows.length
+    for (const c of validated) {
+      if (colorByName.has(c.name)) {
+        c.color = colorByName.get(c.name)
+      } else {
+        c.color = COLOR_NAMES[autoCount % COLOR_NAMES.length]
+        autoCount++
+        colorByName.set(c.name, c.color)
+      }
+    }
+
     const existing = db
       .prepare('SELECT name, weekday, start_period AS startPeriod, end_period AS endPeriod FROM course WHERE semester_id = ? AND user_id = ?')
       .all(semesterId, req.user.id)
@@ -392,6 +409,23 @@ templatesRouter.post(
     })
     if (errors.length) {
       throw badRequest('模板存在无效行', errors)
+    }
+
+    // 颜色分配：同名复用已有颜色，不同名按 8 色轮询（与手动录入一致）
+    const colorRows = db
+      .prepare('SELECT name, color FROM course WHERE semester_id = ? AND user_id = ?')
+      .all(semesterId, req.user.id)
+    const colorByName = new Map(colorRows.map((c) => [c.name, c.color]))
+    const COLOR_NAMES = ['course-1', 'course-2', 'course-3', 'course-4', 'course-5', 'course-6', 'course-7', 'course-8']
+    let autoCount = colorRows.length
+    for (const c of validated) {
+      if (colorByName.has(c.name)) {
+        c.color = colorByName.get(c.name)
+      } else {
+        c.color = COLOR_NAMES[autoCount % COLOR_NAMES.length]
+        autoCount++
+        colorByName.set(c.name, c.color)
+      }
     }
 
     // 去重：同名 + 同星期 + 同节次视为重复
