@@ -334,6 +334,15 @@ function coursesAt(weekday: number, period: number): ImportRow[] {
   return day.rows.filter((r) => r.startPeriod === period)
 }
 
+/** 起始节次格的跨行范围：仅单门课时按课程跨行合并；多门课堆叠时不跨行（各自显示） */
+function spanOf(weekday: number, period: number): { start: number; end: number } | null {
+  const courses = coursesAt(weekday, period)
+  if (courses.length !== 1) return null
+  const c = courses[0]
+  if (c.endPeriod <= c.startPeriod) return null
+  return { start: c.startPeriod, end: c.endPeriod }
+}
+
 /** 该位置是否被跨节次课程覆盖（非起始节次 → 跳过渲染） */
 function coveredBySpan(weekday: number, period: number): boolean {
   const day = previewByWeekday.value.find((d) => d.weekday === weekday)
@@ -446,6 +455,7 @@ function weekLabel(r: ImportRow): string {
                   v-if="!coveredBySpan(wd, p)"
                   class="tpl-grid-preview__cell"
                   :class="{ 'has-course': coursesAt(wd, p).length > 0 }"
+                  :style="spanOf(wd, p) ? { gridRow: `${spanOf(wd, p)!.start + 1} / ${spanOf(wd, p)!.end + 2}` } : undefined"
                 >
                   <div
                     v-for="r in coursesAt(wd, p)"
