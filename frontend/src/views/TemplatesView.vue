@@ -111,9 +111,9 @@ const formError = ref('')
 const formBusy = ref(false)
 const rows = ref<ImportRow[]>([])
 const unitIds = ref<number[]>([])
-const showRowEditor = ref(false)
-const rowEditingIndex = ref<number | null>(null)
-const rowForm = reactive({
+// 课程模板直接编辑表单（借鉴手动导入课程 CourseEditor 的字段布局）
+const showCourseForm = ref(false)
+const courseForm = reactive({
   name: '',
   type: 'course' as 'course' | 'lab',
   teacher: '',
@@ -125,7 +125,8 @@ const rowForm = reactive({
   weekList: [] as number[],
   remark: '',
 })
-const rowError = ref('')
+const courseFormError = ref('')
+const courseFormBusy = ref(false)
 
 onMounted(() => void load())
 
@@ -183,7 +184,6 @@ const CATEGORIES = ['理论课', '实验课', '混合', '学期', '节次']
 const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 const MAX_WEEKS = 30
 
-const weekdayOptions = WEEKDAY_LABELS.map((label, i) => ({ value: i + 1, label }))
 const periodOptions = computed(() =>
   store.periods.map((p) => ({ value: p.index, label: `第 ${p.index} 节 ${p.startTime}–${p.endTime}` })),
 )
@@ -203,7 +203,17 @@ function openCreate(kind: 'course' | 'unit'): void {
   rows.value = []
   unitIds.value = []
   formError.value = ''
-  showEditor.value = true
+  if (kind === 'course') {
+    // 课程模板：直接打开完整课程表单（借鉴手动导入课程）
+    Object.assign(courseForm, {
+      name: '', type: 'course' as const, teacher: '', location: '',
+      weekday: 1, startPeriod: 1, endPeriod: 2, weekType: 'all' as const, weekList: [], remark: '',
+    })
+    courseFormError.value = ''
+    showCourseForm.value = true
+  } else {
+    showEditor.value = true
+  }
 }
 
 function openEdit(t: TemplateInfo): void {
@@ -211,14 +221,72 @@ function openEdit(t: TemplateInfo): void {
   editingKind.value = t.kind
   Object.assign(form, { name: t.name, category: t.category, description: t.description })
   if (t.kind === 'course') {
-    rows.value = (t.content as ImportRow[]).map((r) => ({ ...r, weekList: r.weekList ? [...r.weekList] : null }))
-    unitIds.value = []
+    // 课程模板：直接打开完整课程表单（预填课程数据）
+    const r = (t.content as ImportRow[])[0]
+    Object.assign(courseForm, {
+      name: r.name, type: r.type, teacher: r.teacher, location: r.location,
+      weekday: r.weekday, startPeriod: r.startPeriod, endPeriod: r.endPeriod,
+      weekType: r.weekType, weekList: r.weekList ? [...r.weekList] : [], remark: r.remark,
+    })
+    courseFormError.value = ''
+    showCourseForm.value = true
   } else {
     rows.value = []
     unitIds.value = [...(t.content as number[])]
+    showEditor.value = true
   }
-  formError.value = ''
-  showEditor.value = true
+}
+
+/** 保存课程模板（完整表单直接保存） */
+async function saveCourseForm(): Promise<void> {
+  courseFormError.value = ''
+  if (!courseForm.name.trim()) {
+    courseFormError.value = '请填写课程名称'
+    return
+  }
+  if (courseForm.startPeriod > courseForm.endPeriod) {
+    courseFormError.value = '结束节次不能早于起始节次'
+    return
+  }
+  if (courseForm.weekType === 'custom' && courseForm.weekList.length === 0) {
+    courseFormError.value = '请选择至少一个周次'
+    return
+  }
+  courseFormBusy.value = true
+  try {
+    const row: ImportRow = {
+      name: courseForm.name.trim(),
+      type: courseForm.type,
+      teacher: courseForm.teacher.trim(),
+      location: courseForm.location.trim(),
+      weekType: courseForm.weekType,
+      weekList: courseForm.weekType === 'custom' ? [...courseForm.weekList].sort((a, b) => a - b) : null,
+      weekday: courseForm.weekday as 1 | 2 | 3 | 4 | 5 | 6 | 7,
+      startPeriod: courseForm.startPeriod,
+      endPeriod: courseForm.endPeriod,
+      remark: courseForm.remark.trim(),
+    }
+    const body = {
+      kind: 'course' as const,
+      name: form.name.trim() || row.name,
+      category: form.category,
+      description: form.description,
+      content: [row],
+    }
+    if (editingId.value === null) {
+      await api.createTemplate(body)
+      toast('课程模板已创建', 'success')
+    } else {
+      await api.updateTemplate(editingId.value, body)
+      toast('课程模板已更新（版本 +1）', 'success')
+    }
+    showCourseForm.value = false
+    await load()
+  } catch (e) {
+    courseFormError.value = e instanceof Error ? e.message : '保存失败，请重试'
+  } finally {
+    courseFormBusy.value = false
+  }
 }
 
 /** 组合模板：可引用的课程模板列表 */
@@ -231,65 +299,11 @@ function toggleUnitRef(id: number): void {
   else unitIds.value.push(id)
 }
 
-/** 打开课程行编辑表单（新增或编辑） */
-function openRowEditor(index: number | null): void {
-  rowEditingIndex.value = index
-  rowError.value = ''
-  if (index === null) {
-    Object.assign(rowForm, {
-      name: '', type: 'course' as const, teacher: '', location: '',
-      weekday: 1, startPeriod: 1, endPeriod: 2, weekType: 'all' as const, weekList: [], remark: '',
-    })
-  } else {
-    const r = rows.value[index]
-    Object.assign(rowForm, {
-      name: r.name, type: r.type, teacher: r.teacher, location: r.location,
-      weekday: r.weekday, startPeriod: r.startPeriod, endPeriod: r.endPeriod,
-      weekType: r.weekType, weekList: r.weekList ? [...r.weekList] : [], remark: r.remark,
-    })
-  }
-  showRowEditor.value = true
-}
-
-function toggleRowWeek(w: number): void {
-  const i = rowForm.weekList.indexOf(w)
-  if (i >= 0) rowForm.weekList.splice(i, 1)
-  else rowForm.weekList.push(w)
-}
-
-function saveRow(): void {
-  rowError.value = ''
-  if (!rowForm.name.trim()) {
-    rowError.value = '请填写课程名称'
-    return
-  }
-  if (rowForm.startPeriod > rowForm.endPeriod) {
-    rowError.value = '结束节次不能早于起始节次'
-    return
-  }
-  if (rowForm.weekType === 'custom' && rowForm.weekList.length === 0) {
-    rowError.value = '请选择至少一个周次'
-    return
-  }
-  const row: ImportRow = {
-    name: rowForm.name.trim(),
-    type: rowForm.type,
-    teacher: rowForm.teacher.trim(),
-    location: rowForm.location.trim(),
-    weekType: rowForm.weekType,
-    weekList: rowForm.weekType === 'custom' ? [...rowForm.weekList].sort((a, b) => a - b) : null,
-    weekday: rowForm.weekday as 1 | 2 | 3 | 4 | 5 | 6 | 7,
-    startPeriod: rowForm.startPeriod,
-    endPeriod: rowForm.endPeriod,
-    remark: rowForm.remark.trim(),
-  }
-  if (rowEditingIndex.value === null) rows.value.push(row)
-  else rows.value[rowEditingIndex.value] = row
-  showRowEditor.value = false
-}
-
-function removeRow(i: number): void {
-  rows.value.splice(i, 1)
+/** 课程模板表单：自定义周次切换 */
+function toggleCourseWeek(w: number): void {
+  const i = courseForm.weekList.indexOf(w)
+  if (i >= 0) courseForm.weekList.splice(i, 1)
+  else courseForm.weekList.push(w)
 }
 
 async function save(): Promise<void> {
@@ -713,10 +727,10 @@ function weekLabel(r: ImportRow): string {
       </div>
     </div>
 
-    <!-- 创建/编辑弹窗（admin；course=课程行编辑器 / unit=勾选课程模板） -->
+    <!-- 组合模板编辑弹窗（admin；勾选课程模板组成） -->
     <div v-if="showEditor" class="modal-mask" @mousedown.self="showEditor = false">
-      <div class="modal tpl-editor" role="dialog" aria-modal="true" :aria-label="editingId === null ? '新建模板' : '编辑模板'">
-        <h3 class="modal-title">{{ editingId === null ? (editingKind === 'course' ? '新建课程模板' : '新建组合模板') : '编辑模板' }}</h3>
+      <div class="modal tpl-editor" role="dialog" aria-modal="true" :aria-label="editingId === null ? '新建组合模板' : '编辑组合模板'">
+        <h3 class="modal-title">{{ editingId === null ? '新建组合模板' : '编辑组合模板' }}</h3>
         <div class="tpl-editor-fields">
           <label class="field">
             <span class="field__label">模板名称</span>
@@ -739,48 +753,21 @@ function weekLabel(r: ImportRow): string {
           </label>
         </div>
 
-        <!-- course：课程行列表 -->
-        <template v-if="editingKind === 'course'">
-          <div class="tpl-rows-head">
-            <span class="field__label">课程列表（{{ rows.length }} 门）</span>
-            <button class="btn-mini btn-mini--primary" type="button" @click="openRowEditor(null)">＋ 添加课程</button>
-          </div>
-          <div v-if="rows.length" class="tpl-rows">
-            <div v-for="(r, i) in rows" :key="i" class="tpl-row">
-              <div class="tpl-row-main">
-                <span class="tpl-row-name">
-                  {{ r.name }}
-                  <span class="chip" :class="r.type === 'lab' ? 'chip--lab' : ''">{{ r.type === 'lab' ? '实验' : '理论' }}</span>
-                </span>
-                <span class="tpl-row-meta num">
-                  {{ WEEKDAY_LABELS[r.weekday - 1] }} · 第 {{ r.startPeriod }}{{ r.endPeriod > r.startPeriod ? `–${r.endPeriod}` : '' }} 节 · {{ weekLabelOf(r) }}
-                  <template v-if="r.teacher || r.location"> · {{ r.teacher }}{{ r.location ? ` / ${r.location}` : '' }}</template>
-                </span>
-              </div>
-              <button class="btn-mini" type="button" @click="openRowEditor(i)">编辑</button>
-              <button class="btn-mini btn-mini--danger" type="button" @click="removeRow(i)">删除</button>
-            </div>
-          </div>
-          <div v-else class="tpl-rows-empty">还没有课程，点击"添加课程"开始</div>
-        </template>
-
-        <!-- unit：勾选课程模板组成 -->
-        <template v-else>
-          <div class="tpl-rows-head">
-            <span class="field__label">包含课程模板（{{ unitIds.length }} 门）</span>
-            <span class="tpl-unit-hint">从下方课程模板勾选，管理员修改课程模板后组合自动生效</span>
-          </div>
-          <div v-if="courseTemplates.length" class="tpl-unit-list">
-            <label v-for="ct in courseTemplates" :key="ct.id" class="tpl-unit-item" :class="{ checked: unitIds.includes(ct.id) }">
-              <input type="checkbox" :checked="unitIds.includes(ct.id)" @change="toggleUnitRef(ct.id)" />
-              <span class="tpl-unit-main">
-                <span class="tpl-unit-name">{{ ct.name }}</span>
-                <span class="tpl-unit-meta num">{{ (ct.content as ImportRow[])[0]?.name }} · {{ WEEKDAY_LABELS[((ct.content as ImportRow[])[0]?.weekday ?? 1) - 1] }} 第 {{ (ct.content as ImportRow[])[0]?.startPeriod }} 节</span>
-              </span>
-            </label>
-          </div>
-          <div v-else class="tpl-rows-empty">还没有课程模板，请先在"课程模板"页创建</div>
-        </template>
+        <!-- 勾选课程模板组成 -->
+        <div class="tpl-rows-head">
+          <span class="field__label">包含课程模板（{{ unitIds.length }} 门）</span>
+          <span class="tpl-unit-hint">从下方课程模板勾选，管理员修改课程模板后组合自动生效</span>
+        </div>
+        <div v-if="courseTemplates.length" class="tpl-unit-list">
+          <label v-for="ct in courseTemplates" :key="ct.id" class="tpl-unit-item" :class="{ checked: unitIds.includes(ct.id) }">
+            <input type="checkbox" :checked="unitIds.includes(ct.id)" @change="toggleUnitRef(ct.id)" />
+            <span class="tpl-unit-main">
+              <span class="tpl-unit-name">{{ ct.name }}</span>
+              <span class="tpl-unit-meta num">{{ (ct.content as ImportRow[])[0]?.name }} · {{ WEEKDAY_LABELS[((ct.content as ImportRow[])[0]?.weekday ?? 1) - 1] }} 第 {{ (ct.content as ImportRow[])[0]?.startPeriod }} 节</span>
+            </span>
+          </label>
+        </div>
+        <div v-else class="tpl-rows-empty">还没有课程模板，请先在"课程模板"页创建</div>
 
         <p v-if="formError" class="edit-error" role="alert">{{ formError }}</p>
         <div class="edit-actions">
@@ -792,114 +779,118 @@ function weekLabel(r: ImportRow): string {
       </div>
     </div>
 
-    <!-- 课程行编辑弹窗（图形化表单） -->
-    <div v-if="showRowEditor" class="modal-mask" @mousedown.self="showRowEditor = false">
-      <div class="modal tpl-row-modal" role="dialog" aria-modal="true" :aria-label="rowEditingIndex === null ? '添加课程' : '编辑课程'">
-        <h3 class="modal-title">{{ rowEditingIndex === null ? '添加课程' : '编辑课程' }}</h3>
-        <label class="field">
-          <span class="field__label">课程名称</span>
-          <input v-model="rowForm.name" class="date-input" type="text" placeholder="如：数字信号处理" maxlength="50" />
-        </label>
-        <fieldset class="field">
-          <legend class="field__label">课程类型</legend>
-          <div class="seg">
-            <label class="seg-item" :class="{ checked: rowForm.type === 'course' }">
-              <input v-model="rowForm.type" type="radio" value="course" name="row-type" />
-              <span class="seg-item__dot"></span>
-              <span>理论课</span>
-            </label>
-            <label class="seg-item" :class="{ checked: rowForm.type === 'lab' }">
-              <input v-model="rowForm.type" type="radio" value="lab" name="row-type" />
-              <span class="seg-item__dot"></span>
-              <span>实验课</span>
-            </label>
-          </div>
-        </fieldset>
-        <div class="tpl-row-grid">
-          <label class="field">
+    <!-- 课程模板完整表单弹窗（借鉴手动导入课程 CourseEditor 布局） -->
+    <div v-if="showCourseForm" class="modal-mask" @mousedown.self="showCourseForm = false">
+      <div class="modal tpl-course-modal" role="dialog" aria-modal="true" :aria-label="editingId === null ? '新建课程模板' : '编辑课程模板'">
+        <div class="modal-head">
+          <h3 class="m-title">{{ editingId === null ? '新建课程模板' : '编辑课程模板' }}</h3>
+          <button class="modal-close" type="button" aria-label="关闭" @click="showCourseForm = false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div class="form-grid">
+          <label class="field field--full">
+            <span class="field__label">课程名称</span>
+            <input v-model="courseForm.name" class="text-input" type="text" placeholder="如：数字信号处理" maxlength="50" />
+          </label>
+
+          <fieldset class="field field--full">
+            <legend class="field__label">课程类型</legend>
+            <div class="seg">
+              <label class="seg-item" :class="{ checked: courseForm.type === 'course' }">
+                <input v-model="courseForm.type" type="radio" value="course" name="tpl-course-type" />
+                <span class="seg-item__dot"></span>
+                <span>理论课</span>
+              </label>
+              <label class="seg-item" :class="{ checked: courseForm.type === 'lab' }">
+                <input v-model="courseForm.type" type="radio" value="lab" name="tpl-course-type" />
+                <span class="seg-item__dot"></span>
+                <span>实验课</span>
+              </label>
+            </div>
+          </fieldset>
+
+          <label class="field field--full">
             <span class="field__label">教师</span>
-            <input v-model="rowForm.teacher" class="date-input" type="text" placeholder="选填" maxlength="30" />
+            <input v-model="courseForm.teacher" class="text-input" type="text" placeholder="选填" maxlength="30" />
           </label>
+
           <label class="field">
-            <span class="field__label">地点</span>
-            <input v-model="rowForm.location" class="date-input" type="text" placeholder="选填" maxlength="50" />
+            <span class="field__label">上课地点</span>
+            <input v-model="courseForm.location" class="text-input" type="text" placeholder="如：C3敏学楼501" maxlength="50" />
           </label>
-          <label class="field">
-            <span class="field__label">星期</span>
-            <div class="select-wrap">
-              <AppSelect
-                :model-value="rowForm.weekday"
-                :options="weekdayOptions"
-                aria-label="星期"
-                @update:model-value="(v: string | number | null) => rowForm.weekday = v === null ? 1 : Number(v)"
-              />
+
+          <fieldset class="field field--full">
+            <legend class="field__label">星期</legend>
+            <div class="weekdays" role="radiogroup" aria-label="选择星期">
+              <button
+                v-for="(label, i) in WEEKDAY_LABELS"
+                :key="label"
+                class="weekday-chip"
+                type="button"
+                :class="{ checked: courseForm.weekday === i + 1 }"
+                @click="courseForm.weekday = i + 1"
+              >{{ label }}</button>
             </div>
-          </label>
-          <label class="field">
-            <span class="field__label">节次</span>
-            <div class="tpl-period-pair">
-              <div class="select-wrap">
-                <AppSelect
-                  :model-value="rowForm.startPeriod"
-                  :options="periodOptions"
-                  aria-label="起始节次"
-                  @update:model-value="(v: string | number | null) => rowForm.startPeriod = v === null ? 1 : Number(v)"
-                />
-              </div>
-              <span class="tpl-period-dash">–</span>
-              <div class="select-wrap">
-                <AppSelect
-                  :model-value="rowForm.endPeriod"
-                  :options="periodOptions"
-                  aria-label="结束节次"
-                  @update:model-value="(v: string | number | null) => rowForm.endPeriod = v === null ? 1 : Number(v)"
-                />
-              </div>
-            </div>
-          </label>
-        </div>
-        <fieldset class="field">
-          <legend class="field__label">周次规则</legend>
-          <div class="seg">
-            <label class="seg-item" :class="{ checked: rowForm.weekType === 'all' }">
-              <input v-model="rowForm.weekType" type="radio" value="all" name="row-week" />
-              <span class="seg-item__dot"></span>
-              <span>每周</span>
-            </label>
-            <label class="seg-item" :class="{ checked: rowForm.weekType === 'odd' }">
-              <input v-model="rowForm.weekType" type="radio" value="odd" name="row-week" />
-              <span class="seg-item__dot"></span>
-              <span>单周</span>
-            </label>
-            <label class="seg-item" :class="{ checked: rowForm.weekType === 'even' }">
-              <input v-model="rowForm.weekType" type="radio" value="even" name="row-week" />
-              <span class="seg-item__dot"></span>
-              <span>双周</span>
-            </label>
-            <label class="seg-item" :class="{ checked: rowForm.weekType === 'custom' }">
-              <input v-model="rowForm.weekType" type="radio" value="custom" name="row-week" />
-              <span class="seg-item__dot"></span>
-              <span>自定义</span>
-            </label>
+          </fieldset>
+
+          <div class="field">
+            <span class="field__label">起始节次</span>
+            <AppSelect v-model="courseForm.startPeriod" :options="periodOptions" size="md" aria-label="起始节次" />
           </div>
-        </fieldset>
-        <div v-if="rowForm.weekType === 'custom'" class="field">
-          <span class="field__label">选择周次（可多选）</span>
-          <div class="week-chips">
-            <button
-              v-for="w in weekChips"
-              :key="w"
-              class="week-chip"
-              :class="{ active: rowForm.weekList.includes(w) }"
-              type="button"
-              @click="toggleRowWeek(w)"
-            >{{ w }}</button>
+          <div class="field">
+            <span class="field__label">结束节次</span>
+            <AppSelect v-model="courseForm.endPeriod" :options="periodOptions" size="md" aria-label="结束节次" />
+          </div>
+
+          <fieldset class="field field--full">
+            <legend class="field__label">周次规则</legend>
+            <div class="seg">
+              <label class="seg-item" :class="{ checked: courseForm.weekType === 'all' }">
+                <input v-model="courseForm.weekType" type="radio" value="all" name="tpl-week-type" />
+                <span class="seg-item__dot"></span>
+                <span>每周</span>
+              </label>
+              <label class="seg-item" :class="{ checked: courseForm.weekType === 'odd' }">
+                <input v-model="courseForm.weekType" type="radio" value="odd" name="tpl-week-type" />
+                <span class="seg-item__dot"></span>
+                <span>单周</span>
+              </label>
+              <label class="seg-item" :class="{ checked: courseForm.weekType === 'even' }">
+                <input v-model="courseForm.weekType" type="radio" value="even" name="tpl-week-type" />
+                <span class="seg-item__dot"></span>
+                <span>双周</span>
+              </label>
+              <label class="seg-item" :class="{ checked: courseForm.weekType === 'custom' }">
+                <input v-model="courseForm.weekType" type="radio" value="custom" name="tpl-week-type" />
+                <span class="seg-item__dot"></span>
+                <span>自定义</span>
+              </label>
+            </div>
+          </fieldset>
+
+          <div v-if="courseForm.weekType === 'custom'" class="field field--full">
+            <span class="field__label">选择周次（1–{{ MAX_WEEKS }} 周）</span>
+            <div class="week-custom">
+              <button
+                v-for="w in weekChips"
+                :key="w"
+                class="week-chip"
+                type="button"
+                :class="{ checked: courseForm.weekList.includes(w) }"
+                @click="toggleCourseWeek(w)"
+              >{{ w }}</button>
+            </div>
           </div>
         </div>
-        <p v-if="rowError" class="edit-error" role="alert">{{ rowError }}</p>
+
+        <p v-if="courseFormError" class="edit-error" role="alert">{{ courseFormError }}</p>
         <div class="edit-actions">
-          <button class="btn-mini" type="button" @click="showRowEditor = false">取消</button>
-          <button class="btn-mini btn-mini--primary" type="button" @click="saveRow">确定</button>
+          <button class="btn-mini" type="button" :disabled="courseFormBusy" @click="showCourseForm = false">取消</button>
+          <button class="btn-mini btn-mini--primary" type="button" :disabled="courseFormBusy" @click="saveCourseForm">
+            {{ courseFormBusy ? '保存中…' : '保存为课程模板' }}
+          </button>
         </div>
       </div>
     </div>
@@ -1205,6 +1196,137 @@ function weekLabel(r: ImportRow): string {
 .tpl-save-meta {
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
+}
+
+/* 课程模板完整表单（借鉴手动导入课程 CourseEditor） */
+.tpl-course-modal {
+  width: min(560px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+}
+
+.m-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard),
+    color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.modal-close:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-body);
+}
+
+.modal-close svg {
+  width: 16px;
+  height: 16px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-lg) var(--spacing-md);
+  margin-top: var(--spacing-md);
+}
+
+.field--full {
+  grid-column: 1 / -1;
+}
+
+.seg {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-md);
+  padding: 3px;
+}
+
+.seg-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.seg-item.checked {
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  box-shadow: var(--shadow-card);
+}
+
+.seg-item input {
+  display: none;
+}
+
+.seg-item__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--color-border-strong);
+}
+
+.seg-item.checked .seg-item__dot {
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
+
+.weekdays {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.weekday-chip {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard),
+    background var(--motion-duration-fast) var(--motion-easing-standard),
+    color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.weekday-chip.checked {
+  border-color: var(--color-brand);
+  background: var(--color-brand-subtle);
+  color: var(--color-brand);
+  font-weight: var(--font-weight-bold);
+}
+
+.week-custom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .tpl-cats {
