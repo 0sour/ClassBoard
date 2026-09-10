@@ -126,10 +126,6 @@ const rowForm = reactive({
   remark: '',
 })
 const rowError = ref('')
-const showSaveFromSemester = ref(false)
-const saveFromSemesterId = ref<number | null>(null)
-const saveFromName = ref('')
-const saveFromBusy = ref(false)
 
 onMounted(() => void load())
 
@@ -352,26 +348,31 @@ async function remove(t: TemplateInfo): Promise<void> {
   }
 }
 
+// 从学期勾选课程另存为模板
+const showSaveFromSemester = ref(false)
+const saveFromSemesterId = ref<number | null>(null)
+const saveFromName = ref('')
+const saveFromBusy = ref(false)
+const saveFromCourses = ref<ImportRow[]>([])
+const saveFromSelected = ref<Set<number>>(new Set())
+const saveFromLoading = ref(false)
+
 function openSaveFromSemester(): void {
   saveFromSemesterId.value = store.currentSemesterId
   saveFromName.value = ''
+  saveFromCourses.value = []
+  saveFromSelected.value = new Set()
   showSaveFromSemester.value = true
+  void loadSaveFromCourses()
 }
 
-async function saveFromSemester(): Promise<void> {
+/** 加载所选学期的课程列表 */
+async function loadSaveFromCourses(): Promise<void> {
   if (saveFromSemesterId.value === null) return
-  if (!saveFromName.value.trim()) {
-    toast('请填写模板名称', 'error')
-    return
-  }
-  saveFromBusy.value = true
+  saveFromLoading.value = true
   try {
     const list = await api.listCourses(saveFromSemesterId.value)
-    if (!list.length) {
-      toast('该学期没有课程', 'error')
-      return
-    }
-    const content: ImportRow[] = list.map((c) => ({
+    saveFromCourses.value = list.map((c) => ({
       name: c.name,
       type: c.type,
       teacher: c.teacher,
@@ -383,6 +384,47 @@ async function saveFromSemester(): Promise<void> {
       endPeriod: c.endPeriod,
       remark: c.remark,
     }))
+  } catch {
+    saveFromCourses.value = []
+  } finally {
+    saveFromLoading.value = false
+  }
+}
+
+function onSaveFromSemesterChange(): void {
+  saveFromSelected.value = new Set()
+  void loadSaveFromCourses()
+}
+
+function toggleSaveFromCourse(i: number): void {
+  const next = new Set(saveFromSelected.value)
+  if (next.has(i)) next.delete(i)
+  else next.add(i)
+  saveFromSelected.value = next
+}
+
+function toggleSaveFromAll(): void {
+  const all = saveFromCourses.value.map((_, i) => i)
+  const allSelected = all.every((i) => saveFromSelected.value.has(i))
+  const next = new Set(saveFromSelected.value)
+  if (allSelected) for (const i of all) next.delete(i)
+  else for (const i of all) next.add(i)
+  saveFromSelected.value = next
+}
+
+async function saveFromSemester(): Promise<void> {
+  if (saveFromSemesterId.value === null) return
+  if (!saveFromName.value.trim()) {
+    toast('请填写模板名称', 'error')
+    return
+  }
+  if (saveFromSelected.value.size === 0) {
+    toast('请至少勾选一门课程', 'error')
+    return
+  }
+  saveFromBusy.value = true
+  try {
+    const content = saveFromCourses.value.filter((_, i) => saveFromSelected.value.has(i))
     await api.createTemplate({
       kind: 'unit',
       name: saveFromName.value.trim(),
@@ -862,9 +904,9 @@ function weekLabel(r: ImportRow): string {
       </div>
     </div>
 
-    <!-- 从学期另存弹窗（admin） -->
+    <!-- 从学期勾选课程另存为模板（admin） -->
     <div v-if="showSaveFromSemester" class="modal-mask" @mousedown.self="showSaveFromSemester = false">
-      <div class="modal" role="dialog" aria-modal="true" aria-label="从学期另存为模板">
+      <div class="modal tpl-save-modal" role="dialog" aria-modal="true" aria-label="从学期另存为模板">
         <h3 class="modal-title">从学期另存为模板</h3>
         <label class="field">
           <span class="field__label">来源学期</span>
@@ -873,7 +915,7 @@ function weekLabel(r: ImportRow): string {
               :model-value="saveFromSemesterId"
               :options="semesterOptions"
               aria-label="来源学期"
-              @update:model-value="(v: string | number | null) => saveFromSemesterId = v === null ? null : Number(v)"
+              @update:model-value="(v: string | number | null) => { saveFromSemesterId = v === null ? null : Number(v); onSaveFromSemesterChange() }"
             />
           </div>
         </label>
@@ -881,10 +923,36 @@ function weekLabel(r: ImportRow): string {
           <span class="field__label">模板名称</span>
           <input v-model="saveFromName" class="date-input" type="text" placeholder="如：24集成2基础课程" maxlength="50" />
         </label>
+
+        <!-- 课程勾选列表 -->
+        <div class="tpl-save-head">
+          <span class="field__label">选择课程（已选 {{ saveFromSelected.size }} / {{ saveFromCourses.length }}）</span>
+          <label class="tpl-batch-all">
+            <input type="checkbox" :checked="saveFromCourses.length > 0 && saveFromCourses.every((_, i) => saveFromSelected.has(i))" @change="toggleSaveFromAll" />
+            <span>全选</span>
+          </label>
+        </div>
+        <div v-if="saveFromLoading" class="tpl-rows-empty">加载中…</div>
+        <div v-else-if="!saveFromCourses.length" class="tpl-rows-empty">该学期没有课程</div>
+        <div v-else class="tpl-save-list">
+          <label v-for="(c, i) in saveFromCourses" :key="i" class="tpl-save-item" :class="{ checked: saveFromSelected.has(i) }">
+            <input type="checkbox" :checked="saveFromSelected.has(i)" @change="toggleSaveFromCourse(i)" />
+            <span class="tpl-save-main">
+              <span class="tpl-save-name">
+                {{ c.name }}
+                <span class="chip" :class="c.type === 'lab' ? 'chip--lab' : ''">{{ c.type === 'lab' ? '实验' : '理论' }}</span>
+              </span>
+              <span class="tpl-save-meta num">
+                {{ WEEKDAY_LABELS[c.weekday - 1] }} · 第 {{ c.startPeriod }}{{ c.endPeriod > c.startPeriod ? `–${c.endPeriod}` : '' }} 节 · {{ weekLabelOf(c) }}
+              </span>
+            </span>
+          </label>
+        </div>
+
         <div class="edit-actions">
           <button class="btn-mini" type="button" :disabled="saveFromBusy" @click="showSaveFromSemester = false">取消</button>
-          <button class="btn-mini btn-mini--primary" type="button" :disabled="saveFromBusy" @click="saveFromSemester">
-            {{ saveFromBusy ? '保存中…' : '另存为模板' }}
+          <button class="btn-mini btn-mini--primary" type="button" :disabled="saveFromBusy || saveFromSelected.size === 0" @click="saveFromSemester">
+            {{ saveFromBusy ? '保存中…' : `另存为模板（${saveFromSelected.size} 门）` }}
           </button>
         </div>
       </div>
@@ -1069,6 +1137,72 @@ function weekLabel(r: ImportRow): string {
 }
 
 .tpl-unit-meta {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* 从学期勾选课程另存 */
+.tpl-save-modal {
+  width: min(520px, 100%);
+}
+
+.tpl-save-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}
+
+.tpl-save-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.tpl-save-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard),
+    background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.tpl-save-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.tpl-save-item.checked {
+  border-color: var(--color-brand);
+  background: var(--color-brand-subtle);
+}
+
+.tpl-save-item input {
+  accent-color: var(--color-brand);
+}
+
+.tpl-save-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tpl-save-name {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-body);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tpl-save-meta {
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
 }

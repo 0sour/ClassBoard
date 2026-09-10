@@ -42,7 +42,7 @@ function validateCourseTemplate(content) {
   }
 }
 
-/** 校验组合模板内容（课程模板 id 数组），返回规范化 id 列表 */
+/** 校验组合模板内容：课程模板 id 数组（引用）或课程行数组（快照） */
 function validateUnitContent(content) {
   if (!Array.isArray(content) || content.length === 0) {
     throw badRequest('组合模板内容不能为空')
@@ -50,25 +50,37 @@ function validateUnitContent(content) {
   if (content.length > MAX_ROWS) {
     throw badRequest(`组合模板课程数超过 ${MAX_ROWS} 上限`)
   }
-  const ids = content.map((id) => Number(id))
-  if (ids.some((id) => !Number.isInteger(id) || id < 1)) {
-    throw badRequest('组合模板内容须为课程模板 id 数组')
+  // 数字数组 → 引用课程模板 id
+  if (content.every((c) => typeof c === 'number' || /^\d+$/.test(String(c)))) {
+    const ids = content.map((id) => Number(id))
+    if (ids.some((id) => !Number.isInteger(id) || id < 1)) {
+      throw badRequest('组合模板内容须为课程模板 id 数组或课程行数组')
+    }
+    const placeholders = ids.map(() => '?').join(',')
+    const rows = db.prepare(`SELECT id, kind FROM template WHERE id IN (${placeholders})`).all(...ids)
+    const found = new Set(rows.map((r) => r.id))
+    if (rows.some((r) => r.kind !== 'course')) throw badRequest('组合模板只能引用课程模板（kind=course）')
+    const missing = ids.filter((id) => !found.has(id))
+    if (missing.length) throw badRequest(`引用的课程模板不存在：id=${missing.join(',')}`)
+    return [...new Set(ids)]
   }
-  // 校验引用的课程模板存在且为 course 类型
-  const placeholders = ids.map(() => '?').join(',')
-  const rows = db.prepare(`SELECT id, kind FROM template WHERE id IN (${placeholders})`).all(...ids)
-  const found = new Set(rows.map((r) => r.id))
-  const badKind = rows.some((r) => r.kind !== 'course')
-  if (badKind) throw badRequest('组合模板只能引用课程模板（kind=course）')
-  const missing = ids.filter((id) => !found.has(id))
-  if (missing.length) throw badRequest(`引用的课程模板不存在：id=${missing.join(',')}`)
-  return [...new Set(ids)]
+  // 课程行数组 → 快照（逐行校验）
+  return content.map((row, i) => {
+    try {
+      return validateCourse(row)
+    } catch (e) {
+      throw badRequest(`第 ${i + 1} 行课程数据无效：${e.message}`)
+    }
+  })
 }
 
-/** 解析模板为课程行数组（unit 展开引用的课程模板） */
+/** 解析模板为课程行数组（unit 展开引用或快照） */
 function resolveTemplateRows(row) {
   const content = JSON.parse(row.content)
   if (row.kind === 'course') return content
+  // 快照（课程行数组）直接返回
+  if (content.length > 0 && typeof content[0] !== 'number') return content
+  // 引用（id 数组）展开课程模板
   const placeholders = content.map(() => '?').join(',')
   const refs = db.prepare(`SELECT * FROM template WHERE id IN (${placeholders})`).all(...content)
   return refs.flatMap((r) => JSON.parse(r.content))
