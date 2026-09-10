@@ -13,6 +13,7 @@ import { attachSession, requireSession } from './lib/access.js'
 import { ensureDefaultSettings } from './lib/settings.js'
 import { accessRouter } from './routes/access.js'
 import { usersRouter } from './routes/users.js'
+import { templatesRouter } from './routes/templates.js'
 import { contextRouter, scheduleRouter } from './routes/schedule.js'
 import { semestersRouter } from './routes/semesters.js'
 import { periodsRouter } from './routes/periods.js'
@@ -40,6 +41,7 @@ app.use(attachSession)
 // 认证与用户管理：login/register/me/sessions 公开（会话中间件内部处理），users 需管理员
 app.use('/api/access', accessRouter)
 app.use('/api/users', usersRouter)
+app.use('/api/templates', templatesRouter)
 app.use('/api/context', contextRouter)
 app.use('/api/schedule', requireSession, scheduleRouter)
 app.use('/api/semesters', requireSession, semestersRouter)

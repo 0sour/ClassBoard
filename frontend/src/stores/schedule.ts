@@ -724,6 +724,7 @@ export const useScheduleStore = defineStore('schedule', () => {
     setHomeworkDone,
     deleteHomework,
     loadMatters,
+    loadCourses,
     updateSettings,
     setShowOddEvenFilter,
     currentUser,

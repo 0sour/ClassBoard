@@ -35,7 +35,7 @@ backupRouter.get(
   wrap(async (req, res) => {
     const uid = req.user.id
     const payload = {
-      version: 2,
+      version: 3,
       exportedAt: new Date().toISOString(),
       semesters: db.prepare('SELECT * FROM semester WHERE user_id = ? ORDER BY id ASC').all(uid).map(toSemester),
       periods: db.prepare('SELECT * FROM period_template WHERE user_id = ? ORDER BY semester_id ASC, period_index ASC').all(uid).map(toPeriod),
@@ -43,6 +43,17 @@ backupRouter.get(
       exams: db.prepare('SELECT * FROM exam WHERE user_id = ? ORDER BY id ASC').all(uid).map(toExam),
       homework: db.prepare('SELECT * FROM homework WHERE user_id = ? ORDER BY id ASC').all(uid).map(toHomework),
       settings: readSettings(uid),
+      // 模板全局共享（admin 维护），随备份导出
+      templates: db.prepare('SELECT * FROM template ORDER BY id ASC').all().map((t) => ({
+        id: t.id,
+        name: t.name,
+        category: t.category,
+        description: t.description,
+        version: t.version,
+        content: JSON.parse(t.content),
+        createdAt: t.created_at,
+        updatedAt: t.updated_at,
+      })),
       // 口令哈希不导出（安全要求）
     }
     const d = new Date()
@@ -71,7 +82,7 @@ backupRouter.post(
     } catch {
       throw badFile('备份文件格式不符（须为 JSON）')
     }
-    if (data.version !== 2 || !Array.isArray(data.semesters) || !Array.isArray(data.courses)) {
+    if (data.version !== 2 && data.version !== 3 || !Array.isArray(data.semesters) || !Array.isArray(data.courses)) {
       throw badFile('备份文件版本或结构无法识别')
     }
 
@@ -129,6 +140,20 @@ backupRouter.post(
       insSetting.run(req.user.id, 'reminder', JSON.stringify(sets.reminder ?? { enabled: false, mode: 'every', advanceMinutes: 10 }))
       insSetting.run(req.user.id, 'lab_reminder', JSON.stringify(sets.labReminder ?? { enabled: false, mode: 'every', advanceMinutes: 10 }))
       insSetting.run(req.user.id, 'homework_reminder', JSON.stringify(sets.homeworkReminder ?? { enabled: false, advanceDays: 2 }))
+      // 恢复模板（全局共享；仅 admin 恢复时写入，避免普通用户覆盖）
+      if (req.user.role === 'admin' && Array.isArray(data.templates)) {
+        db.prepare('DELETE FROM template').run()
+        const insTpl = db.prepare(
+          'INSERT INTO template (id, name, category, description, version, content, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        )
+        for (const t of data.templates) {
+          if (!t || !t.name || !Array.isArray(t.content)) continue
+          insTpl.run(
+            t.id, t.name, t.category ?? '', t.description ?? '', t.version ?? 1,
+            JSON.stringify(t.content), req.user.id, t.createdAt ?? new Date().toISOString(), t.updatedAt ?? new Date().toISOString(),
+          )
+        }
+      }
     })
     restore()
 

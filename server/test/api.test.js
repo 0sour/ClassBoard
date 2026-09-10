@@ -311,7 +311,7 @@ test('备份导出与恢复', async () => {
   const out = await fetch(base + '/api/backup', { headers: { Cookie: `classboard_session=${adminCookie}` } })
   const payload = await out.json()
   assert.equal(out.status, 200)
-  assert.equal(payload.version, 2)
+  assert.equal(payload.version, 3)
   assert.equal(payload.courses.length, 1)
 
   // 清空后恢复

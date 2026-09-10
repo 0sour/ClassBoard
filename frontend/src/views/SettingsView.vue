@@ -9,6 +9,7 @@ import TimePicker from '@/components/common/TimePicker.vue'
 import DatePicker from '@/components/common/DatePicker.vue'
 import { confirm, toast } from '@/utils/ui'
 import { api, type SessionInfo, type UserInfo } from '@/api/client'
+import TemplateAdmin from '@/components/settings/TemplateAdmin.vue'
 import type { Period, Semester } from '@/types'
 
 const store = useScheduleStore()
@@ -16,7 +17,7 @@ const route = useRoute()
 const router = useRouter()
 
 // ================= Tab 导航 =================
-type TabKey = 'semester' | 'period' | 'reminder' | 'weather' | 'data' | 'account' | 'users'
+type TabKey = 'semester' | 'period' | 'reminder' | 'weather' | 'data' | 'account' | 'users' | 'templates'
 
 const TABS: { key: TabKey; label: string; adminOnly?: boolean }[] = [
   { key: 'semester', label: '学期' },
@@ -26,6 +27,7 @@ const TABS: { key: TabKey; label: string; adminOnly?: boolean }[] = [
   { key: 'data', label: '数据' },
   { key: 'account', label: '账号' },
   { key: 'users', label: '用户管理', adminOnly: true },
+  { key: 'templates', label: '课程模板', adminOnly: true },
 ]
 
 const activeTab = ref<TabKey>('semester')
@@ -1101,6 +1103,11 @@ function formatTime(iso: string | null): string {
         <button v-if="u.id !== store.currentUser?.id" class="btn-mini" type="button" @click="openReset(u)">重置密码</button>
         <button v-if="u.id !== store.currentUser?.id" class="btn-mini btn-mini--danger" type="button" @click="openDelete(u)">删除</button>
       </div>
+    </div>
+
+    <!-- 课程模板（admin 专属） -->
+    <div v-show="activeTab === 'templates'" class="panel reveal">
+      <TemplateAdmin />
     </div>
 
     <!-- 重置密码弹窗 -->

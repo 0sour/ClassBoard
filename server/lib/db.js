@@ -144,6 +144,40 @@ if (!hasUserTable) {
   console.log('[migrate] 多用户迁移完成：admin 用户 id=' + adminId)
 }
 
+// ============================================================
+// 模板迁移：template / import_log 表（幂等）
+// ============================================================
+const hasTemplateTable = db
+  .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='template'")
+  .get()
+if (!hasTemplateTable) {
+  db.exec(`
+    CREATE TABLE template (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      version INTEGER NOT NULL DEFAULT 1,
+      content TEXT NOT NULL,
+      created_by INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE import_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      template_id INTEGER NOT NULL REFERENCES template(id) ON DELETE CASCADE,
+      template_version INTEGER NOT NULL,
+      semester_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+      mode TEXT NOT NULL,
+      count INTEGER NOT NULL,
+      imported_at TEXT NOT NULL
+    );
+  `)
+  console.log('[migrate] 模板表迁移完成')
+}
+
 /** 迁移用：生成 admin 初始密码哈希（随机 16 位，打印到日志，首次登录后应修改） */
 function hashPassphraseForMigration() {
   const pass = randomBytes(8).toString('hex')

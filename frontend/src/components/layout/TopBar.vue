@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import AppSelect from '@/components/common/AppSelect.vue'
 import ImportWizard from '@/components/import/ImportWizard.vue'
+import TemplateImportWizard from '@/components/import/TemplateImportWizard.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
 import { formatMonthDay } from '@/utils/week'
 
@@ -34,6 +35,7 @@ function switchView(name: 'week' | 'day'): void {
 
 const showImportDropdown = ref(false)
 const showImportWizard = ref(false)
+const showTemplateWizard = ref(false)
 const showCourseEditor = ref(false)
 const showUserMenu = ref(false)
 
@@ -53,9 +55,10 @@ function onDocMouseDown(e: MouseEvent): void {
 onMounted(() => document.addEventListener('mousedown', onDocMouseDown))
 onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
 
-function onImport(mode: 'pdf' | 'manual'): void {
+function onImport(mode: 'pdf' | 'template' | 'manual'): void {
   showImportDropdown.value = false
   if (mode === 'pdf') showImportWizard.value = true
+  else if (mode === 'template') showTemplateWizard.value = true
   else showCourseEditor.value = true
 }
 
@@ -167,6 +170,7 @@ const reminders = computed(() => {
         </button>
         <div class="import-menu" v-if="showImportDropdown" role="menu">
           <button type="button" role="menuitem" @click="onImport('pdf')">从 PDF 导入</button>
+          <button type="button" role="menuitem" @click="onImport('template')">从模板导入</button>
           <button type="button" role="menuitem" @click="onImport('manual')">手动录入</button>
         </div>
       </div>
@@ -251,6 +255,9 @@ const reminders = computed(() => {
 
   <!-- PDF 导入三步向导 -->
   <ImportWizard :open="showImportWizard" @close="showImportWizard = false" @done="showImportWizard = false" />
+
+  <!-- 模板导入四步向导 -->
+  <TemplateImportWizard :open="showTemplateWizard" @close="showTemplateWizard = false" />
 
   <!-- 手动录入课程 -->
   <CourseEditor :open="showCourseEditor" @close="showCourseEditor = false" @done="showCourseEditor = false" />

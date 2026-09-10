@@ -276,6 +276,36 @@ export const api = {
 
   setSignupEnabled: (enabled: boolean) =>
     request<{ enabled: boolean }>('/users/signup', { method: 'PUT', body: JSON.stringify({ enabled }) }),
+
+  // ---- 课程模板 ----
+  listTemplates: () => request<{ templates: TemplateInfo[] }>('/templates'),
+
+  getTemplate: (id: number) => request<{ template: TemplateInfo }>(`/templates/${id}`),
+
+  createTemplate: (body: { name: string; category: string; description: string; content: ImportRow[] }) =>
+    request<{ template: TemplateInfo }>('/templates', { method: 'POST', body: JSON.stringify(body) }),
+
+  updateTemplate: (id: number, body: { name: string; category: string; description: string; content: ImportRow[] }) =>
+    request<{ template: TemplateInfo }>(`/templates/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+  deleteTemplate: (id: number) => request<void>(`/templates/${id}`, { method: 'DELETE' }),
+
+  importTemplate: (id: number, body: { semesterId: number; mode: 'append' | 'overwrite' | 'dedupe' }) =>
+    request<{ count: number; skipped: number; templateVersion: number }>(`/templates/${id}/import`, { method: 'POST', body: JSON.stringify(body) }),
+}
+
+export interface TemplateInfo {
+  id: number
+  name: string
+  category: string
+  description: string
+  version: number
+  content: ImportRow[]
+  createdBy: number
+  createdAt: string
+  updatedAt: string
+  importCount?: number
+  lastImportedAt?: string | null
 }
 
 export interface UserInfo {
