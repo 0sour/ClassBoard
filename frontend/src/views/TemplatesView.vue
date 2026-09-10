@@ -113,6 +113,8 @@ const rows = ref<ImportRow[]>([])
 const unitIds = ref<number[]>([])
 // 课程模板直接编辑表单（借鉴手动导入课程 CourseEditor 的字段布局）
 const showCourseForm = ref(false)
+/** 录入方式：fixed=固定课表（单行）/ per=每节课调整（多行，按节数导入） */
+const courseTab = ref<'fixed' | 'per'>('fixed')
 const courseForm = reactive({
   name: '',
   type: 'course' as 'course' | 'lab',
@@ -125,6 +127,34 @@ const courseForm = reactive({
   weekList: [] as number[],
   remark: '',
 })
+/** 每节课调整：一个时间段（同一门课的一节课），周次由 weekList 自定义 */
+interface CourseSession {
+  weekday: number
+  startPeriod: number
+  endPeriod: number
+  location: string
+  weekList: number[]
+}
+const courseSessions = ref<CourseSession[]>([])
+
+function blankCourseSession(): CourseSession {
+  return { weekday: 1, startPeriod: 1, endPeriod: 2, location: '', weekList: [] }
+}
+
+function addCourseSession(): void {
+  courseSessions.value.push(blankCourseSession())
+}
+
+function removeCourseSession(i: number): void {
+  courseSessions.value.splice(i, 1)
+}
+
+function toggleCourseSessionWeek(s: CourseSession, w: number): void {
+  const i = s.weekList.indexOf(w)
+  if (i >= 0) s.weekList.splice(i, 1)
+  else s.weekList.push(w)
+}
+
 const courseFormError = ref('')
 const courseFormBusy = ref(false)
 
@@ -187,6 +217,7 @@ const MAX_WEEKS = 30
 const periodOptions = computed(() =>
   store.periods.map((p) => ({ value: p.index, label: `第 ${p.index} 节 ${p.startTime}–${p.endTime}` })),
 )
+const weekdayOptions = WEEKDAY_LABELS.map((label, i) => ({ value: i + 1, label }))
 const weekChips = computed(() => Array.from({ length: MAX_WEEKS }, (_, i) => i + 1))
 
 function weekLabelOf(r: ImportRow): string {
@@ -209,6 +240,8 @@ function openCreate(kind: 'course' | 'unit'): void {
       name: '', type: 'course' as const, teacher: '', location: '',
       weekday: 1, startPeriod: 1, endPeriod: 2, weekType: 'all' as const, weekList: [], remark: '',
     })
+    courseSessions.value = [blankCourseSession()]
+    courseTab.value = 'fixed'
     courseFormError.value = ''
     showCourseForm.value = true
   } else {
@@ -221,13 +254,27 @@ function openEdit(t: TemplateInfo): void {
   editingKind.value = t.kind
   Object.assign(form, { name: t.name, category: t.category, description: t.description })
   if (t.kind === 'course') {
-    // 课程模板：直接打开完整课程表单（预填课程数据）
-    const r = (t.content as ImportRow[])[0]
+    // 课程模板：直接打开完整课程表单（预填课程数据；多行 → 每节课调整模式）
+    const rows = t.content as ImportRow[]
+    const first = rows[0]
     Object.assign(courseForm, {
-      name: r.name, type: r.type, teacher: r.teacher, location: r.location,
-      weekday: r.weekday, startPeriod: r.startPeriod, endPeriod: r.endPeriod,
-      weekType: r.weekType, weekList: r.weekList ? [...r.weekList] : [], remark: r.remark,
+      name: first.name, type: first.type, teacher: first.teacher, location: first.location,
+      weekday: first.weekday, startPeriod: first.startPeriod, endPeriod: first.endPeriod,
+      weekType: first.weekType, weekList: first.weekList ? [...first.weekList] : [], remark: first.remark,
     })
+    if (rows.length > 1) {
+      courseTab.value = 'per'
+      courseSessions.value = rows.map((r) => ({
+        weekday: r.weekday,
+        startPeriod: r.startPeriod,
+        endPeriod: r.endPeriod,
+        location: r.location,
+        weekList: r.weekList ? [...r.weekList] : [],
+      }))
+    } else {
+      courseTab.value = 'fixed'
+      courseSessions.value = [blankCourseSession()]
+    }
     courseFormError.value = ''
     showCourseForm.value = true
   } else {
@@ -237,24 +284,52 @@ function openEdit(t: TemplateInfo): void {
   }
 }
 
-/** 保存课程模板（完整表单直接保存） */
+/** 保存课程模板（完整表单直接保存；fixed=单行 / per=多行按节数） */
 async function saveCourseForm(): Promise<void> {
   courseFormError.value = ''
   if (!courseForm.name.trim()) {
     courseFormError.value = '请填写课程名称'
     return
   }
-  if (courseForm.startPeriod > courseForm.endPeriod) {
-    courseFormError.value = '结束节次不能早于起始节次'
-    return
-  }
-  if (courseForm.weekType === 'custom' && courseForm.weekList.length === 0) {
-    courseFormError.value = '请选择至少一个周次'
-    return
-  }
-  courseFormBusy.value = true
-  try {
-    const row: ImportRow = {
+  let rows: ImportRow[]
+  if (courseTab.value === 'per') {
+    if (courseSessions.value.length === 0) {
+      courseFormError.value = '请至少添加一节课'
+      return
+    }
+    for (const [i, s] of courseSessions.value.entries()) {
+      if (s.startPeriod > s.endPeriod) {
+        courseFormError.value = `第 ${i + 1} 节课结束节次不能早于起始节次`
+        return
+      }
+      if (s.weekList.length === 0) {
+        courseFormError.value = `第 ${i + 1} 节课请至少选择一周`
+        return
+      }
+    }
+    // 每个时间段生成一条同名课程记录（周次一律按自定义周次保存）
+    rows = courseSessions.value.map((s) => ({
+      name: courseForm.name.trim(),
+      type: courseForm.type,
+      teacher: courseForm.teacher.trim(),
+      location: s.location.trim(),
+      weekType: 'custom' as const,
+      weekList: [...s.weekList].sort((a, b) => a - b),
+      weekday: s.weekday as 1 | 2 | 3 | 4 | 5 | 6 | 7,
+      startPeriod: s.startPeriod,
+      endPeriod: s.endPeriod,
+      remark: courseForm.remark.trim(),
+    }))
+  } else {
+    if (courseForm.startPeriod > courseForm.endPeriod) {
+      courseFormError.value = '结束节次不能早于起始节次'
+      return
+    }
+    if (courseForm.weekType === 'custom' && courseForm.weekList.length === 0) {
+      courseFormError.value = '请选择至少一个周次'
+      return
+    }
+    rows = [{
       name: courseForm.name.trim(),
       type: courseForm.type,
       teacher: courseForm.teacher.trim(),
@@ -265,13 +340,16 @@ async function saveCourseForm(): Promise<void> {
       startPeriod: courseForm.startPeriod,
       endPeriod: courseForm.endPeriod,
       remark: courseForm.remark.trim(),
-    }
+    }]
+  }
+  courseFormBusy.value = true
+  try {
     const body = {
       kind: 'course' as const,
-      name: form.name.trim() || row.name,
+      name: form.name.trim() || courseForm.name.trim(),
       category: form.category,
       description: form.description,
-      content: [row],
+      content: rows,
     }
     if (editingId.value === null) {
       await api.createTemplate(body)
@@ -825,6 +903,22 @@ function weekLabel(r: ImportRow): string {
           </button>
         </div>
 
+        <!-- 录入方式 Tab：固定课表 / 每节课调整（与手动添加课程一致） -->
+        <div class="editor-tabs" role="tablist" aria-label="录入方式">
+          <button
+            type="button" role="tab" class="editor-tab"
+            :class="{ active: courseTab === 'fixed' }"
+            :aria-selected="courseTab === 'fixed'"
+            @click="courseTab = 'fixed'"
+          >固定课表</button>
+          <button
+            type="button" role="tab" class="editor-tab"
+            :class="{ active: courseTab === 'per' }"
+            :aria-selected="courseTab === 'per'"
+            @click="courseTab = 'per'"
+          >每节课调整</button>
+        </div>
+
         <div class="form-grid">
           <label class="field field--full">
             <span class="field__label">课程名称</span>
@@ -852,73 +946,121 @@ function weekLabel(r: ImportRow): string {
             <input v-model="courseForm.teacher" class="text-input" type="text" placeholder="选填" maxlength="30" />
           </label>
 
-          <label class="field">
-            <span class="field__label">上课地点</span>
-            <input v-model="courseForm.location" class="text-input" type="text" placeholder="如：C3敏学楼501" maxlength="50" />
-          </label>
+          <!-- 固定课表：每周重复的时间安排 -->
+          <template v-if="courseTab === 'fixed'">
+            <label class="field">
+              <span class="field__label">上课地点</span>
+              <input v-model="courseForm.location" class="text-input" type="text" placeholder="如：C3敏学楼501" maxlength="50" />
+            </label>
 
-          <fieldset class="field field--full">
-            <legend class="field__label">星期</legend>
-            <div class="weekdays" role="radiogroup" aria-label="选择星期">
-              <button
-                v-for="(label, i) in WEEKDAY_LABELS"
-                :key="label"
-                class="weekday-chip"
-                type="button"
-                :class="{ checked: courseForm.weekday === i + 1 }"
-                @click="courseForm.weekday = i + 1"
-              >{{ label }}</button>
+            <fieldset class="field field--full">
+              <legend class="field__label">星期</legend>
+              <div class="weekdays" role="radiogroup" aria-label="选择星期">
+                <button
+                  v-for="(label, i) in WEEKDAY_LABELS"
+                  :key="label"
+                  class="weekday-chip"
+                  type="button"
+                  :class="{ checked: courseForm.weekday === i + 1 }"
+                  @click="courseForm.weekday = i + 1"
+                >{{ label }}</button>
+              </div>
+            </fieldset>
+
+            <div class="field">
+              <span class="field__label">起始节次</span>
+              <AppSelect v-model="courseForm.startPeriod" :options="periodOptions" size="md" aria-label="起始节次" />
             </div>
-          </fieldset>
-
-          <div class="field">
-            <span class="field__label">起始节次</span>
-            <AppSelect v-model="courseForm.startPeriod" :options="periodOptions" size="md" aria-label="起始节次" />
-          </div>
-          <div class="field">
-            <span class="field__label">结束节次</span>
-            <AppSelect v-model="courseForm.endPeriod" :options="periodOptions" size="md" aria-label="结束节次" />
-          </div>
-
-          <fieldset class="field field--full">
-            <legend class="field__label">周次规则</legend>
-            <div class="seg">
-              <label class="seg-item" :class="{ checked: courseForm.weekType === 'all' }">
-                <input v-model="courseForm.weekType" type="radio" value="all" name="tpl-week-type" />
-                <span class="seg-item__dot"></span>
-                <span>每周</span>
-              </label>
-              <label class="seg-item" :class="{ checked: courseForm.weekType === 'odd' }">
-                <input v-model="courseForm.weekType" type="radio" value="odd" name="tpl-week-type" />
-                <span class="seg-item__dot"></span>
-                <span>单周</span>
-              </label>
-              <label class="seg-item" :class="{ checked: courseForm.weekType === 'even' }">
-                <input v-model="courseForm.weekType" type="radio" value="even" name="tpl-week-type" />
-                <span class="seg-item__dot"></span>
-                <span>双周</span>
-              </label>
-              <label class="seg-item" :class="{ checked: courseForm.weekType === 'custom' }">
-                <input v-model="courseForm.weekType" type="radio" value="custom" name="tpl-week-type" />
-                <span class="seg-item__dot"></span>
-                <span>自定义</span>
-              </label>
+            <div class="field">
+              <span class="field__label">结束节次</span>
+              <AppSelect v-model="courseForm.endPeriod" :options="periodOptions" size="md" aria-label="结束节次" />
             </div>
-          </fieldset>
 
-          <div v-if="courseForm.weekType === 'custom'" class="field field--full">
-            <span class="field__label">选择周次（1–{{ MAX_WEEKS }} 周）</span>
-            <div class="week-custom">
-              <button
-                v-for="w in weekChips"
-                :key="w"
-                class="week-chip"
-                type="button"
-                :class="{ checked: courseForm.weekList.includes(w) }"
-                @click="toggleCourseWeek(w)"
-              >{{ w }}</button>
+            <fieldset class="field field--full">
+              <legend class="field__label">周次规则</legend>
+              <div class="seg">
+                <label class="seg-item" :class="{ checked: courseForm.weekType === 'all' }">
+                  <input v-model="courseForm.weekType" type="radio" value="all" name="tpl-week-type" />
+                  <span class="seg-item__dot"></span>
+                  <span>每周</span>
+                </label>
+                <label class="seg-item" :class="{ checked: courseForm.weekType === 'odd' }">
+                  <input v-model="courseForm.weekType" type="radio" value="odd" name="tpl-week-type" />
+                  <span class="seg-item__dot"></span>
+                  <span>单周</span>
+                </label>
+                <label class="seg-item" :class="{ checked: courseForm.weekType === 'even' }">
+                  <input v-model="courseForm.weekType" type="radio" value="even" name="tpl-week-type" />
+                  <span class="seg-item__dot"></span>
+                  <span>双周</span>
+                </label>
+                <label class="seg-item" :class="{ checked: courseForm.weekType === 'custom' }">
+                  <input v-model="courseForm.weekType" type="radio" value="custom" name="tpl-week-type" />
+                  <span class="seg-item__dot"></span>
+                  <span>自定义</span>
+                </label>
+              </div>
+            </fieldset>
+
+            <div v-if="courseForm.weekType === 'custom'" class="field field--full">
+              <span class="field__label">选择周次（1–{{ MAX_WEEKS }} 周）</span>
+              <div class="week-custom">
+                <button
+                  v-for="w in weekChips"
+                  :key="w"
+                  class="week-chip"
+                  type="button"
+                  :class="{ checked: courseForm.weekList.includes(w) }"
+                  @click="toggleCourseWeek(w)"
+                >{{ w }}</button>
+              </div>
             </div>
-          </div>
+          </template>
+
+          <!-- 每节课调整：每节课独立指定时间与地点（按节数导入） -->
+          <template v-else>
+            <div class="field field--full">
+              <div v-for="(s, i) in courseSessions" :key="i" class="session-card">
+                <div class="session-grid">
+                  <label class="field">
+                    <span class="field__label">星期</span>
+                    <AppSelect v-model="s.weekday" :options="weekdayOptions" size="md" :aria-label="`第 ${i + 1} 节课星期`" />
+                  </label>
+                  <div class="field">
+                    <span class="field__label">起始节次</span>
+                    <AppSelect v-model="s.startPeriod" :options="periodOptions" size="md" :aria-label="`第 ${i + 1} 节课起始节次`" />
+                  </div>
+                  <div class="field">
+                    <span class="field__label">结束节次</span>
+                    <AppSelect v-model="s.endPeriod" :options="periodOptions" size="md" :aria-label="`第 ${i + 1} 节课结束节次`" />
+                  </div>
+                  <label class="field">
+                    <span class="field__label">地点</span>
+                    <input v-model="s.location" class="text-input" type="text" placeholder="如：C3敏学楼501" maxlength="50" :aria-label="`第 ${i + 1} 节课地点`" />
+                  </label>
+                </div>
+
+                <div class="session-weeks">
+                  <div class="session-weeks-head">
+                    <span class="field__label">选择周次（1–{{ MAX_WEEKS }} 周）</span>
+                    <button class="session-del" type="button" :aria-label="`删除第 ${i + 1} 节课`" @click="removeCourseSession(i)">×</button>
+                  </div>
+                  <div class="week-custom">
+                    <button
+                      v-for="w in weekChips"
+                      :key="w"
+                      class="week-chip"
+                      type="button"
+                      :class="{ checked: s.weekList.includes(w) }"
+                      @click="toggleCourseSessionWeek(s, w)"
+                    >{{ w }}</button>
+                  </div>
+                </div>
+              </div>
+
+              <button class="btn btn--ghost add-session" type="button" @click="addCourseSession">＋ 添加一节课</button>
+            </div>
+          </template>
         </div>
 
         <p v-if="courseFormError" class="edit-error" role="alert">{{ courseFormError }}</p>
@@ -1363,6 +1505,90 @@ function weekLabel(r: ImportRow): string {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+/* 录入方式 Tab + 每节课调整（与手动添加课程一致） */
+.editor-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  margin-top: var(--spacing-md);
+}
+
+.editor-tab {
+  flex: 1;
+  padding: 6px 0;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  transition: color var(--motion-duration-normal) var(--motion-easing-standard),
+    background-color var(--motion-duration-normal) var(--motion-easing-standard);
+}
+
+.editor-tab.active {
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  box-shadow: var(--shadow-card);
+}
+
+.session-card {
+  padding: var(--spacing-md);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-page);
+  margin-bottom: var(--spacing-sm);
+}
+
+.session-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-sm);
+}
+
+.session-weeks {
+  margin-top: var(--spacing-sm);
+}
+
+.session-weeks-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.session-del {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-lg);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard),
+    color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.session-del:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-feedback-error);
+}
+
+.add-session {
+  width: 100%;
+  padding: 8px 0;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-brand);
+  font-size: var(--font-size-md);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.add-session:hover {
+  background: var(--color-brand-subtle);
 }
 
 .tpl-cats {

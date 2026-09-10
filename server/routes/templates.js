@@ -30,16 +30,21 @@ function toTemplate(row) {
   }
 }
 
-/** 校验课程模板内容（单门课程行） */
+/** 校验课程模板内容（1-N 门课程行；固定课表 1 行 / 每节课调整 N 行） */
 function validateCourseTemplate(content) {
-  if (!Array.isArray(content) || content.length !== 1) {
-    throw badRequest('课程模板须包含且仅包含一门课程')
+  if (!Array.isArray(content) || content.length === 0) {
+    throw badRequest('课程模板须包含至少一门课程')
   }
-  try {
-    return [validateCourse(content[0])]
-  } catch (e) {
-    throw badRequest(`课程数据无效：${e.message}`)
+  if (content.length > MAX_ROWS) {
+    throw badRequest(`课程模板课程数超过 ${MAX_ROWS} 上限`)
   }
+  return content.map((row, i) => {
+    try {
+      return validateCourse(row)
+    } catch (e) {
+      throw badRequest(`第 ${i + 1} 行课程数据无效：${e.message}`)
+    }
+  })
 }
 
 /** 校验组合模板内容：课程模板 id 数组（引用）或课程行数组（快照） */
