@@ -23,6 +23,22 @@ const importBusy = ref(false)
 const importError = ref('')
 const importResult = ref<{ count: number; skipped: number } | null>(null)
 
+// 预览状态
+const previewing = ref<TemplateInfo | null>(null)
+
+/** 打开预览弹窗 */
+function openPreview(t: TemplateInfo): void {
+  previewing.value = t
+}
+
+/** 从预览进入导入 */
+function previewToImport(): void {
+  if (!previewing.value) return
+  const t = previewing.value
+  previewing.value = null
+  openImport(t)
+}
+
 // 管理员编辑状态（图形化课程行编辑器）
 const showEditor = ref(false)
 const editingId = ref<number | null>(null)
@@ -299,11 +315,12 @@ const semesterOptions = computed(() =>
   store.semesters.map((s) => ({ value: s.id, label: s.name })),
 )
 
-/** 预览：模板课程行 → 按星期分组 */
+/** 预览：模板课程行 → 按星期分组（预览弹窗与导入弹窗共用） */
 const previewByWeekday = computed(() => {
-  if (!importing.value) return []
+  const t = previewing.value ?? importing.value
+  if (!t) return []
   const map: Record<number, ImportRow[]> = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [] }
-  for (const r of importing.value.content) map[r.weekday]?.push(r)
+  for (const r of t.content) map[r.weekday]?.push(r)
   return [1, 2, 3, 4, 5, 6, 7].map((wd) => ({ weekday: wd, rows: map[wd] }))
 })
 
@@ -354,7 +371,7 @@ function weekLabel(r: ImportRow): string {
       <p v-else class="tpl-empty-hint">请联系管理员创建班级课程模板</p>
     </div>
     <div v-else class="tpl-grid reveal">
-      <div v-for="t in filteredTemplates" :key="t.id" class="tpl-card">
+      <div v-for="t in filteredTemplates" :key="t.id" class="tpl-card" role="button" tabindex="0" :aria-label="`预览模板 ${t.name}`" @click="openPreview(t)" @keydown.enter="openPreview(t)">
         <div class="tpl-card__head">
           <span class="tpl-card__name">{{ t.name }}</span>
           <span v-if="t.category" class="chip">{{ t.category }}</span>
@@ -364,12 +381,51 @@ function weekLabel(r: ImportRow): string {
           {{ t.content.length }} 门课 · v{{ t.version }}
           <span v-if="t.importCount" class="tpl-card__used">已导入 {{ t.importCount }} 次</span>
         </div>
-        <div class="tpl-card__actions">
+        <div class="tpl-card__actions" @click.stop>
           <button class="btn-mini btn-mini--primary" type="button" @click="openImport(t)">一键导入</button>
           <template v-if="store.currentUser?.role === 'admin'">
             <button class="btn-mini" type="button" @click="openEdit(t)">编辑</button>
             <button class="btn-mini btn-mini--danger" type="button" @click="remove(t)">删除</button>
           </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- 模板预览弹窗 -->
+    <div v-if="previewing" class="modal-mask" @mousedown.self="previewing = null">
+      <div class="modal tpl-preview-modal" role="dialog" aria-modal="true" :aria-label="`预览模板 ${previewing.name}`">
+        <div class="tpl-preview-head">
+          <div class="tpl-preview-head-main">
+            <h3 class="modal-title">{{ previewing.name }}</h3>
+            <span class="tpl-preview-meta num">
+              <span v-if="previewing.category" class="chip">{{ previewing.category }}</span>
+              {{ previewing.content.length }} 门课 · v{{ previewing.version }}
+              <span v-if="previewing.importCount" class="tpl-card__used">已导入 {{ previewing.importCount }} 次</span>
+            </span>
+            <span v-if="previewing.description" class="tpl-preview-desc">{{ previewing.description }}</span>
+          </div>
+          <button class="tpl-close" type="button" aria-label="关闭" @click="previewing = null">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <!-- 按星期分组的课程预览 -->
+        <div class="tpl-preview">
+          <div v-for="(d, i) in previewByWeekday" :key="d.weekday" class="tpl-preview-day">
+            <span class="tpl-preview-wd">{{ WEEKDAY_LABELS[i] }}</span>
+            <div v-if="d.rows.length" class="tpl-preview-rows">
+              <div v-for="r in d.rows" :key="`${r.name}-${r.startPeriod}`" class="tpl-preview-row">
+                <span class="tpl-preview-name">{{ r.name }}</span>
+                <span class="tpl-preview-meta num">第 {{ r.startPeriod }}{{ r.endPeriod > r.startPeriod ? `–${r.endPeriod}` : '' }} 节 · {{ weekLabel(r) }}</span>
+              </div>
+            </div>
+            <div v-else class="tpl-preview-empty">—</div>
+          </div>
+        </div>
+
+        <div class="edit-actions">
+          <button class="btn-mini" type="button" @click="previewing = null">关闭</button>
+          <button class="btn-mini btn-mini--primary" type="button" @click="previewToImport">一键导入</button>
         </div>
       </div>
     </div>
@@ -752,13 +808,21 @@ function weekLabel(r: ImportRow): string {
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
+  cursor: pointer;
   transition: box-shadow var(--motion-duration-normal) var(--motion-easing-standard),
-    transform var(--motion-duration-normal) var(--motion-easing-standard);
+    transform var(--motion-duration-normal) var(--motion-easing-standard),
+    border-color var(--motion-duration-normal) var(--motion-easing-standard);
 }
 
 .tpl-card:hover {
   box-shadow: var(--shadow-hover);
   transform: translateY(-1px);
+  border-color: var(--color-border-strong);
+}
+
+.tpl-card:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
 }
 
 .tpl-card__head {
@@ -844,6 +908,62 @@ function weekLabel(r: ImportRow): string {
 
 .tpl-import-modal {
   width: min(520px, 100%);
+}
+
+/* 预览弹窗 */
+.tpl-preview-modal {
+  width: min(520px, 100%);
+}
+
+.tpl-preview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+}
+
+.tpl-preview-head-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tpl-preview-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  flex-wrap: wrap;
+}
+
+.tpl-preview-desc {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.tpl-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  flex: none;
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard),
+    color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.tpl-close:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-body);
+}
+
+.tpl-close svg {
+  width: 16px;
+  height: 16px;
 }
 
 .modal-title {
