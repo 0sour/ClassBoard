@@ -1349,7 +1349,25 @@ function weekLabel(r: ImportRow): string {
 
 /* 从学期勾选课程另存 */
 .tpl-save-modal {
-  width: min(520px, 100%);
+  width: min(560px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  /* 自定义滚动条（设计规范：细条 + 圆角 thumb） */
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+.tpl-save-modal::-webkit-scrollbar {
+  width: 8px;
+}
+
+.tpl-save-modal::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-full);
+}
+
+.tpl-save-modal::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .tpl-save-head {
@@ -1362,9 +1380,10 @@ function weekLabel(r: ImportRow): string {
 .tpl-save-list {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-sm);
+  gap: var(--spacing-md);
   max-height: 320px;
   overflow-y: auto;
+  padding-right: 2px;
 }
 
 /* 按课程分组：组头 + 组内时间段 */
@@ -1394,6 +1413,7 @@ function weekLabel(r: ImportRow): string {
 
 .tpl-save-group-head input {
   accent-color: var(--color-brand);
+  flex: none;
 }
 
 .tpl-save-group-count {
@@ -1401,20 +1421,21 @@ function weekLabel(r: ImportRow): string {
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
   flex: none;
+  white-space: nowrap;
 }
 
 .tpl-save-sessions {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: var(--spacing-xs);
+  gap: 4px;
+  padding: var(--spacing-sm);
 }
 
 .tpl-save-session {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-  padding: 4px 8px;
+  padding: 6px 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--motion-duration-fast) var(--motion-easing-standard);
@@ -1430,6 +1451,14 @@ function weekLabel(r: ImportRow): string {
 
 .tpl-save-session input {
   accent-color: var(--color-brand);
+  flex: none;
+}
+
+.tpl-save-session .tpl-save-meta {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .tpl-save-item {
