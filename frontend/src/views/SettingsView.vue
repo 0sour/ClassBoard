@@ -1146,9 +1146,6 @@ function formatTime(iso: string | null): string {
         </div>
       </div>
     </div>
-
-    <!-- 外观 -->
-    <div v-show="activeTab === 'semester'" class="panel reveal" style="display: none"></div>
   </div>
 </template>
 
