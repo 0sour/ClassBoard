@@ -29,7 +29,8 @@ function getAdminId() {
 }
 
 export function readSettings(userId) {
-  const weatherUserId = userId
+  // 天气设置全局共享：读取 admin 名下的配置（所有用户共享同一份）
+  const weatherUserId = getAdminId() ?? userId
   return {
     showOddEvenFilter: readJson(userId, 'show_odd_even_filter', DEFAULT_SETTINGS.showOddEvenFilter),
     reminder: { ...DEFAULT_SETTINGS.reminder, ...readJson(userId, 'reminder', {}) },
