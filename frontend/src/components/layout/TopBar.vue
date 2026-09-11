@@ -216,9 +216,10 @@ const reminders = computed(() => {
         </div>
         <div class="menu-backdrop" v-if="showReminderMenu" @click="showReminderMenu = false"></div>
       </div>
-      <!-- 事项（考试/实验/作业，UI 设计文档 1.1：桌面顶栏入口；图标与底部 Tab 一致为列表） -->
+      <!-- 事项（考试/实验/作业，UI 设计文档 1.1：桌面顶栏入口）
+           移动端底部 Tab 已有「事项」入口，顶栏隐藏以免与标题争抢宽度、把设置按钮挤出屏幕 -->
       <button
-        class="btn-icon"
+        class="btn-icon btn-matters"
         :class="{ active: isMatters }"
         type="button"
         aria-label="事项"
@@ -302,6 +303,10 @@ const reminders = computed(() => {
   font-size: var(--font-size-xl);
   font-weight: var(--font-weight-bold);
   white-space: nowrap;
+  /* 窄屏标题过长时截断，避免把右侧操作区推出屏幕 */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .seg {
@@ -316,7 +321,7 @@ const reminders = computed(() => {
 
 /* 按钮等宽：激活字重变化不影响按钮宽度，托盘总宽恒定，切换时不会左右移动 */
 .seg-btn {
-  width: 104px;
+  min-width: 104px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -325,6 +330,7 @@ const reminders = computed(() => {
   border-radius: var(--radius-md);
   font-size: var(--font-size-md);
   color: var(--color-text-tertiary);
+  white-space: nowrap;
   transition: color var(--motion-duration-normal) var(--motion-easing-standard),
     background-color var(--motion-duration-normal) var(--motion-easing-standard),
     box-shadow var(--motion-duration-normal) var(--motion-easing-standard);
@@ -347,6 +353,8 @@ const reminders = computed(() => {
   align-items: center;
   gap: var(--spacing-sm);
   margin-left: auto;
+  /* 不可被压缩：右侧图标优先留在屏幕内（内部元素按断点收缩） */
+  flex: none;
 }
 
 .import-wrap {
@@ -377,12 +385,18 @@ const reminders = computed(() => {
   height: 15px;
 }
 
-/* 移动端：导入按钮仅图标（文字隐藏），学期选择限宽省略 */
+/* 移动端：导入按钮仅图标（文字隐藏），学期选择限宽省略；事项入口隐藏（底部 Tab 已有） */
 .btn-import__label {
   display: inline;
 }
 
-@media (max-width: 767px) {
+/* 中等宽度（<1024px）：品牌与导入收为图标、学期选择可收缩，
+   否则 768–1023px（平板竖屏）下品牌 + 分段控件 + 操作区总宽超出视口、设置图标被挤出屏幕 */
+@media (max-width: 1023px) {
+  .brand span {
+    display: none;
+  }
+
   .btn-import {
     width: 34px;
     padding: 0;
@@ -393,15 +407,59 @@ const reminders = computed(() => {
     display: none;
   }
 
+  .seg-btn {
+    min-width: 88px;
+    padding: 6px 8px;
+  }
+
   .semester-select {
-    max-width: 110px;
+    flex: 0 1 140px;
+    min-width: 72px;
+    max-width: 140px;
   }
 }
 
-/* 更窄机型（≤360pt，如 iPhone SE 1 代）：学期选择进一步收窄，保证顶栏不溢出 */
-@media (max-width: 360px) {
+@media (max-width: 767px) {
   .semester-select {
-    max-width: 76px;
+    /* 可收缩的弹性宽度：窄屏时学期名先省略，标题与右侧图标保持完整 */
+    flex: 0 1 110px;
+    min-width: 56px;
+    max-width: 110px;
+  }
+
+  /* 双类名提高特异性：覆盖同特异性的 .btn-icon 基础规则（后者在文件中更靠后） */
+  .btn-icon.btn-matters {
+    display: none;
+  }
+}
+
+/* 更窄机型（≤360pt，如 iPhone SE 1 代）：学期选择与内边距进一步收窄，保证顶栏不溢出 */
+@media (max-width: 360px) {
+  .topbar {
+    padding: 0 var(--spacing-sm);
+  }
+
+  .semester-select {
+    flex-basis: 72px;
+    min-width: 44px;
+    max-width: 72px;
+  }
+}
+
+/* 移动端顶栏：标题与操作区共用一行，压缩间距给操作区留足空间 */
+@media (max-width: 767px) {
+  .topbar {
+    gap: var(--spacing-sm);
+    padding: 0 var(--spacing-md);
+  }
+
+  .top-actions {
+    gap: var(--spacing-2xs);
+  }
+
+  /* 标题保持完整（页面标识比学期名更重要）：不可压缩，超出部分由学期选择器先让位 */
+  .page-title {
+    flex: none;
   }
 }
 

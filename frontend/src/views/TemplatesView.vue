@@ -1473,6 +1473,18 @@ function resolvePreviewRows(t: TemplateInfo): ImportRow[] {
   margin-bottom: var(--spacing-lg);
 }
 
+/* 移动端：标题与操作区分行，操作按钮换行排布（4 个按钮一行放不下会横向溢出） */
+@media (max-width: 767px) {
+  .tpl-head {
+    flex-direction: column;
+  }
+
+  .tpl-admin-actions {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+}
+
 .tpl-title {
   font-size: var(--font-size-2xl);
   font-weight: var(--font-weight-bold);
