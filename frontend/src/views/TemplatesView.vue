@@ -343,9 +343,28 @@ const weekChips = computed(() => Array.from({ length: MAX_WEEKS }, (_, i) => i +
 
 function weekLabelOf(r: ImportRow): string {
   if (r.weekType === 'all') return '每周'
-  if (r.weekType === 'odd') return r.weekList?.length ? `单周（第 ${r.weekList.join(',')} 周）` : '单周'
-  if (r.weekType === 'even') return r.weekList?.length ? `双周（第 ${r.weekList.join(',')} 周）` : '双周'
-  return r.weekList?.length ? `第 ${r.weekList.join(',')} 周` : '每周'
+  if (r.weekType === 'odd') return r.weekList?.length ? `单周（${compressWeeks(r.weekList)}）` : '单周'
+  if (r.weekType === 'even') return r.weekList?.length ? `双周（${compressWeeks(r.weekList)}）` : '双周'
+  return r.weekList?.length ? compressWeeks(r.weekList) : '每周'
+}
+
+/** 周次压缩：连续区间用「–」连接（如 1,2,3,5,7,8 → 1–3,5,7–8），前缀「第…周」 */
+function compressWeeks(weeks: number[]): string {
+  const sorted = [...weeks].sort((a, b) => a - b)
+  const parts: string[] = []
+  let start = sorted[0]
+  let prev = sorted[0]
+  for (let i = 1; i <= sorted.length; i++) {
+    const cur = sorted[i]
+    if (cur === prev + 1) {
+      prev = cur
+      continue
+    }
+    parts.push(start === prev ? String(start) : `${start}–${prev}`)
+    start = cur
+    prev = cur
+  }
+  return `第 ${parts.join(',')} 周`
 }
 
 function openCreate(kind: 'course' | 'unit'): void {
@@ -717,15 +736,50 @@ const semesterOptions = computed(() =>
   store.semesters.map((s) => ({ value: s.id, label: s.name })),
 )
 
-/** 预览：模板课程行 → 按星期分组（预览弹窗与导入弹窗共用；unit 展开引用或快照） */
-const previewByWeekday = computed(() => {
+/** 预览：模板课程行 → 按课程名分组（预览弹窗与导入弹窗共用；unit 展开引用或快照）
+ * 清单式预览：同一门课的多个时间段合并到一张卡片，避免周课表网格在小尺寸下堆叠难读 */
+const previewGroups = computed(() => {
   const t = previewing.value ?? importing.value
   if (!t) return []
-  const rows = resolvePreviewRows(t)
-  const map: Record<number, ImportRow[]> = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [] }
-  for (const r of rows) map[r.weekday]?.push(r)
-  return [1, 2, 3, 4, 5, 6, 7].map((wd) => ({ weekday: wd, rows: map[wd] }))
+  return groupRows(resolvePreviewRows(t))
 })
+
+/** 预览统计：课程门数（按课程名去重）与节数（课程行数） */
+const previewStats = computed(() => {
+  const t = previewing.value ?? importing.value
+  if (!t) return { courses: 0, sessions: 0 }
+  const rows = resolvePreviewRows(t)
+  return { courses: new Set(rows.map((r) => r.name)).size, sessions: rows.length }
+})
+
+/** 课程行按课程名分组：组内时间段按星期/节次排序，组间按最早时间段排序 */
+function groupRows(rows: ImportRow[]): { name: string; type: ImportRow['type']; teacher: string; sessions: ImportRow[] }[] {
+  const map = new Map<string, { name: string; type: ImportRow['type']; teacher: string; sessions: ImportRow[] }>()
+  for (const r of rows) {
+    let g = map.get(r.name)
+    if (!g) {
+      g = { name: r.name, type: r.type, teacher: r.teacher, sessions: [] }
+      map.set(r.name, g)
+    }
+    if (r.type === 'lab') g.type = 'lab'
+    if (!g.teacher && r.teacher) g.teacher = r.teacher
+    g.sessions.push(r)
+  }
+  const groups = [...map.values()]
+  for (const g of groups) g.sessions.sort((a, b) => a.weekday - b.weekday || a.startPeriod - b.startPeriod)
+  groups.sort((a, b) => {
+    const ka = a.sessions[0]
+    const kb = b.sessions[0]
+    return ka.weekday - kb.weekday || ka.startPeriod - kb.startPeriod || a.name.localeCompare(b.name)
+  })
+  return groups
+}
+
+/** 模板统计（列表卡片用） */
+function templateStats(t: TemplateInfo): { courses: number; sessions: number } {
+  const rows = resolvePreviewRows(t)
+  return { courses: new Set(rows.map((r) => r.name)).size, sessions: rows.length }
+}
 
 /** 解析模板为课程行数组（course 直接返回；unit 快照返回课程行；unit 引用展开课程模板；semester 返回空） */
 function resolvePreviewRows(t: TemplateInfo): ImportRow[] {
@@ -740,45 +794,6 @@ function resolvePreviewRows(t: TemplateInfo): ImportRow[] {
     const ref = templates.value.find((x) => x.id === id)
     return ref && ref.kind === 'course' ? (ref.content as ImportRow[]) : []
   })
-}
-
-/** 周课表网格预览：7 天 × 12 节，同一格堆叠显示该时段全部课程（含周次标签） */
-const GRID_PERIODS = 12
-
-/** 某天某节显示的课程：仅起始于该节的课（跨行课只在起始节显示，非起始节跳过） */
-function coursesAt(weekday: number, period: number): ImportRow[] {
-  const day = previewByWeekday.value.find((d) => d.weekday === weekday)
-  if (!day) return []
-  return day.rows.filter((r) => r.startPeriod === period)
-}
-
-/** 该位置是否跳过渲染：无起始课（被跨行课覆盖的中间/结束节次，由起始格显示） */
-function shouldSkip(weekday: number, period: number): boolean {
-  return coursesAt(weekday, period).length === 0
-}
-
-/** 起始节次格的跨行范围：仅单门跨行课程时合并；多门课堆叠不跨行 */
-function spanOf(weekday: number, period: number): { start: number; end: number } | null {
-  const courses = coursesAt(weekday, period)
-  if (courses.length !== 1) return null
-  const c = courses[0]
-  if (c.endPeriod <= c.startPeriod) return null
-  return { start: c.startPeriod, end: c.endPeriod }
-}
-
-/** 周次标签（网格内显示） */
-function weekTag(r: ImportRow): string {
-  if (r.weekType === 'all') return '每周'
-  if (r.weekType === 'odd') return r.weekList?.length ? `单周·${r.weekList.join(',')}` : '单周'
-  if (r.weekType === 'even') return r.weekList?.length ? `双周·${r.weekList.join(',')}` : '双周'
-  return r.weekList?.length ? `第${r.weekList.join(',')}周` : ''
-}
-
-function weekLabel(r: ImportRow): string {
-  if (r.weekType === 'all') return '每周'
-  if (r.weekType === 'odd') return r.weekList?.length ? `单周（第 ${r.weekList.join(',')} 周）` : '单周'
-  if (r.weekType === 'even') return r.weekList?.length ? `双周（第 ${r.weekList.join(',')} 周）` : '双周'
-  return r.weekList ? `第${r.weekList.join(',')}周` : '每周'
 }
 </script>
 
@@ -863,7 +878,7 @@ function weekLabel(r: ImportRow): string {
             {{ (t.content as SemesterTemplateContent).periods.length }} 节 · v{{ t.version }}
           </template>
           <template v-else>
-            {{ (t.content as ImportRow[] | number[]).length }} 门课 · v{{ t.version }}
+            {{ templateStats(t).courses }} 门课 · {{ templateStats(t).sessions }} 节 · v{{ t.version }}
           </template>
           <span v-if="t.importCount" class="tpl-card__used">已导入 {{ t.importCount }} 次</span>
         </div>
@@ -891,7 +906,7 @@ function weekLabel(r: ImportRow): string {
                 {{ (previewing.content as SemesterTemplateContent).periods.length }} 节 · v{{ previewing.version }}
               </template>
               <template v-else>
-                {{ (previewing.content as ImportRow[] | number[]).length }} 门课 · v{{ previewing.version }}
+                {{ previewStats.courses }} 门课 · {{ previewStats.sessions }} 节 · v{{ previewing.version }}
               </template>
               <span v-if="previewing.importCount" class="tpl-card__used">已导入 {{ previewing.importCount }} 次</span>
             </span>
@@ -939,12 +954,13 @@ function weekLabel(r: ImportRow): string {
           </div>
         </div>
 
-        <!-- 课程模板：单门课程信息卡片（紧凑展示） -->
+        <!-- 课程模板：单门课程信息卡片（按节数逐节展示） -->
         <div v-else-if="previewing.kind === 'course'" class="tpl-course-preview">
-          <div v-for="r in (previewing.content as ImportRow[])" :key="r.name" class="tpl-course-card">
+          <div v-for="(r, i) in (previewing.content as ImportRow[])" :key="`${r.name}-${i}`" class="tpl-course-card">
             <div class="tpl-course-card__head">
               <span class="tpl-course-card__name">{{ r.name }}</span>
               <span class="chip" :class="r.type === 'lab' ? 'chip--lab' : ''">{{ r.type === 'lab' ? '实验课' : '理论课' }}</span>
+              <span v-if="(previewing.content as ImportRow[]).length > 1" class="tpl-combo-count num">第 {{ i + 1 }} 节</span>
             </div>
             <div class="tpl-course-card__grid">
               <div class="tpl-course-card__item">
@@ -975,44 +991,25 @@ function weekLabel(r: ImportRow): string {
           </div>
         </div>
 
-        <!-- 组合模板：周课表网格预览（7 天 × 12 节，同格堆叠显示不同周次的课程）
-             所有网格项显式指定 grid-row/grid-column：CSS Grid 稀疏自动放置的游标只进不退，
-             跨行课程会把后续自动放置项推到错误行，必须完全禁用自动放置 -->
-        <div v-else class="tpl-grid-preview" aria-label="课程预览网格">
-          <div class="tpl-grid-preview__grid">
-            <div class="tpl-grid-preview__head p-h" :style="{ gridRow: '1', gridColumn: '1' }">节次</div>
-            <div
-              v-for="wd in 7"
-              :key="'h' + wd"
-              class="tpl-grid-preview__head"
-              :style="{ gridRow: '1', gridColumn: String(wd + 1) }"
-            >{{ WEEKDAY_LABELS[wd - 1] }}</div>
-            <template v-for="p in GRID_PERIODS" :key="'r' + p">
-              <div class="tpl-grid-preview__period" :style="{ gridRow: String(p + 1), gridColumn: '1' }">{{ p }}</div>
-              <template v-for="wd in 7" :key="'c' + wd + '-' + p">
-                <div
-                  v-if="!shouldSkip(wd, p)"
-                  class="tpl-grid-preview__cell"
-                  :class="{ 'has-course': coursesAt(wd, p).length > 0 }"
-                  :style="{
-                    gridColumn: String(wd + 1),
-                    gridRow: spanOf(wd, p)
-                      ? `${spanOf(wd, p)!.start + 1} / ${spanOf(wd, p)!.end + 2}`
-                      : String(p + 1),
-                  }"
-                >
-                  <div
-                    v-for="r in coursesAt(wd, p)"
-                    :key="`${r.name}-${r.startPeriod}`"
-                    class="tpl-grid-preview__course"
-                    :class="{ 'is-lab': r.type === 'lab' }"
-                  >
-                    <span class="tpl-grid-preview__cname">{{ r.name }}</span>
-                    <span v-if="weekTag(r)" class="tpl-grid-preview__cweek num">{{ weekTag(r) }}</span>
-                  </div>
-                </div>
-              </template>
-            </template>
+        <!-- 组合模板：按课程分组的清单预览（同一门课的多个时间段合并；清单比周课表网格更耐读，
+             不受堆叠/截断/跨周次影响） -->
+        <div v-else class="tpl-combo-preview" aria-label="组合模板课程清单">
+          <div v-if="!previewGroups.length" class="tpl-rows-empty">该模板不包含课程</div>
+          <div v-for="g in previewGroups" :key="g.name" class="tpl-combo-group">
+            <div class="tpl-combo-head">
+              <span class="tpl-combo-name">{{ g.name }}</span>
+              <span class="chip" :class="g.type === 'lab' ? 'chip--lab' : ''">{{ g.type === 'lab' ? '实验课' : '理论课' }}</span>
+              <span v-if="g.teacher" class="tpl-combo-teacher">{{ g.teacher }}</span>
+              <span class="tpl-combo-count num">{{ g.sessions.length }} 节</span>
+            </div>
+            <div class="tpl-combo-sessions">
+              <div v-for="(r, i) in g.sessions" :key="i" class="tpl-combo-session">
+                <span class="tpl-combo-wd">{{ WEEKDAY_LABELS[r.weekday - 1] }}</span>
+                <span class="tpl-combo-period num">第 {{ r.startPeriod }}{{ r.endPeriod > r.startPeriod ? `–${r.endPeriod}` : '' }} 节</span>
+                <span class="tpl-combo-week">{{ weekLabelOf(r) }}</span>
+                <span v-if="r.location" class="tpl-combo-loc">{{ r.location }}</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1028,17 +1025,23 @@ function weekLabel(r: ImportRow): string {
       <div class="modal tpl-import-modal" role="dialog" aria-modal="true" :aria-label="batchImporting ? '批量导入课程模板' : `导入模板 ${importing?.name}`">
         <h3 class="modal-title">{{ batchImporting ? `批量导入所选课程模板（${selectedIds.size} 门）` : `导入「${importing?.name}」` }}</h3>
 
-        <!-- 预览（单模板） -->
-        <div v-if="!batchImporting" class="tpl-preview">
-          <div v-for="(d, i) in previewByWeekday" :key="d.weekday" class="tpl-preview-day">
-            <span class="tpl-preview-wd">{{ WEEKDAY_LABELS[i] }}</span>
-            <div v-if="d.rows.length" class="tpl-preview-rows">
-              <div v-for="r in d.rows" :key="`${r.name}-${r.startPeriod}`" class="tpl-preview-row">
-                <span class="tpl-preview-name">{{ r.name }}</span>
-                <span class="tpl-preview-meta num">第 {{ r.startPeriod }}{{ r.endPeriod > r.startPeriod ? `–${r.endPeriod}` : '' }} 节 · {{ weekLabel(r) }}</span>
+        <!-- 预览（单模板，按课程分组清单） -->
+        <div v-if="!batchImporting" class="tpl-combo-preview tpl-combo-preview--compact">
+          <div v-if="!previewGroups.length" class="tpl-rows-empty">该模板不包含课程</div>
+          <div v-for="g in previewGroups" :key="g.name" class="tpl-combo-group">
+            <div class="tpl-combo-head">
+              <span class="tpl-combo-name">{{ g.name }}</span>
+              <span class="chip" :class="g.type === 'lab' ? 'chip--lab' : ''">{{ g.type === 'lab' ? '实验课' : '理论课' }}</span>
+              <span class="tpl-combo-count num">{{ g.sessions.length }} 节</span>
+            </div>
+            <div class="tpl-combo-sessions">
+              <div v-for="(r, i) in g.sessions" :key="i" class="tpl-combo-session">
+                <span class="tpl-combo-wd">{{ WEEKDAY_LABELS[r.weekday - 1] }}</span>
+                <span class="tpl-combo-period num">第 {{ r.startPeriod }}{{ r.endPeriod > r.startPeriod ? `–${r.endPeriod}` : '' }} 节</span>
+                <span class="tpl-combo-week">{{ weekLabelOf(r) }}</span>
+                <span v-if="r.location" class="tpl-combo-loc">{{ r.location }}</span>
               </div>
             </div>
-            <div v-else class="tpl-preview-empty">—</div>
           </div>
         </div>
 
@@ -2432,85 +2435,105 @@ function weekLabel(r: ImportRow): string {
   flex: none;
 }
 
-/* 周课表网格预览 */
-.tpl-grid-preview {
-  overflow-x: auto;
+/* 组合模板预览：按课程分组的清单（同一门课的时间段合并到一张卡片） */
+.tpl-combo-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  max-height: 52vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+/* 导入弹窗内的紧凑变体：限高更小 */
+.tpl-combo-preview--compact {
+  max-height: 240px;
+}
+
+.tpl-combo-group {
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-md);
-  max-height: 320px;
-  overflow-y: auto;
+  /* 不设 overflow:hidden——否则组头无法在滚动容器内吸顶 */
+  flex-shrink: 0;
 }
 
-.tpl-grid-preview__grid {
-  display: grid;
-  grid-template-columns: 36px repeat(7, minmax(72px, 1fr));
-  /* 固定行高：堆叠课程不撑开行（否则一行被撑高、其他列大片留白）；
-     行高按 34px 起，跨行课程自然获得多倍高度 */
-  grid-template-rows: auto repeat(12, minmax(34px, auto));
-  min-width: 620px;
-  /* 网格项显式定位（grid-row/grid-column 均在模板内联指定），禁用自动放置 */
-  grid-auto-flow: row dense;
-}
-
-.tpl-grid-preview__head {
-  padding: var(--spacing-xs) var(--spacing-sm);
-  background: var(--color-bg-subtle);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-secondary);
-  text-align: center;
-  border-bottom: 1px solid var(--color-border-default);
-}
-
-.tpl-grid-preview__period {
+/* 组头吸顶：长清单滚动时始终能看清当前课程；下缘投影代替边框（吸顶时仍分隔内容） */
+.tpl-combo-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: var(--font-size-xs);
-  color: var(--color-text-tertiary);
-  border-bottom: 1px solid var(--color-border-default);
-  border-right: 1px solid var(--color-border-default);
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-subtle);
+  border-radius: calc(var(--radius-md) - 1px) calc(var(--radius-md) - 1px) 0 0;
+  box-shadow: 0 1px 0 var(--color-border-default);
 }
 
-.tpl-grid-preview__cell {
-  min-height: 30px;
-  padding: 2px;
-  border-bottom: 1px solid var(--color-border-default);
-  border-right: 1px solid var(--color-border-default);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.tpl-grid-preview__course {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 2px 4px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-brand-line);
-  background: var(--color-brand-subtle);
-  color: var(--color-brand);
-  font-size: 10px;
-  line-height: 1.3;
-  text-align: center;
-}
-
-.tpl-grid-preview__course.is-lab {
-  border-color: var(--course-3-line);
-  background: var(--course-3-bg);
-  color: var(--course-3-text);
-}
-
-.tpl-grid-preview__cname {
+.tpl-combo-name {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.tpl-grid-preview__cweek {
-  font-size: 9px;
-  opacity: 0.75;
+.tpl-combo-teacher {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.tpl-combo-count {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  flex: none;
+  white-space: nowrap;
+}
+
+.tpl-combo-sessions {
+  display: flex;
+  flex-direction: column;
+}
+
+.tpl-combo-session {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 7px var(--spacing-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-body);
+  border-top: 1px solid var(--color-border-default);
+}
+
+.tpl-combo-wd {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  flex: none;
+  width: 32px;
+}
+
+.tpl-combo-period {
+  color: var(--color-text-secondary);
+  flex: none;
+  white-space: nowrap;
+}
+
+.tpl-combo-week {
+  color: var(--color-brand);
+  flex: none;
+  white-space: nowrap;
+}
+
+.tpl-combo-loc {
+  margin-left: auto;
+  min-width: 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
