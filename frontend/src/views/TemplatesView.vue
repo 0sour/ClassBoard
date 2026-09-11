@@ -975,13 +975,20 @@ function weekLabel(r: ImportRow): string {
           </div>
         </div>
 
-        <!-- 组合模板：周课表网格预览（7 天 × 12 节，同格堆叠显示不同周次的课程） -->
+        <!-- 组合模板：周课表网格预览（7 天 × 12 节，同格堆叠显示不同周次的课程）
+             所有网格项显式指定 grid-row/grid-column：CSS Grid 稀疏自动放置的游标只进不退，
+             跨行课程会把后续自动放置项推到错误行，必须完全禁用自动放置 -->
         <div v-else class="tpl-grid-preview" aria-label="课程预览网格">
           <div class="tpl-grid-preview__grid">
-            <div class="tpl-grid-preview__head p-h">节次</div>
-            <div v-for="wd in 7" :key="'h' + wd" class="tpl-grid-preview__head">{{ WEEKDAY_LABELS[wd - 1] }}</div>
+            <div class="tpl-grid-preview__head p-h" :style="{ gridRow: '1', gridColumn: '1' }">节次</div>
+            <div
+              v-for="wd in 7"
+              :key="'h' + wd"
+              class="tpl-grid-preview__head"
+              :style="{ gridRow: '1', gridColumn: String(wd + 1) }"
+            >{{ WEEKDAY_LABELS[wd - 1] }}</div>
             <template v-for="p in GRID_PERIODS" :key="'r' + p">
-              <div class="tpl-grid-preview__period">{{ p }}</div>
+              <div class="tpl-grid-preview__period" :style="{ gridRow: String(p + 1), gridColumn: '1' }">{{ p }}</div>
               <template v-for="wd in 7" :key="'c' + wd + '-' + p">
                 <div
                   v-if="!shouldSkip(wd, p)"
@@ -989,7 +996,9 @@ function weekLabel(r: ImportRow): string {
                   :class="{ 'has-course': coursesAt(wd, p).length > 0 }"
                   :style="{
                     gridColumn: String(wd + 1),
-                    ...(spanOf(wd, p) ? { gridRow: `${spanOf(wd, p)!.start + 1} / ${spanOf(wd, p)!.end + 2}` } : {}),
+                    gridRow: spanOf(wd, p)
+                      ? `${spanOf(wd, p)!.start + 1} / ${spanOf(wd, p)!.end + 2}`
+                      : String(p + 1),
                   }"
                 >
                   <div
@@ -2435,8 +2444,12 @@ function weekLabel(r: ImportRow): string {
 .tpl-grid-preview__grid {
   display: grid;
   grid-template-columns: 36px repeat(7, minmax(72px, 1fr));
-  grid-template-rows: auto repeat(12, minmax(30px, auto));
+  /* 固定行高：堆叠课程不撑开行（否则一行被撑高、其他列大片留白）；
+     行高按 34px 起，跨行课程自然获得多倍高度 */
+  grid-template-rows: auto repeat(12, minmax(34px, auto));
   min-width: 620px;
+  /* 网格项显式定位（grid-row/grid-column 均在模板内联指定），禁用自动放置 */
+  grid-auto-flow: row dense;
 }
 
 .tpl-grid-preview__head {
