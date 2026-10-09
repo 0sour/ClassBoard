@@ -6,13 +6,27 @@
 # ============================================================
 FROM node:22-alpine AS build
 RUN apk add --no-cache python3 make g++
-# NAS 直连外网不稳定（node-gyp headers 下载超时）；构建阶段走宿主机 clash 代理。
-# 依赖 build.network: host（docker-compose.yml），容器内 127.0.0.1 即宿主机。
-ARG HTTP_PROXY=http://127.0.0.1:7890
-ARG HTTPS_PROXY=http://127.0.0.1:7890
+# 构建期网络：默认直连。若目标机器必须走代理，用
+#   --build-arg HTTP_PROXY=http://host:port --build-arg HTTPS_PROXY=...
+# 传入（需配合 build.network: host 让 127.0.0.1 指向宿主机）。
+# 注意 node-gyp / prebuild-install 会直连 github.com 拉预编译产物，内网不通时
+# 改用下方 npm registry + 二进制镜像参数（见 NPM_BINARY_HOST）。
+ARG HTTP_PROXY=
+ARG HTTPS_PROXY=
 ARG NO_PROXY=localhost,127.0.0.1
 ENV HTTP_PROXY=$HTTP_PROXY HTTPS_PROXY=$HTTPS_PROXY \
     http_proxy=$HTTP_PROXY https_proxy=$HTTPS_PROXY no_proxy=$NO_PROXY
+# 受限网络（github.com / unofficial-builds.nodejs.org 不通，常见于国内 NAS）：
+#   --build-arg NPM_REGISTRY=https://registry.npmmirror.com \
+#   --build-arg NPM_BINARY_HOST=https://registry.npmmirror.com/-/binary/better-sqlite3
+# npm_config_nodedir 指向镜像自带头文件（/usr/local/include/node），使 node-gyp
+# 源码编译 better-sqlite3 时无需联网下载 node headers —— 这是内网构建的关键，
+# 否则 node-gyp 会去 unofficial-builds.nodejs.org 拉头文件而超时失败。
+ARG NPM_REGISTRY=
+ARG NPM_BINARY_HOST=
+ENV npm_config_registry=$NPM_REGISTRY \
+    npm_config_better_sqlite3_binary_host=$NPM_BINARY_HOST \
+    npm_config_nodedir=/usr/local
 WORKDIR /app
 
 # 依赖分层缓存：仅两份 package 文件先装依赖

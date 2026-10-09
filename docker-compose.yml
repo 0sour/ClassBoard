@@ -1,12 +1,22 @@
 # ClassBoard 部署编排（技术设计文档 7.2）
 # 用法：CLASSBOARD_PORT=8080 docker compose up -d --build
+#
+# 构建期网络（按目标机器选一种）：
+#   1) 能直连 npm registry 与 github.com：无需额外参数。
+#   2) 需要走宿主机代理：保留下方 build.network: host，并传
+#      --build-arg HTTP_PROXY=http://127.0.0.1:7890 --build-arg HTTPS_PROXY=...
+#   3) 受限网络（github.com 不通，node-gyp/prebuild-install 会超时）：
+#      用构建参数切镜像源 ——
+#      --build-arg NPM_REGISTRY=https://registry.npmmirror.com \
+#      --build-arg NPM_BINARY_HOST=https://registry.npmmirror.com/-/binary/better-sqlite3
 services:
   classboard:
     image: classboard:latest
     build:
       context: .
       dockerfile: Dockerfile
-      # 构建阶段复用宿主网络栈：Dockerfile 内 npm/node-gyp 经 127.0.0.1:7890 代理拉取
+      # 构建阶段复用宿主网络栈：容器内 127.0.0.1 指向宿主机
+      # （仅在需要走宿主机代理时有用；不需要代理可删掉此行）
       network: host
     ports:
       - "${CLASSBOARD_PORT:-3000}:3000"

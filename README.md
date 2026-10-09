@@ -37,7 +37,19 @@ CLASSBOARD_PORT=3000 docker compose up -d --build
 
 数据持久化在 `./data/classboard.db`（挂载到容器 `/app/data`），升级容器不丢数据。
 
-> **NAS 构建提示**：若 NAS 直连外网不稳定（node-gyp 下载超时），Dockerfile 已内置构建阶段走宿主机代理的方案（`build.network: host` + `HTTP(S)_PROXY=http://127.0.0.1:7890`），按需调整代理地址即可。
+> **NAS 构建提示**：构建期网络按目标机器选一种——
+> 1. **能直连 `registry.npmjs.org` 与 `github.com`**：默认即可，无需额外参数。
+> 2. **需要走宿主机代理**：保留 `build.network: host`，传 `--build-arg HTTP_PROXY=http://127.0.0.1:7890 --build-arg HTTPS_PROXY=...`。
+> 3. **受限网络（`github.com` / `unofficial-builds.nodejs.org` 不通，国内 NAS 常见）**：
+>    ```bash
+>    docker compose build \
+>      --build-arg NPM_REGISTRY=https://registry.npmmirror.com \
+>      --build-arg NPM_BINARY_HOST=https://registry.npmmirror.com/-/binary/better-sqlite3
+>    ```
+>    `better-sqlite3` 需编译原生模块，`node-gyp` 默认会联网下载 node headers；Dockerfile 已设
+>    `npm_config_nodedir=/usr/local` 让它直接复用镜像自带头文件，这是内网构建成功的关键。
+>    注意 `node:22-alpine` 属 unofficial build，头文件下载失败时报
+>    `unofficial-builds.nodejs.org ... ETIMEDOUT`，此时务必用方案 3。
 
 ## 🗂 课程数据模型
 

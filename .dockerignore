@@ -11,8 +11,11 @@ frontend/dist
 frontend/public/sample.pdf
 frontend/scripts
 
-# 本地数据与快照：Docker 的 filepath.Match 不跨目录，模式需加 **/ 前缀
-# （否则 server/lib/data/ 与 data/snapshots/ 会随 COPY 进入构建上下文与镜像）
-**/data
+# 本地数据与快照。只排除真正的数据目录，勿用 `**/data`：
+# 那会连同 frontend/src/data/pdf-fixture.json（vue-tsc 类型检查的测试夹具）
+# 一起排除，导致 Docker 构建在前端 `npm run build` 阶段报 TS2307。
+data
+server/lib/data
+backups
 **/*.db
 **/*.db-*
