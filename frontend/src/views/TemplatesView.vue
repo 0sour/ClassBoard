@@ -4,7 +4,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import AppSelect from '@/components/common/AppSelect.vue'
-import { MAX_WEEKS, periodRange } from '@/utils/session'
+import { MAX_WEEKS, periodRange, periodsLabel, weeksLabel } from '@/utils/session'
 import { api, type SemesterTemplateContent, type TemplateInfo } from '@/api/client'
 import type { ImportRow } from '@/utils/pdf'
 import { confirm, toast } from '@/utils/ui'
@@ -643,24 +643,31 @@ const saveFromCourses = ref<ImportRow[]>([])
 const saveFromSelected = ref<Set<number>>(new Set())
 const saveFromLoading = ref(false)
 
-/** 按课程名分组（同一门课多个时间段合并显示） */
+/** 按「课程名 + 类型」分组：同名理论课与实验课是两门独立课程，必须分开显示，
+ * 否则整组只能打一个标签，会把理论课错标成实验课（详见 groupRows 注释） */
 const saveFromGroups = computed(() => {
   const map = new Map<string, { name: string; type: ImportRow['type']; indices: number[] }>()
   saveFromCourses.value.forEach((c, i) => {
-    const key = c.name
+    const key = `${c.name}|${c.type}`
     if (!map.has(key)) map.set(key, { name: c.name, type: c.type, indices: [] })
     map.get(key)!.indices.push(i)
   })
   return [...map.values()]
 })
 
-/** 组内时间段文本（如「周四 第5–8节 第15周」） */
-function sessionTextOf(c: ImportRow): string {
-  const s0 = c.sessions[0]
-  if (!s0) return '无固定时间'
-  const p = s0.periods
-  const pText = p.length > 1 ? `第 ${p[0]}–${p[p.length - 1]} 节` : `第 ${p[0]} 节`
-  return `${WEEKDAY_LABELS[s0.weekday - 1]} · ${pText} · ${weekLabelOf(c)}`
+/** 组内时间段计数：一行代表一个课程记录（sessions 为其全部时间段） */
+function sessionCountOf(indices: number[]): number {
+  return indices.reduce((n, i) => n + (saveFromCourses.value[i]?.sessions.length ?? 0), 0)
+}
+
+/** 一行渲染其全部时间段文案（不再只取第一个，否则一门课的第 2+ 个时间段会被隐藏） */
+function sessionTextsOf(c: ImportRow): string[] {
+  if (!c.sessions.length) return ['无固定时间']
+  return c.sessions.map((s) => {
+    const p = s.periods
+    const pText = periodsLabel(p)
+    return `${WEEKDAY_LABELS[s.weekday - 1]} · ${pText} · ${weeksLabel(s.weeks)}`
+  })
 }
 
 /** 组是否全选 */
@@ -803,24 +810,26 @@ const previewGroups = computed(() => {
   return groupRows(resolvePreviewRows(t))
 })
 
-/** 预览统计：课程门数（按课程名去重）与节数（课程行数） */
+/** 预览统计：课程门数（按「名字+类型」去重，理论/实验算两门）与节数（课程行数） */
 const previewStats = computed(() => {
   const t = previewing.value ?? importing.value
   if (!t) return { courses: 0, sessions: 0 }
   const rows = resolvePreviewRows(t)
-  return { courses: new Set(rows.map((r) => r.name)).size, sessions: rows.length }
+  return { courses: new Set(rows.map((r) => `${r.name}|${r.type}`)).size, sessions: rows.length }
 })
 
-/** 课程行按课程名分组：组内时间段按星期/节次排序，组间按最早时间段排序 */
+/** 课程行分组：键为「课程名 + 类型」——同名理论课与实验课是两门独立课程，
+ * 若只按名字分组会给整组打单一标签（理论课被错标成实验课）并让两类混在一起。
+ * 组内按星期/节次排序，组间按最早时间段排序。 */
 function groupRows(rows: ImportRow[]): { name: string; type: ImportRow['type']; teacher: string; sessions: ImportRow[] }[] {
   const map = new Map<string, { name: string; type: ImportRow['type']; teacher: string; sessions: ImportRow[] }>()
   for (const r of rows) {
-    let g = map.get(r.name)
+    const key = `${r.name}|${r.type}`
+    let g = map.get(key)
     if (!g) {
       g = { name: r.name, type: r.type, teacher: r.teacher, sessions: [] }
-      map.set(r.name, g)
+      map.set(key, g)
     }
-    if (r.type === 'lab') g.type = 'lab'
     if (!g.teacher && r.teacher) g.teacher = r.teacher
     g.sessions.push(r)
   }
@@ -839,7 +848,7 @@ function groupRows(rows: ImportRow[]): { name: string; type: ImportRow['type']; 
 /** 模板统计（列表卡片用） */
 function templateStats(t: TemplateInfo): { courses: number; sessions: number } {
   const rows = resolvePreviewRows(t)
-  return { courses: new Set(rows.map((r) => r.name)).size, sessions: rows.length }
+  return { courses: new Set(rows.map((r) => `${r.name}|${r.type}`)).size, sessions: rows.length }
 }
 
 /** 解析模板为课程行数组（course 直接返回；unit 快照返回课程行；unit 引用展开课程模板；semester 返回空） */
@@ -1479,9 +1488,9 @@ function resolvePreviewRows(t: TemplateInfo): ImportRow[] {
           <input v-model="saveFromName" class="date-input" type="text" placeholder="如：24集成2基础课程" maxlength="50" />
         </label>
 
-        <!-- 课程勾选列表（按课程名分组，同一门课多个时间段合并显示） -->
+        <!-- 课程勾选列表（按「课程名 + 类型」分组；一个课程记录含全部时间段，逐行展开显示） -->
         <div class="tpl-save-head">
-          <span class="field__label">选择课程（已选 {{ saveFromSelected.size }} / {{ saveFromCourses.length }} 节）</span>
+          <span class="field__label">选择课程（已选 {{ saveFromSelected.size }} / {{ saveFromCourses.length }} 门）</span>
           <label class="tpl-batch-all">
             <input type="checkbox" :checked="saveFromCourses.length > 0 && saveFromCourses.every((_, i) => saveFromSelected.has(i))" @change="toggleSaveFromAll" />
             <span>全选</span>
@@ -1490,22 +1499,24 @@ function resolvePreviewRows(t: TemplateInfo): ImportRow[] {
         <div v-if="saveFromLoading" class="tpl-rows-empty">加载中…</div>
         <div v-else-if="!saveFromCourses.length" class="tpl-rows-empty">该学期没有课程</div>
         <div v-else class="tpl-save-list">
-          <div v-for="g in saveFromGroups" :key="g.name" class="tpl-save-group">
-            <label class="tpl-save-group-head" :class="{ checked: groupAllSelected(g) }">
-              <input type="checkbox" :checked="groupAllSelected(g)" @change="toggleSaveFromGroup(g)" />
-              <span class="tpl-save-name">
-                {{ g.name }}
-                <span class="chip" :class="g.type === 'lab' ? 'chip--lab' : ''">{{ g.type === 'lab' ? '实验' : '理论' }}</span>
-              </span>
-              <span class="tpl-save-group-count num">{{ g.indices.length }} 节</span>
-            </label>
-            <div class="tpl-save-sessions">
-              <label v-for="i in g.indices" :key="i" class="tpl-save-session" :class="{ checked: saveFromSelected.has(i) }">
-                <input type="checkbox" :checked="saveFromSelected.has(i)" @change="toggleSaveFromCourse(i)" />
-                <span class="tpl-save-meta num">{{ sessionTextOf(saveFromCourses[i]) }}</span>
+            <div v-for="g in saveFromGroups" :key="`${g.name}|${g.type}`" class="tpl-save-group">
+              <label class="tpl-save-group-head" :class="{ checked: groupAllSelected(g) }">
+                <input type="checkbox" :checked="groupAllSelected(g)" @change="toggleSaveFromGroup(g)" />
+                <span class="tpl-save-name">
+                  {{ g.name }}
+                  <span class="chip" :class="g.type === 'lab' ? 'chip--lab' : ''">{{ g.type === 'lab' ? '实验' : '理论' }}</span>
+                </span>
+                <span class="tpl-save-group-count num">{{ sessionCountOf(g.indices) }} 节</span>
               </label>
+              <div class="tpl-save-sessions">
+                <label v-for="i in g.indices" :key="i" class="tpl-save-session" :class="{ checked: saveFromSelected.has(i) }">
+                  <input type="checkbox" :checked="saveFromSelected.has(i)" @change="toggleSaveFromCourse(i)" />
+                  <span class="tpl-save-meta num">
+                    <span v-for="(txt, k) in sessionTextsOf(saveFromCourses[i])" :key="k" class="tpl-save-line">{{ txt }}</span>
+                  </span>
+                </label>
+              </div>
             </div>
-          </div>
         </div>
 
         <div class="edit-actions">
@@ -1910,6 +1921,14 @@ function resolvePreviewRows(t: TemplateInfo): ImportRow[] {
 .tpl-save-meta {
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
+  /* 一个课程记录可能含多个时间段，逐行排列（每个时间段一行） */
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tpl-save-line {
+  display: block;
 }
 
 /* 课程模板完整表单（借鉴手动导入课程 CourseEditor；宽度规则在 .modal 之后定义） */
