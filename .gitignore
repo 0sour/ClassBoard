@@ -5,9 +5,14 @@ node_modules/
 frontend/dist/
 dist/
 
-# 本地数据（数据库与 WAL）
-server/lib/data/*.db
-server/lib/data/*.db-*
+# 本地数据（数据库、WAL 与自动快照）
+# compose 的 bind mount 根目录（含 data/snapshots/），以及后端默认数据目录
+/data/
+server/lib/data/
+
+# 兜底：任何路径下的 SQLite 库与 WAL/SHM 旁文件
+*.db
+*.db-*
 
 # 本地备份（NAS 课表数据快照，勿提交）
 backups/

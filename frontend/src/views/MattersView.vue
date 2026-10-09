@@ -80,9 +80,26 @@ async function removeExam(e: Exam): Promise<void> {
 }
 
 // ---- 实验课 ----
+/** 实验课列表：按课程组（本学期的实验课），排序取各课最早的上课时间 */
 const labCourses = computed(() =>
-  store.visibleCourses.filter((c) => c.type === 'lab').sort((a, b) => a.weekday - b.weekday || a.startPeriod - b.startPeriod),
+  store.courses
+    .filter((c) => c.semesterId === store.currentSemesterId && c.type === 'lab')
+    .sort((a, b) => {
+      const ka = a.sessions[0]
+      const kb = b.sessions[0]
+      const wa = ka ? ka.weekday : 9
+      const wb = kb ? kb.weekday : 9
+      return wa - wb || (ka?.periods[0] ?? 0) - (kb?.periods[0] ?? 0) || a.name.localeCompare(b.name)
+    }),
 )
+
+/** 实验课的时间文案（多个上课时间合并展示） */
+function labTimeText(c: Course): string {
+  if (!c.sessions.length) return '无固定时间'
+  return c.sessions
+    .map((s) => `${WEEKDAY_LABELS[s.weekday - 1]} 第${s.periods[0]}${s.periods[s.periods.length - 1] > s.periods[0] ? `–${s.periods[s.periods.length - 1]}` : ''}节`)
+    .join(' · ')
+}
 const selectedCourse = ref<Course | null>(null)
 const showLabEditor = ref(false)
 const labEditorPresetLab = ref(true)
@@ -306,7 +323,7 @@ const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周�
           <span class="item-name">{{ c.name }}</span>
           <span class="item-meta">{{ c.location }} · {{ c.teacher }}</span>
         </span>
-        <span class="item-slot num">{{ WEEKDAY_LABELS[c.weekday - 1] }} 第{{ c.startPeriod }}–{{ c.endPeriod }}节</span>
+        <span class="item-slot num">{{ labTimeText(c) }}</span>
       </button>
       <div v-if="labCourses.length === 0" class="empty">
         <p class="empty__title">还没有实验课</p>
@@ -398,7 +415,7 @@ const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周�
             <dl class="detail-list">
               <div class="detail-row"><dt>教师</dt><dd>{{ selectedLab.teacher || '—' }}</dd></div>
               <div class="detail-row"><dt>地点</dt><dd>{{ selectedLab.location || '—' }}</dd></div>
-              <div class="detail-row"><dt>时间</dt><dd class="num">{{ WEEKDAY_LABELS[selectedLab.weekday - 1] }} 第{{ selectedLab.startPeriod }}–{{ selectedLab.endPeriod }}节</dd></div>
+              <div class="detail-row"><dt>时间</dt><dd class="num">{{ labTimeText(selectedLab) }}</dd></div>
               <div class="detail-row" v-if="selectedLab.remark"><dt>备注</dt><dd>{{ selectedLab.remark }}</dd></div>
             </dl>
             <div class="detail-actions">
@@ -412,7 +429,7 @@ const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周�
       </aside>
     </div>
 
-    <CourseModal :course="selectedCourse" @close="selectedCourse = null" @edit="editLabCourse" />
+    <CourseModal :course-id="selectedCourse?.id ?? null" @close="selectedCourse = null" @edit="editLabCourse" />
     <CourseEditor
       :open="showLabEditor"
       :course="editingCourse"

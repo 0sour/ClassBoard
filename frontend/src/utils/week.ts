@@ -1,7 +1,7 @@
 // ============================================================
 // ClassBoard · 日期与周次工具
 // ============================================================
-import type { Semester, Weekday, WeekType } from '@/types'
+import type { Semester, Weekday } from '@/types'
 
 /** 解析 YYYY-MM-DD 为本地 Date（避免 UTC 偏移） */
 export function parseDate(s: string): Date {
@@ -28,8 +28,19 @@ export function getWeekday(d: Date): Weekday {
   return ((js + 6) % 7 + 1) as Weekday
 }
 
-/** 计算日期在学期中的周序号。
- * @returns 周序号（从 1 起）；日期早于学期起始日返回 0，晚于学期结束日返回 null（假期）。
+/** 某日期所在周的起始日（按 weekStartDay 对齐：周一起算或周日起算） */
+export function weekStartOf(date: Date, weekStartDay: 1 | 7): Date {
+  const off = (((date.getDay() - weekStartDay) % 7) + 7) % 7
+  const start = new Date(date)
+  start.setDate(date.getDate() - off)
+  return start
+}
+
+/**
+ * 计算日期在学期中的周序号。
+ * 算法与服务端 server/lib/weekspan.js 的 weekNumberIn 完全一致：
+ * 以 weekStartDay 对齐「周起点」，周序号 = 目标周起始日与学期首周起始日相差的周数 + 1。
+ * @returns 0=未开学（早于起始日）；null=学期已结束（晚于结束日）；1..n=第几周
  */
 export function calcWeekNumber(
   date: Date,
@@ -37,13 +48,14 @@ export function calcWeekNumber(
 ): number | null {
   const start = parseDate(semester.startDate)
   const end = parseDate(semester.endDate)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null
   if (date.getTime() < start.getTime()) return 0
-  const offset = semester.weekStartDay === 7 ? 1 : 0 // 周起始对齐：周日=7 时平移 1 天
-  const dayMs = 24 * 60 * 60 * 1000
-  const diff = Math.floor((date.getTime() - start.getTime()) / dayMs) + offset
-  const week = Math.floor(diff / 7) + 1
   if (date.getTime() > end.getTime()) return null
-  return week
+  const weeks = Math.round(
+    (weekStartOf(date, semester.weekStartDay).getTime() - weekStartOf(start, semester.weekStartDay).getTime()) /
+      (7 * 24 * 60 * 60 * 1000),
+  )
+  return weeks + 1
 }
 
 /** 获取某周（以周一为锚）的 7 天日期列表 */
@@ -72,36 +84,4 @@ export function isOddWeek(weekNumber: number | null): boolean {
   return weekNumber % 2 === 1
 }
 
-/** 判断周规则在指定周序号是否可见 */
-export function isVisibleInWeek(
-  weekType: WeekType,
-  weekList: number[] | null,
-  weekNumber: number | null,
-): boolean {
-  if (weekNumber === null) return false
-  switch (weekType) {
-    case 'all':
-      return true
-    case 'odd':
-      // 单周 + 可选周数范围（如 8-14 周单周 → weekList=[8,10,12,14]）
-      if (!isOddWeek(weekNumber)) return false
-      return weekList === null || weekList.length === 0 || weekList.includes(weekNumber)
-    case 'even':
-      // 双周 + 可选周数范围
-      if (isOddWeek(weekNumber)) return false
-      return weekList === null || weekList.length === 0 || weekList.includes(weekNumber)
-    case 'custom':
-      return weekList !== null && weekList.includes(weekNumber)
-  }
-}
 
-/** 展开周规则为规范表示（供测试与展示） */
-export function normalizeWeekType(weekType: WeekType, weekList: number[] | null): {
-  weekType: WeekType
-  weekList: number[] | null
-} {
-  if (weekType === 'custom' && weekList === null) {
-    return { weekType: 'all', weekList: null }
-  }
-  return { weekType, weekList }
-}

@@ -2,10 +2,11 @@
 // ClassBoard · 学期路由（技术文档 4.3.1 #7-#11，多用户按 user_id 隔离）
 // ============================================================
 import { Router } from 'express'
-import { db, DEFAULT_PERIODS, getCurrentSemesterId, setCurrentSemesterId, clearCurrentSemesterId, toSemester } from '../lib/db.js'
+import { db, DATA_DIR, DEFAULT_PERIODS, getCurrentSemesterId, setCurrentSemesterId, clearCurrentSemesterId, toSemester } from '../lib/db.js'
 import { badRequest, notFound } from '../lib/errors.js'
 import { wrap } from '../lib/errors.js'
 import { semesterRules, validateFields } from '../lib/validate.js'
+import { createSnapshot } from '../lib/snapshot.js'
 
 export const semestersRouter = Router()
 
@@ -81,8 +82,13 @@ semestersRouter.delete(
   '/:id',
   wrap(async (req, res) => {
     const id = Number(req.params.id)
-    const row = db.prepare('SELECT * FROM semester WHERE id = ? AND user_id = ?').get(id, req.user.id)
+    const row = db.prepare('SELECT id FROM semester WHERE id = ? AND user_id = ?').get(id, req.user.id)
     if (!row) throw notFound('学期不存在')
+    // 删除学期会级联清空课程/考试/作业：先做一致性快照
+    const removedCourses = db
+      .prepare('SELECT COUNT(*) AS n FROM course WHERE semester_id = ? AND user_id = ?')
+      .get(id, req.user.id).n
+    const snapshot = await createSnapshot(db, DATA_DIR, 'semester-delete')
     const del = db.transaction(() => {
       db.prepare('DELETE FROM semester WHERE id = ?').run(id)
       if (getCurrentSemesterId(req.user.id) === id) {
@@ -92,6 +98,6 @@ semestersRouter.delete(
       }
     })
     del()
-    res.status(204).end()
+    res.json({ deletedCourses: removedCourses, snapshot })
   }),
 )

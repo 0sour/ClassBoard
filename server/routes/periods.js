@@ -69,13 +69,47 @@ periodsRouter.delete(
     const id = Number(req.params.id)
     const row = db.prepare('SELECT * FROM period_template WHERE id = ? AND user_id = ?').get(id, req.user.id)
     if (!row) throw notFound('节次不存在')
+    const removedIndex = row.period_index
+
+    // 受影响课程数（该节次上有课的课程组数），供前端提示
+    const affectedCourses = db
+      .prepare(
+        `SELECT COUNT(DISTINCT cs.course_id) AS n
+           FROM course_slot sl
+           JOIN course_session cs ON cs.id = sl.session_id
+           JOIN course c ON c.id = cs.course_id
+          WHERE sl.period = ? AND c.semester_id = ? AND c.user_id = ?`,
+      )
+      .get(removedIndex, row.semester_id, req.user.id).n
+
     const reorder = db.transaction(() => {
+      const sessionFilter = `session_id IN (
+        SELECT cs.id FROM course_session cs
+          JOIN course c ON c.id = cs.course_id
+         WHERE c.semester_id = ? AND c.user_id = ?
+      )`
+
+      // 被删节次上的格子连同课程时间一起移除（节次序号已不存在）
+      db.prepare(`DELETE FROM course_slot WHERE period = ? AND ${sessionFilter}`)
+        .run(removedIndex, row.semester_id, req.user.id)
+
+      // 后续节次整体前移 1，保持 course_slot.period 与节次模板索引一致。
+      // 按节次升序逐值更新：可证明不与 UNIQUE(session_id, period, week) 冲突
+      // （最小的 p 更新为 p-1 时，p-1 ≤ removedIndex 且该值已无行占用）。
+      const shifting = db
+        .prepare(`SELECT DISTINCT period AS p FROM course_slot WHERE period > ? AND ${sessionFilter} ORDER BY p ASC`)
+        .all(removedIndex, row.semester_id, req.user.id)
+      const shiftOne = db.prepare(`UPDATE course_slot SET period = ? WHERE period = ? AND ${sessionFilter}`)
+      for (const { p } of shifting) {
+        shiftOne.run(p - 1, p, row.semester_id, req.user.id)
+      }
+
       db.prepare('DELETE FROM period_template WHERE id = ?').run(id)
       const rest = db.prepare('SELECT * FROM period_template WHERE semester_id = ? ORDER BY period_index ASC').all(row.semester_id)
       const update = db.prepare('UPDATE period_template SET period_index = ? WHERE id = ?')
       rest.forEach((p, i) => update.run(i + 1, p.id))
     })
     reorder()
-    res.status(204).end()
+    res.json({ removedPeriod: removedIndex, affectedCourses })
   }),
 )

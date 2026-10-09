@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { Course } from '@/types'
+import type { CourseBlock } from '@/types'
 
 const props = defineProps<{
-  course: Course
+  /** 课程块（一个上课时间一组；同一课程多个时间段渲染为多块） */
+  course: CourseBlock
   conflict?: boolean
   /** 折叠态（冲突分栏 1/3）：只显示名称；未传为 false，非冲突课程不受影响 */
   collapsed?: boolean
@@ -11,7 +12,7 @@ const props = defineProps<{
   dragging?: boolean
 }>()
 
-const emit = defineEmits<{ (e: 'open', course: Course): void }>()
+const emit = defineEmits<{ (e: 'open', courseId: number): void }>()
 
 /** 课程色板三值 CSS 变量（从全局 :root 读取，运行时由 color 名映射） */
 const style = computed(() => ({
@@ -28,7 +29,7 @@ const style = computed(() => ({
     :style="style"
     :class="{ lab: course.type === 'lab', conflict, collapsed, dragging }"
     :aria-label="`${course.name}，${course.location}`"
-    @click="emit('open', course)"
+    @click="emit('open', course.id)"
   >
     <span v-if="course.type === 'lab'" class="lab-tag">实验</span>
     <span v-if="conflict" class="conflict-dot" aria-hidden="true"></span>

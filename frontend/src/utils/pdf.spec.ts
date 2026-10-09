@@ -91,9 +91,8 @@ describe('PDF 解析：单元格字段解析', () => {
     expect(r.name).toBe('模拟集成电路设计')
     expect(r.location).toBe('C3敏学楼110')
     expect(r.teacher).toBe('骆晨')
-    expect(r.startPeriod).toBe(3)
-    expect(r.endPeriod).toBe(4)
-    expect(r.weekday).toBe(5)
+    expect(r.sessions[0].periods).toEqual([3, 4])
+    expect(r.sessions[0].weekday).toBe(5)
     expect(r.type).toBe('course')
     expect(r.remark).toBe('讲课 48 学时 / 周学时 3 / 学分 3')
   })
@@ -108,7 +107,8 @@ describe('PDF 解析：单元格字段解析', () => {
     expect(r.name).toBe('马克思主义基本原理')
     expect(r.location).toBe('C5科教中心231')
     expect(r.teacher).toBe('焦鑫')
-    expect(r.weekType).toBe('odd')
+    // 1-15周(单) → 逐周数组 [1,3,5,7,9,11,13,15]
+    expect(r.sessions[0].weeks).toEqual([1, 3, 5, 7, 9, 11, 13, 15])
   })
 
   it('课程学时组成含实验 → 仍为 course，实验学时进备注', () => {
@@ -119,8 +119,7 @@ describe('PDF 解析：单元格字段解析', () => {
     )
     if ('error' in r) throw new Error(r.error)
     expect(r.type).toBe('course')
-    expect(r.weekType).toBe('custom')
-    expect(r.weekList).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15])
+    expect(r.sessions[0].weeks).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15])
     expect(r.remark).toBe('讲课 24 学时 + 实验 8 学时 / 周学时 2 / 学分 2')
   })
 
@@ -150,50 +149,38 @@ describe('PDF 解析：单元格字段解析', () => {
   it('无节次段时使用单元格所在行区间', () => {
     const r = parseCellText('某某课程/场地:C3/教师:李', 1, [5, 6])
     if ('error' in r) throw new Error(r.error)
-    expect(r.startPeriod).toBe(5)
-    expect(r.endPeriod).toBe(6)
+    expect(r.sessions[0].periods).toEqual([5, 6])
   })
 })
 
 describe('PDF 解析：周次规则展开', () => {
-  it('1-16周 → all', () => {
-    expect(parseWeeks('1-16周')).toEqual({ weekType: 'all', weekList: null })
+  const full = Array.from({ length: 16 }, (_, i) => i + 1)
+  it('1-16周 → 逐周 [1..16]', () => {
+    expect(parseWeeks('1-16周')).toEqual(full)
   })
-  it('1-15周(单) → odd（全学期单周，无范围）', () => {
-    expect(parseWeeks('1-15周(单)')).toEqual({ weekType: 'odd', weekList: null })
+  it('1-15周(单) → 全学期单周 [1,3,...,15]', () => {
+    expect(parseWeeks('1-15周(单)')).toEqual([1, 3, 5, 7, 9, 11, 13, 15])
   })
-  it('1-7周(单) → odd + 范围 [1,3,5,7]（不含 9-15 周）', () => {
-    const r = parseWeeks('1-7周(单)')
-    expect(r.weekType).toBe('odd')
-    expect(r.weekList).toEqual([1, 3, 5, 7])
+  it('1-7周(单) → [1,3,5,7]（不含 9-15 周）', () => {
+    expect(parseWeeks('1-7周(单)')).toEqual([1, 3, 5, 7])
   })
-  it('1-8周(双) → even + 范围 [2,4,6,8]', () => {
-    const r = parseWeeks('1-8周(双)')
-    expect(r.weekType).toBe('even')
-    expect(r.weekList).toEqual([2, 4, 6, 8])
+  it('1-8周(双) → [2,4,6,8]', () => {
+    expect(parseWeeks('1-8周(双)')).toEqual([2, 4, 6, 8])
   })
-  it('8-14周(单) → odd + 范围 [9,11,13]', () => {
-    const r = parseWeeks('8-14周(单)')
-    expect(r.weekType).toBe('odd')
-    expect(r.weekList).toEqual([9, 11, 13])
+  it('8-14周(单) → [9,11,13]', () => {
+    expect(parseWeeks('8-14周(单)')).toEqual([9, 11, 13])
   })
   it('1-8周,10-16周(双) → 前段全周 + 后段双周（(双) 只修饰最后一段）', () => {
-    const r = parseWeeks('1-8周,10-16周(双)')
-    expect(r.weekType).toBe('custom')
-    expect(r.weekList).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16])
+    expect(parseWeeks('1-8周,10-16周(双)')).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16])
   })
-  it('1-10周,12周,15周 → custom', () => {
-    const r = parseWeeks('1-10周,12周,15周')
-    expect(r.weekType).toBe('custom')
-    expect(r.weekList).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15])
+  it('1-10周,12周,15周 → 逐周展开', () => {
+    expect(parseWeeks('1-10周,12周,15周')).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15])
   })
-  it('6-13周 → custom 连续区间', () => {
-    const r = parseWeeks('6-13周')
-    expect(r.weekType).toBe('custom')
-    expect(r.weekList).toEqual([6, 7, 8, 9, 10, 11, 12, 13])
+  it('6-13周 → 连续区间逐周', () => {
+    expect(parseWeeks('6-13周')).toEqual([6, 7, 8, 9, 10, 11, 12, 13])
   })
-  it('空串 → all', () => {
-    expect(parseWeeks('')).toEqual({ weekType: 'all', weekList: null })
+  it('空串 → 空数组（由调用方决定默认全周）', () => {
+    expect(parseWeeks('')).toEqual([])
   })
 })
 
@@ -226,19 +213,19 @@ describe('PDF 解析：真实 fixture 全量', () => {
 
   it('全部课程星期与节次有效', () => {
     for (const r of rows) {
-      expect(r.weekday).toBeGreaterThanOrEqual(1)
-      expect(r.weekday).toBeLessThanOrEqual(7)
-      expect(r.startPeriod).toBeGreaterThanOrEqual(1)
-      expect(r.endPeriod).toBeGreaterThanOrEqual(r.startPeriod)
+      for (const s of r.sessions) {
+        expect(s.weekday).toBeGreaterThanOrEqual(1)
+        expect(s.weekday).toBeLessThanOrEqual(7)
+        expect(s.periods[0]).toBeGreaterThanOrEqual(1)
+        expect(s.periods[s.periods.length - 1]).toBeGreaterThanOrEqual(s.periods[0])
+      }
     }
   })
 
-  it('单双周规则样本正确（数字信号处理 1-7周(单) 星期四 → odd + 范围 [1,3,5,7]）', () => {
-    const r = rows.find((x) => x.name === '数字信号处理' && x.weekday === 4)
-    expect(r?.weekType).toBe('odd')
-    expect(r?.weekList).toEqual([1, 3, 5, 7])
-    expect(r?.startPeriod).toBe(5)
-    expect(r?.endPeriod).toBe(6)
+  it('单双周规则样本正确（数字信号处理 1-7周(单) 星期四 → [1,3,5,7]，第 5–6 节）', () => {
+    const r = rows.find((x) => x.name === '数字信号处理' && x.sessions[0].weekday === 4)
+    expect(r?.sessions[0].weeks).toEqual([1, 3, 5, 7])
+    expect(r?.sessions[0].periods).toEqual([5, 6])
   })
 
   it('含实验学时的课程识别为 course（微电子器件基础）', () => {

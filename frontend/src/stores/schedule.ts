@@ -1,13 +1,21 @@
 // ============================================================
 // ClassBoard · scheduleStore（学期 / 周次 / 课程 / 节次）
-// 数据源：后端 API 优先（remote 模式），后端不可用时回退本地 mock
+// 数据源：后端 API 优先；连接失败进入明确的「连接失败」状态（可重试），不回退 mock
+// 课程模型：course 组 + sessions（每个上课时间一组逐项 periods/weeks）
 // ============================================================
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { api, type ScheduleResponse, type SettingsPayload, type UserInfo, type WeatherData } from '@/api/client'
-import { MOCK_COURSES, MOCK_PERIODS, MOCK_SEMESTER } from '@/data/mock'
-import type { Course, Exam, Homework, Period, Semester, Weekday, WeekType } from '@/types'
+import {
+  api,
+  type ScheduleCourseBlock,
+  type ScheduleResponse,
+  type SettingsPayload,
+  type UserInfo,
+  type WeatherData,
+} from '@/api/client'
+import type { Course, CourseBlock, Exam, Homework, Period, Semester, Weekday } from '@/types'
 import { pickCourseColor } from '@/utils/course'
+import { courseBlocks, normalizeServerBlock, runsOf, toBlocks } from '@/utils/session'
 import type { ImportRow } from '@/utils/pdf'
 import {
   calcWeekNumber,
@@ -15,18 +23,54 @@ import {
   formatMonthDay,
   getWeekday,
   isOddWeek,
-  isVisibleInWeek,
   parseDate,
   toMonday,
   weekDates,
 } from '@/utils/week'
 
+/** 服务端课程块 → 前端 CourseBlock */
+function serverBlockToBlock(raw: ScheduleCourseBlock): CourseBlock {
+  // 服务端的 startPeriod/endPeriod 基于「本周节次」，跨节课程在部分周会缩水；
+  // 网格定位与冲突检测统一用完整节次（allPeriods），保证块位置不随切周跳变。
+  const allPeriods = raw.allPeriods?.length ? raw.allPeriods : raw.periods
+  return normalizeServerBlock({
+    id: raw.id,
+    sessionId: raw.sessionId,
+    semesterId: raw.semesterId,
+    type: raw.type,
+    name: raw.name,
+    teacher: raw.teacher,
+    location: raw.location,
+    color: raw.color,
+    remark: raw.remark,
+    weekday: raw.weekday as Weekday,
+    periods: raw.periods,
+    startPeriod: allPeriods.length ? allPeriods[0] : raw.startPeriod,
+    endPeriod: allPeriods.length ? allPeriods[allPeriods.length - 1] : raw.endPeriod,
+    runs: runsOf(raw.periods),
+    allPeriods,
+    weeks: [],
+    active: true,
+  })
+}
+
+/** 课程写入载荷（元数据 + 上课时间组） */
+export interface CourseWritePayload {
+  type: 'course' | 'lab'
+  name: string
+  teacher: string
+  location: string
+  color?: string
+  remark?: string
+  sessions: { weekday: Weekday; location: string; periods: number[]; weeks: number[] }[]
+}
+
 export const useScheduleStore = defineStore('schedule', () => {
   // 学期状态
-  const semesters = ref<Semester[]>([MOCK_SEMESTER])
-  const currentSemesterId = ref<number | null>(MOCK_SEMESTER.id)
-  const periods = ref<Period[]>(MOCK_PERIODS)
-  const courses = ref<Course[]>(MOCK_COURSES)
+  const semesters = ref<Semester[]>([])
+  const currentSemesterId = ref<number | null>(null)
+  const periods = ref<Period[]>([])
+  const courses = ref<Course[]>([])
 
   // 事项状态（考试 / 作业，当前学期全量）
   const exams = ref<Exam[]>([])
@@ -34,6 +78,7 @@ export const useScheduleStore = defineStore('schedule', () => {
 
   // 周视图状态
   const weekOffset = ref(0) // 0=当前周，-1=上一周
+  /** 已废弃的单双周过滤：周次已逐项存储，保留开关语义为「忽略周次过滤，显示全部课程」 */
   const showOddEvenFilter = ref(true)
 
   // 设置（提醒等；remote 模式以服务端为准）
@@ -50,7 +95,6 @@ export const useScheduleStore = defineStore('schedule', () => {
   const weatherData = ref<WeatherData | null>(null)
   const weatherLoading = ref(false)
 
-  /** 拉取天气（设置页保存后调用；失败保留旧数据） */
   async function refreshWeather(): Promise<void> {
     if (!remote.value || !settings.value.weather?.enabled) {
       weatherData.value = null
@@ -66,23 +110,44 @@ export const useScheduleStore = defineStore('schedule', () => {
     }
   }
 
-  // 访问口令：开启且未登录时为 true（App 层据此展示口令页）
+  // 未登录时为 true（App 层据此展示口令页）
   const accessRequired = ref(false)
 
-  // 远端模式：API 连接成功即为 true；weekContext 为 /api/schedule 的周聚合数据
+  // 远端模式：API 连接成功即为 true
   const remote = ref(false)
+  /** 连接失败状态（区分「后端不可达」与「数据为空」——不再回退 mock 造成错觉） */
+  const connectError = ref<string | null>(null)
+  const bootstrapping = ref(false)
   const weekContext = ref<ScheduleResponse | null>(null)
-  // 今天所在周的聚合数据：与周视图切换（weekOffset）解耦，日视图/「今日课程」据此显示
   const todayContext = ref<ScheduleResponse | null>(null)
 
-  // 加载标志（骨架屏用，UI 设计文档 4.4）
+  // 加载标志（骨架屏用）
   const mattersLoading = ref(false)
 
   const currentSemester = computed(
     () => semesters.value.find((s) => s.id === currentSemesterId.value) ?? null,
   )
 
-  const today = computed(() => new Date())
+  /**
+   * 当前日期。用 ref 而非 computed(() => new Date())：
+   * 后者没有响应式依赖，首次求值后永久缓存，挂机跨天后「今天」页/周号/铃铛会停在旧日期。
+   * 由 tickDate() 定时刷新（App 启动时注册）。
+   */
+  const today = ref(new Date())
+
+  /** 跨天检查：日期字符串变化时更新 today 并重拉「今天」所在周数据 */
+  function tickDate(): boolean {
+    const now = new Date()
+    const sameDay =
+      now.getFullYear() === today.value.getFullYear() &&
+      now.getMonth() === today.value.getMonth() &&
+      now.getDate() === today.value.getDate()
+    if (sameDay) return false
+    today.value = now
+    // 跨天后「今天」相关的周数据（今日课程、铃铛）需要重取
+    void refreshToday()
+    return true
+  }
 
   /** 当前周周一锚点 */
   const anchorMonday = computed(() => {
@@ -102,83 +167,78 @@ export const useScheduleStore = defineStore('schedule', () => {
 
   const isOdd = computed(() => isOddWeek(weekNumber.value))
 
-  /** 标题日期区间（周数/状态由 WeekNav badge 展示） */
+  /** 标题日期区间 */
   const weekTitle = computed(() => {
     const mon = weekDays.value[0]
     const sun = weekDays.value[6]
     return `${formatMonthDay(mon)}–${formatMonthDay(sun)}`
   })
 
-  /** 课程集合：remote 模式为服务端按周过滤后的可见课程 */
-  const visibleCourses = computed<Course[]>(() => {
-    if (remote.value && weekContext.value) return weekContext.value.courses
-    return courses.value.filter((c) => {
-      if (c.semesterId !== currentSemesterId.value) return false
-      if (!showOddEvenFilter.value) return true
-      return isVisibleInWeek(c.weekType, c.weekList, weekNumber.value)
-    })
+  /**
+   * 展示周的课程块：remote 模式用服务端按周聚合的结果；
+   * 本地模式由课程组按周号派生（周次数组包含即出现）。
+   */
+  const visibleCourseBlocks = computed<CourseBlock[]>(() => {
+    if (remote.value && weekContext.value) {
+      return weekContext.value.courses.map(serverBlockToBlock)
+    }
+    const wn = weekNumber.value
+    if (wn === null) return []
+    if (!showOddEvenFilter.value) {
+      // 开关关闭：显示全部课程（忽略周次过滤）
+      return courses.value
+        .filter((c) => c.semesterId === currentSemesterId.value)
+        .flatMap((c) => courseBlocks(c))
+    }
+    return courses.value
+      .filter((c) => c.semesterId === currentSemesterId.value)
+      .flatMap((c) => toBlocks(c, wn).filter((b) => b.active))
   })
 
-  /** 按星期分组 */
-  const coursesByWeekday = computed<Record<Weekday, Course[]>>(() => {
-    const map = {
-      1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
-    } as Record<Weekday, Course[]>
-    for (const c of visibleCourses.value) {
-      map[c.weekday].push(c)
-    }
+  /** 按星期分组（渲染单位：课程块） */
+  const blocksByWeekday = computed<Record<Weekday, CourseBlock[]>>(() => {
+    const map = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [] } as Record<Weekday, CourseBlock[]>
+    for (const b of visibleCourseBlocks.value) map[b.weekday].push(b)
     return map
   })
 
-  /** 某天的课程（日视图用） */
-  function coursesOf(date: Date): Course[] {
-    const wd = ((date.getDay() + 6) % 7 + 1) as Weekday
-    return coursesByWeekday.value[wd]
-  }
 
-  /** 任意日期的课程（双日视图用）：按该日所在周独立过滤，跨周（周六+周日、滑入下周）正确。
-   * remote 模式 courses 为当前学期全量（loadCourses 已拉取），不依赖单周 weekContext。 */
-  function coursesOfDate(date: Date): Course[] {
+  /** 任意日期的课程块（双日视图用）：按该日所在周独立过滤 */
+  function coursesOfDate(date: Date): CourseBlock[] {
     const wd = getWeekday(date)
     const info = weekInfoOf(date)
-    // 未开学（周号 0）或假期（null）：该日无课，与桌面 /api/schedule 的 isHoliday 行为一致
     if (info.weekNumber === null || info.weekNumber === 0) return []
-    return courses.value.filter((c) => {
-      if (c.semesterId !== currentSemesterId.value) return false
-      if (c.weekday !== wd) return false
-      if (!showOddEvenFilter.value) return true
-      return isVisibleInWeek(c.weekType, c.weekList, info.weekNumber)
-    })
+    return courses.value
+      .filter((c) => c.semesterId === currentSemesterId.value)
+      .flatMap((c) => toBlocks(c, info.weekNumber))
+      .filter((b) => b.active && b.weekday === wd)
   }
 
-  /** 今天真实日期所在周的周号（remote 以服务端为准） */
+  /** 今天真实日期所在周的周号 */
   const todayWeekNumber = computed(() => {
     if (remote.value && todayContext.value) return todayContext.value.week.weekNumber
     return currentSemester.value ? calcWeekNumber(toMonday(today.value), currentSemester.value) : null
   })
 
-  /** 今天所在周的可见课程：不随周视图切换（weekOffset）变化，日视图/「今日课程」据此显示 */
-  const todayCourses = computed<Course[]>(() => {
-    if (remote.value && todayContext.value) return todayContext.value.courses
-    return courses.value.filter((c) => {
-      if (c.semesterId !== currentSemesterId.value) return false
-      if (!showOddEvenFilter.value) return true
-      return isVisibleInWeek(c.weekType, c.weekList, todayWeekNumber.value)
-    })
+  /** 今天所在周的可见课程块 */
+  const todayCourseBlocks = computed<CourseBlock[]>(() => {
+    if (remote.value && todayContext.value) return todayContext.value.courses.map(serverBlockToBlock)
+    const wn = todayWeekNumber.value
+    if (wn === null) return []
+    return courses.value
+      .filter((c) => c.semesterId === currentSemesterId.value)
+      .flatMap((c) => toBlocks(c, wn).filter((b) => b.active))
   })
 
+
   /** 今天所在周按星期分组 */
-  const todayCoursesByWeekday = computed<Record<Weekday, Course[]>>(() => {
-    const map = {
-      1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
-    } as Record<Weekday, Course[]>
-    for (const c of todayCourses.value) {
-      map[c.weekday].push(c)
-    }
+  const todayCoursesByWeekday = computed<Record<Weekday, CourseBlock[]>>(() => {
+    const map = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [] } as Record<Weekday, CourseBlock[]>
+    for (const c of todayCourseBlocks.value) map[c.weekday].push(c)
     return map
   })
 
-  /** 拉取今天所在周的聚合数据（与 refreshSchedule 的展示周相互独立） */
+  /** 拉取今天所在周的聚合数据 */
   async function refreshToday(): Promise<void> {
     if (!remote.value) return
     try {
@@ -188,29 +248,27 @@ export const useScheduleStore = defineStore('schedule', () => {
     }
   }
 
-  /** 远端周数据（考试/作业，供后续页面接入） */
-  const weekExams = computed(() => weekContext.value?.exams ?? [])
-  const weekHomework = computed(() => weekContext.value?.homework ?? [])
-
   // ============================================================
-  // 远端数据加载（mock 兜底）
+  // 远端数据加载
   // ============================================================
 
-  /** 当前登录用户（null=未登录） */
   const currentUser = ref<UserInfo | null>(null)
-  /** 注册开关（登录页显示注册入口） */
   const signupEnabled = ref(false)
 
-  /** 启动：拉取 context（学期/当前学期/节次/设置），失败则保持 mock */
+  /**
+   * 启动：拉取 context，失败时进入 connectError 状态并保留已有数据。
+   * 不再回退 mock 课表——避免「课程看起来丢了」的错觉。
+   */
   async function bootstrap(): Promise<void> {
+    bootstrapping.value = true
     try {
       const ctx = await api.getContext()
       if (ctx.accessRequired) {
-        // 未登录：标记后由 App 层展示登录页
         accessRequired.value = true
         return
       }
       accessRequired.value = false
+      connectError.value = null
       currentUser.value = ctx.user ?? null
       semesters.value = ctx.semesters
       currentSemesterId.value = ctx.currentSemesterId ?? (ctx.semesters[0]?.id ?? null)
@@ -223,26 +281,26 @@ export const useScheduleStore = defineStore('schedule', () => {
       await refreshToday()
       await loadMatters()
       await refreshWeather()
-    } catch {
-      remote.value = false
+    } catch (e) {
+      // 保留已有数据；标记连接失败供 UI 提示与重试
+      connectError.value = e instanceof Error ? e.message : '无法连接服务器'
+    } finally {
+      bootstrapping.value = false
     }
   }
 
-  /** 登录（成功后重新 bootstrap） */
   async function login(username: string, password: string, remember: boolean): Promise<void> {
     const res = await api.login(username, password, remember)
     currentUser.value = res.user
     await afterAccessVerified()
   }
 
-  /** 注册（成功后重新 bootstrap） */
   async function register(username: string, password: string): Promise<void> {
     const res = await api.register(username, password)
     currentUser.value = res.user
     await afterAccessVerified()
   }
 
-  /** 登出 */
   async function logout(): Promise<void> {
     try {
       await api.logout()
@@ -254,7 +312,6 @@ export const useScheduleStore = defineStore('schedule', () => {
     remote.value = false
   }
 
-  /** 拉取注册开关 */
   async function refreshSignupEnabled(): Promise<void> {
     try {
       const res = await api.getSignupEnabled()
@@ -264,18 +321,15 @@ export const useScheduleStore = defineStore('schedule', () => {
     }
   }
 
-  /** 拉取当前学期课程全量（颜色轮询/统计以真实数据为基准；远端拉取失败保留本地） */
+  /** 拉取当前学期课程全量（颜色轮询/统计以真实数据为基准；失败保留本地并抛出） */
   async function loadCourses(): Promise<void> {
     if (!remote.value) return
-    try {
-      const list = await api.listCourses(currentSemesterId.value ?? undefined)
-      if (list.length) courses.value = list
-    } catch {
-      // 拉取失败保留本地数据
-    }
+    const list = await api.listCourses(currentSemesterId.value ?? undefined)
+    // 真实为空要如实反映（不再用 if (list.length) 掩盖清空结果）
+    courses.value = list
   }
 
-  /** 拉取当前学期考试与作业（事项页 / 信息面板 / 铃铛共用） */
+  /** 拉取当前学期考试与作业 */
   async function loadMatters(): Promise<void> {
     if (!remote.value) return
     mattersLoading.value = true
@@ -294,7 +348,6 @@ export const useScheduleStore = defineStore('schedule', () => {
     }
   }
 
-  /** 口令校验成功后的恢复流程：重新拉取 context 并进入应用 */
   async function afterAccessVerified(): Promise<void> {
     accessRequired.value = false
     await bootstrap()
@@ -326,13 +379,11 @@ export const useScheduleStore = defineStore('schedule', () => {
     void refreshSchedule()
   }
 
-  /** 跳转到指定周（相对今天所在周的天数偏移；今天在学期外时以学期第 1 周为基准） */
   function goToWeek(week: number): void {
     const base = todayWeekNumber.value
     if (base !== null) {
       weekOffset.value = week - base
     } else {
-      // 今天在学期外（未开学/假期）：以学期第 1 周周一为锚点
       const sem = currentSemester.value
       if (!sem) return
       const firstMonday = toMonday(parseDate(sem.startDate))
@@ -353,13 +404,13 @@ export const useScheduleStore = defineStore('schedule', () => {
       periods.value = ctx.periods
       await loadCourses()
       await refreshSchedule()
+      await refreshToday()
       await loadMatters()
     } catch {
       // 失败保持本地切换
     }
   }
 
-  /** 创建学期（服务端自动生成默认节次模板并设为当前学期） */
   async function createSemester(payload: {
     name: string
     startDate: string
@@ -383,19 +434,21 @@ export const useScheduleStore = defineStore('schedule', () => {
       if (next) {
         const ctx = await api.getContext()
         periods.value = ctx.periods
-        await refreshSchedule()
-        await loadMatters()
       }
     }
+    // 无论是否删的是当前学期，都要重拉课程与周数据（修复残留旧课程）
+    await loadCourses()
+    await refreshSchedule()
+    await refreshToday()
+    await loadMatters()
   }
 
-  /** 新增节次行（追加到学期末尾） */
   async function addPeriod(payload: { startTime: string; endTime: string }): Promise<void> {
     if (!currentSemesterId.value) throw new Error('未设置当前学期')
     const created = await api.createPeriod({ semesterId: currentSemesterId.value, ...payload })
     periods.value.push(created)
   }
-  /** 修改节次行起止时间 */
+
   async function updatePeriod(id: number, payload: { startTime: string; endTime: string }): Promise<void> {
     const updated = await api.updatePeriod(id, payload)
     const idx = periods.value.findIndex((p) => p.id === id)
@@ -403,123 +456,88 @@ export const useScheduleStore = defineStore('schedule', () => {
     await refreshSchedule()
   }
 
-  /** 删除节次行（剩余行自动重排） */
-  async function deletePeriod(id: number): Promise<void> {
-    await api.deletePeriod(id)
+  /** 删除节次行（剩余行自动重排；被删节次上的课程时间一并移除，后续节次前移） */
+  async function deletePeriod(id: number): Promise<{ removedPeriod: number; affectedCourses: number }> {
+    const res = await api.deletePeriod(id)
     periods.value = periods.value.filter((p) => p.id !== id)
+    // 节次序号变化会同步迁移课程格子，需重拉课程与周数据
+    await loadCourses()
     await refreshSchedule()
+    await refreshToday()
+    return res
   }
 
-  /** 更新学期信息（设置页编辑开始/结束日期） */
   async function updateSemester(
     id: number,
     patch: { name: string; startDate: string; endDate: string; weekStartDay: 1 | 7 },
   ): Promise<void> {
-    if (remote.value) {
-      const updated = await api.updateSemester(id, patch)
-      const idx = semesters.value.findIndex((s) => s.id === id)
-      if (idx >= 0) semesters.value[idx] = updated
-      if (id === currentSemesterId.value) await refreshSchedule()
-    } else {
-      const idx = semesters.value.findIndex((s) => s.id === id)
-      if (idx >= 0) semesters.value[idx] = { ...semesters.value[idx], ...patch }
-    }
+    const updated = await api.updateSemester(id, patch)
+    const idx = semesters.value.findIndex((s) => s.id === id)
+    if (idx >= 0) semesters.value[idx] = updated
+    if (id === currentSemesterId.value) await refreshSchedule()
   }
 
-  /** mock 模式自增 id */
-  const nextId = () => Math.max(0, ...courses.value.map((c) => c.id)) + 1
-
-  /** 手动新增课程（含实验课）：remote 走 API，mock 本地写入 */
-  async function addCourse(
-    payload: {
-      type: 'course' | 'lab'
-      name: string
-      teacher: string
-      location: string
-      weekType: WeekType
-      weekList: number[] | null
-      weekday: Weekday
-      startPeriod: number
-      endPeriod: number
-      remark?: string
-    },
-  ): Promise<Course> {
+  /** 新增课程（含实验课与无固定时间课程） */
+  async function addCourse(payload: CourseWritePayload): Promise<Course> {
     const semesterId = currentSemesterId.value
     if (semesterId === null) throw new Error('未设置当前学期，请先创建学期')
-    if (remote.value) {
-      const { color } = pickCourseColor(courses.value, payload.name, courses.value.length)
-      const created = await api.createCourse({ ...payload, semesterId, color })
-      courses.value.push(created)
-      await refreshSchedule()
-      return created
-    }
-    let autoCount = courses.value.length
-    const { color, autoCount: next } = pickCourseColor(courses.value, payload.name, autoCount)
-    autoCount = next
-    const course: Course = { ...payload, id: nextId(), semesterId, color, remark: payload.remark ?? '' }
-    courses.value.push(course)
-    return course
+    const { color } = pickCourseColor(courses.value, payload.name, courses.value.length)
+    const created = await api.createCourse({
+      semesterId,
+      type: payload.type,
+      name: payload.name,
+      teacher: payload.teacher,
+      location: payload.location,
+      color: payload.color ?? color,
+      remark: payload.remark,
+      sessions: payload.sessions,
+    })
+    courses.value.push(created)
+    await refreshSchedule()
+    await refreshToday()
+    return created
   }
 
-  /** 导入落库：remote 模式提交服务端事务（追加/覆盖），本地模式直接写入。
-   * 颜色分配与手动录入一致（技术设计 3.3.1）：按录入顺序 8 色轮询，同名复用。
-   * @param semesterId 目标学期，缺省为当前学期
-   * @returns 实际写入的课程数
+  /** 导入落库：remote 提交服务端事务（追加/覆盖），本地模式直接写入。
+   * @param keepLabs 覆盖导入时保留已有实验课（PDF 只产理论课时的救生索）
    */
-  async function importCourses(rows: ImportRow[], mode: 'append' | 'overwrite', semesterId?: number): Promise<number> {
+  async function importCourses(
+    rows: ImportRow[],
+    mode: 'append' | 'overwrite',
+    semesterId?: number,
+    keepLabs = false,
+  ): Promise<{ count: number; removed: number; keptLabs: number }> {
     const targetId = semesterId ?? currentSemesterId.value
     if (targetId === null) throw new Error('未设置当前学期，请先创建学期')
-    // 逐行分配颜色：同名复用已有颜色，其余按顺序轮询（与 addCourse 一致）
     let autoCount = courses.value.length
     const colored = rows.map((row) => {
       const { color, autoCount: next } = pickCourseColor(courses.value, row.name, autoCount)
       autoCount = next
-      return { ...row, color }
+      return { ...row, color: row.color ?? color }
     })
-    if (remote.value) {
-      const res = await api.importConfirm({ mode, semesterId: targetId, rows: colored })
-      await refreshSchedule()
-      return res.count
-    }
-    // 本地 mock 模式
-    if (mode === 'overwrite') {
-      courses.value = courses.value.filter((c) => c.semesterId !== targetId)
-    }
-    let added = 0
-    for (const row of colored) {
-      const { color, autoCount: next } = pickCourseColor(courses.value, row.name, autoCount)
-      autoCount = next
-      courses.value.push({ ...row, id: nextId(), semesterId: targetId, color })
-      added++
-    }
-    return added
+    const res = await api.importConfirm({ mode, semesterId: targetId, rows: colored, keepLabs })
+    await loadCourses()
+    await refreshSchedule()
+    await refreshToday()
+    return { count: res.count, removed: res.removed ?? 0, keptLabs: res.keptLabs ?? 0 }
   }
 
-  /** 更新课程（remote 走 API，mock 本地写入） */
-  async function updateCourse(id: number, payload: {
-    type: 'course' | 'lab'
-    name: string
-    teacher: string
-    location: string
-    color: string
-    weekType: WeekType
-    weekList: number[] | null
-    weekday: Weekday
-    startPeriod: number
-    endPeriod: number
-    remark?: string
-  }): Promise<Course> {
-    if (remote.value) {
-      const updated = await api.updateCourse(id, payload)
-      const idx = courses.value.findIndex((c) => c.id === id)
-      if (idx >= 0) courses.value[idx] = updated
-      await refreshSchedule()
-      return updated
-    }
+  /** 更新课程（整组原子替换：元数据 + 全部上课时间） */
+  async function updateCourse(id: number, payload: CourseWritePayload): Promise<Course> {
+    const updated = await api.updateCourse(id, {
+      type: payload.type,
+      name: payload.name,
+      teacher: payload.teacher,
+      location: payload.location,
+      color: payload.color ?? (courses.value.find((c) => c.id === id)?.color ?? 'course-1'),
+      remark: payload.remark,
+      sessions: payload.sessions,
+    })
     const idx = courses.value.findIndex((c) => c.id === id)
-    if (idx < 0) throw new Error('课程不存在')
-    courses.value[idx] = { ...courses.value[idx], ...payload, remark: payload.remark ?? '' }
-    return courses.value[idx]
+    if (idx >= 0) courses.value[idx] = updated
+    await refreshSchedule()
+    await refreshToday()
+    return updated
   }
 
   /** 删除课程（关联考试/作业的 courseId 由服务端置空保留） */
@@ -530,6 +548,7 @@ export const useScheduleStore = defineStore('schedule', () => {
     }
     courses.value = courses.value.filter((c) => c.id !== id)
     await refreshSchedule()
+    await refreshToday()
   }
 
   // ---- 考试 ----
@@ -570,7 +589,6 @@ export const useScheduleStore = defineStore('schedule', () => {
     return updated
   }
 
-  /** 切换作业完成状态（列表勾选即时生效） */
   async function setHomeworkDone(id: number, done: boolean): Promise<void> {
     const idx = homework.value.findIndex((h) => h.id === id)
     if (idx >= 0) homework.value[idx] = { ...homework.value[idx], done }
@@ -590,13 +608,7 @@ export const useScheduleStore = defineStore('schedule', () => {
   }
 
   // ---- 设置 ----
-  /** 部分写设置（提醒 / 单双周过滤 / 天气），成功后同步本地 */
   async function updateSettings(patch: Partial<SettingsPayload>): Promise<void> {
-    if (!remote.value) {
-      settings.value = { ...settings.value, ...patch }
-      if (patch.showOddEvenFilter !== undefined) showOddEvenFilter.value = patch.showOddEvenFilter
-      return
-    }
     const updated = await api.updateSettings(patch)
     settings.value = updated
     showOddEvenFilter.value = updated.showOddEvenFilter
@@ -604,13 +616,8 @@ export const useScheduleStore = defineStore('schedule', () => {
     if (patch.weather !== undefined) await refreshWeather()
   }
 
-  /** 单双周过滤开关（同时写回设置） */
   async function setShowOddEvenFilter(v: boolean): Promise<void> {
     showOddEvenFilter.value = v
-    if (!remote.value) {
-      settings.value = { ...settings.value, showOddEvenFilter: v }
-      return
-    }
     try {
       const updated = await api.updateSettings({ showOddEvenFilter: v })
       settings.value = updated
@@ -620,29 +627,8 @@ export const useScheduleStore = defineStore('schedule', () => {
     }
   }
 
-  // ---- 访问口令 ----
-  async function verifyAccess(passphrase: string): Promise<void> {
-    await api.verifyAccess(passphrase)
-    await afterAccessVerified()
-  }
 
-  async function enableAccess(passphrase: string): Promise<void> {
-    await api.enableAccess(passphrase)
-    settings.value = { ...settings.value, accessEnabled: true }
-  }
-
-  async function disableAccess(passphrase: string): Promise<void> {
-    await api.disableAccess(passphrase)
-    settings.value = { ...settings.value, accessEnabled: false }
-  }
-
-  async function logoutAccess(): Promise<void> {
-    await api.logoutAccess()
-  }
-
-  /** 供日视图/聚合使用：某日期所在周信息
-   * remote 模式下仅当日期属于当前展示周时直接使用服务端周号，
-   * 其余日期按本地学期起止计算（与周视图切换解耦，不随 weekOffset 漂移） */
+  /** 供日视图/聚合使用：某日期所在周信息 */
   function weekInfoOf(date: Date) {
     const mon = toMonday(date)
     const inDisplayedWeek =
@@ -655,7 +641,7 @@ export const useScheduleStore = defineStore('schedule', () => {
         : null
     return {
       dateStr: formatDate(date),
-      weekday: ((date.getDay() + 6) % 7 + 1) as Weekday,
+      weekday: getWeekday(date),
       weekNumber: weekNo,
       isOdd: isOddWeek(weekNo),
     }
@@ -681,6 +667,8 @@ export const useScheduleStore = defineStore('schedule', () => {
     refreshWeather,
     accessRequired,
     remote,
+    connectError,
+    bootstrapping,
     mattersLoading,
     weekContext,
     today,
@@ -689,17 +677,15 @@ export const useScheduleStore = defineStore('schedule', () => {
     weekNumber,
     isOdd,
     weekTitle,
-    visibleCourses,
-    coursesByWeekday,
-    coursesOf,
+    visibleCourseBlocks,
+    blocksByWeekday,
     coursesOfDate,
     todayWeekNumber,
-    todayCourses,
+    todayCourseBlocks,
     todayCoursesByWeekday,
     refreshToday,
+    tickDate,
     refreshSchedule,
-    weekExams,
-    weekHomework,
     weekInfoOf,
     nextWeek,
     prevWeek,
@@ -733,16 +719,7 @@ export const useScheduleStore = defineStore('schedule', () => {
     register,
     logout,
     refreshSignupEnabled,
-    verifyAccess,
-    enableAccess,
-    disableAccess,
-    logoutAccess,
   }
 })
 
-/** 今天是否在展示周内（供今天列高亮） */
-export function isTodayInView(view: Date[], today: Date): boolean {
-  return view.some((d) => d.getTime() === today.getTime())
-}
 
-export { parseDate }

@@ -2,7 +2,8 @@
 import { computed, reactive, ref, watch } from 'vue'
 import AppSelect, { type AppSelectOption } from '@/components/common/AppSelect.vue'
 import { useScheduleStore } from '@/stores/schedule'
-import { COURSE_COLOR_NAMES, type Course, type CourseType, type Weekday, type WeekType } from '@/types'
+import { COURSE_COLOR_NAMES, type Course, type CourseType, type Weekday } from '@/types'
+import { MAX_WEEKS, periodRange } from '@/utils/session'
 import { calcWeekNumber, parseDate } from '@/utils/week'
 
 const props = defineProps<{
@@ -34,8 +35,8 @@ function blankForm() {
     weekday: 1 as Weekday,
     startPeriod: 1,
     endPeriod: 2,
-    weekType: 'all' as WeekType,
-    weekList: [] as number[],
+    /** 无固定时间课程（实践类）：不排入课表网格 */
+    noFixedTime: false,
     remark: '',
   }
 }
@@ -47,13 +48,18 @@ const busy = ref(false)
 /** 当前标签页：fixed = 固定课表，per = 每节课调整（编辑模式隐藏） */
 const activeTab = ref<'fixed' | 'per'>('fixed')
 
-/** 「每节课调整」：一个时间段（同一门课的一节课），周次由 weekList 自定义 */
+/** 周次选择的预设模式（仅界面用；保存时一律展开为逐周数组） */
+type WeekMode = 'all' | 'odd' | 'even' | 'custom'
+const weekMode = ref<WeekMode>('all')
+const weekList = ref<number[]>([])
+
+/** 「每节课调整」：一个时间段（同一门课的一节课），周次由此行独立选择 */
 interface SessionRow {
   weekday: Weekday
   startPeriod: number
   endPeriod: number
   location: string
-  weekList: number[]
+  weeks: number[]
 }
 
 function blankSession(): SessionRow {
@@ -62,7 +68,7 @@ function blankSession(): SessionRow {
     startPeriod: 1,
     endPeriod: 2,
     location: '',
-    weekList: [],
+    weeks: [],
   }
 }
 
@@ -77,13 +83,12 @@ function removeSession(i: number): void {
 }
 
 function toggleSessionWeek(s: SessionRow, w: number): void {
-  const i = s.weekList.indexOf(w)
-  if (i >= 0) s.weekList.splice(i, 1)
-  else s.weekList.push(w)
+  const i = s.weeks.indexOf(w)
+  if (i >= 0) s.weeks.splice(i, 1)
+  else s.weeks.push(w)
 }
 
-/** 学期总周数（自定义周次可选范围；上限与服务端校验 MAX_WEEKS=30 一致） */
-const MAX_WEEKS = 30
+/** 学期总周数（自定义周次可选范围；上限复用 utils/session 的 MAX_WEEKS） */
 const maxWeeks = computed(() => {
   const sem = store.currentSemester
   if (!sem) return 16
@@ -107,9 +112,44 @@ const weekdayOptions: AppSelectOption[] = WEEKDAY_LABELS.map((label, i) => ({
 const weekChips = computed(() => Array.from({ length: maxWeeks.value }, (_, i) => i + 1))
 
 function toggleWeek(w: number): void {
-  const i = form.weekList.indexOf(w)
-  if (i >= 0) form.weekList.splice(i, 1)
-  else form.weekList.push(w)
+  const i = weekList.value.indexOf(w)
+  if (i >= 0) weekList.value.splice(i, 1)
+  else weekList.value.push(w)
+}
+
+/** 从课程的 sessions 反推界面所需的 weekMode/weekList（单组时用于固定课表页） */
+function deriveWeekUI(course: Course): { mode: WeekMode; list: number[] } {
+  if (!course.sessions.length) return { mode: 'all', list: [] }
+  const set = new Set<number>()
+  for (const s of course.sessions) for (const w of s.weeks) set.add(w)
+  const list = [...set].sort((a, b) => a - b)
+  const total = maxWeeks.value
+  const all = Array.from({ length: total }, (_, i) => i + 1)
+  if (list.length === total && list.every((w, i) => w === all[i])) return { mode: 'all', list: [] }
+  const odds = all.filter((w) => w % 2 === 1)
+  const evens = all.filter((w) => w % 2 === 0)
+  if (list.length === odds.length && list.every((w, i) => w === odds[i])) return { mode: 'odd', list: [] }
+  if (list.length === evens.length && list.every((w, i) => w === evens[i])) return { mode: 'even', list: [] }
+  // 连续单/双周区间（如 1–7 周单周）
+  const consecutive = list.every((w, i) => i === 0 || w - list[i - 1] === 2)
+  if (consecutive && list.length >= 2 && list.every((w) => w % 2 === 1)) return { mode: 'odd', list }
+  if (consecutive && list.length >= 2 && list.every((w) => w % 2 === 0)) return { mode: 'even', list }
+  return { mode: 'custom', list }
+}
+
+/** 界面选择 → 逐周数组 */
+function weeksFromUI(mode: WeekMode, list: number[], total: number): number[] {
+  const all = Array.from({ length: total }, (_, i) => i + 1)
+  switch (mode) {
+    case 'all':
+      return all
+    case 'odd':
+      return list.length ? list.filter((w) => w % 2 === 1) : all.filter((w) => w % 2 === 1)
+    case 'even':
+      return list.length ? list.filter((w) => w % 2 === 0) : all.filter((w) => w % 2 === 0)
+    default:
+      return [...list].sort((a, b) => a - b)
+  }
 }
 
 /** 每次打开重置表单（编辑模式加载课程数据） */
@@ -118,24 +158,38 @@ watch(
   (v) => {
     if (!v) return
     if (props.course) {
+      const c = props.course
+      const first = c.sessions[0]
       Object.assign(form, {
-        name: props.course.name,
-        type: props.course.type,
-        teacher: props.course.teacher,
-        location: props.course.location,
-        color: props.course.color,
-        weekday: props.course.weekday,
-        startPeriod: props.course.startPeriod,
-        endPeriod: props.course.endPeriod,
-        weekType: props.course.weekType,
-        weekList: props.course.weekList ? [...props.course.weekList] : [],
-        remark: props.course.remark,
+        name: c.name,
+        type: c.type,
+        teacher: c.teacher,
+        location: c.location,
+        color: c.color,
+        weekday: first?.weekday ?? 1,
+        startPeriod: first?.periods.length ? first.periods[0] : 1,
+        endPeriod: first?.periods.length ? first.periods[first.periods.length - 1] : 2,
+        noFixedTime: c.sessions.length === 0,
+        remark: c.remark,
       })
-      sessions.value = [blankSession()]
-      activeTab.value = 'fixed'
+      const ui = deriveWeekUI(c)
+      weekMode.value = ui.mode
+      weekList.value = ui.list
+      // 多个上课时间 → 直接进入「每节课调整」以便逐个编辑
+      sessions.value = c.sessions.length > 1
+        ? c.sessions.map((s) => ({
+            weekday: s.weekday,
+            startPeriod: s.periods[0] ?? 1,
+            endPeriod: s.periods[s.periods.length - 1] ?? 2,
+            location: s.location,
+            weeks: [...s.weeks],
+          }))
+        : []
+      activeTab.value = c.sessions.length > 1 ? 'per' : 'fixed'
     } else {
       Object.assign(form, blankForm())
-      // 空白格快捷新增：预填星期与起始节次（结束节次默认 +1）
+      weekMode.value = 'all'
+      weekList.value = []
       if (props.presetWeekday) form.weekday = props.presetWeekday
       if (props.presetPeriod) {
         form.startPeriod = props.presetPeriod
@@ -156,8 +210,26 @@ function onKeydown(e: KeyboardEvent): void {
 /** 校验一行时间段，返回错误信息（空串表示通过） */
 function validateSession(s: SessionRow, i: number): string {
   if (s.startPeriod > s.endPeriod) return `第 ${i + 1} 节课结束节次不能早于起始节次`
-  if (s.weekList.length === 0) return `第 ${i + 1} 节课请至少选择一周`
+  if (s.weeks.length === 0) return `第 ${i + 1} 节课请至少选择一周`
   return ''
+}
+
+/** 组装写库载荷：sessions 中节次/周次一律为逐项数组 */
+function buildPayload(rows: { weekday: Weekday; startPeriod: number; endPeriod: number; location: string; weeks: number[] }[]) {
+  return {
+    type: form.type,
+    name: form.name.trim(),
+    teacher: form.teacher.trim(),
+    location: form.location.trim(),
+    color: form.color,
+    remark: form.remark.trim(),
+    sessions: rows.map((r) => ({
+      weekday: r.weekday,
+      location: r.location.trim(),
+      periods: periodRange(r.startPeriod, r.endPeriod),
+      weeks: [...new Set(r.weeks)].sort((a, b) => a - b),
+    })),
+  }
 }
 
 async function submit(keepOpen = false): Promise<void> {
@@ -170,30 +242,47 @@ async function submit(keepOpen = false): Promise<void> {
   busy.value = true
   try {
     if (isEdit.value && props.course) {
-      // 编辑模式：整体更新单条课程记录
-      if (form.startPeriod > form.endPeriod) {
-        error.value = '结束节次不能早于起始节次'
-        return
+      // 编辑模式：整组原子更新（元数据 + 全部上课时间）
+      let rows: { weekday: Weekday; startPeriod: number; endPeriod: number; location: string; weeks: number[] }[]
+      if (form.noFixedTime) {
+        rows = []
+      } else if (activeTab.value === 'per') {
+        for (const [i, s] of sessions.value.entries()) {
+          const msg = validateSession(s, i)
+          if (msg) {
+            error.value = msg
+            return
+          }
+        }
+        rows = sessions.value.map((s) => ({ ...s }))
+      } else {
+        if (form.startPeriod > form.endPeriod) {
+          error.value = '结束节次不能早于起始节次'
+          return
+        }
+        const weeks = weeksFromUI(weekMode.value, weekList.value, maxWeeks.value)
+        if (!weeks.length) {
+          error.value = '请选择至少一个周次'
+          return
+        }
+        rows = [{ weekday: form.weekday, startPeriod: form.startPeriod, endPeriod: form.endPeriod, location: form.location, weeks }]
       }
-      if (form.weekType === 'custom' && form.weekList.length === 0) {
-        error.value = '请选择至少一个周次'
-        return
-      }
-      await store.updateCourse(props.course.id, {
-        type: form.type,
-        name,
-        teacher: form.teacher.trim(),
-        location: form.location.trim(),
-        color: form.color,
-        weekType: form.weekType,
-        weekList: form.weekType === 'all' ? null : [...form.weekList].sort((a, b) => a - b),
-        weekday: form.weekday,
-        startPeriod: form.startPeriod,
-        endPeriod: form.endPeriod,
-        remark: form.remark.trim(),
-      })
+      await store.updateCourse(props.course.id, buildPayload(rows))
       emit('done', name)
       emit('close')
+      return
+    }
+
+    // 新增模式
+    if (form.noFixedTime) {
+      await store.addCourse(buildPayload([]))
+      if (keepOpen) {
+        Object.assign(form, { name: '', teacher: '', remark: '' })
+        emit('done', name)
+      } else {
+        emit('done', name)
+        emit('close')
+      }
       return
     }
     if (activeTab.value === 'per') {
@@ -208,52 +297,27 @@ async function submit(keepOpen = false): Promise<void> {
           return
         }
       }
-      // 每个时间段写入一条同名课程记录（颜色按课程名自动复用）；周次一律按自定义周次保存
-      for (const s of sessions.value) {
-        await store.addCourse({
-          type: form.type,
-          name,
-          teacher: form.teacher.trim(),
-          location: s.location.trim(),
-          weekType: 'custom',
-          weekList: [...s.weekList].sort((a, b) => a - b),
-          weekday: s.weekday,
-          startPeriod: s.startPeriod,
-          endPeriod: s.endPeriod,
-          remark: form.remark.trim(),
-        })
-      }
+      // 每节课合并写入同一门课程（多上课时间组），不再拆成多门同名课程
+      await store.addCourse(buildPayload(sessions.value.map((s) => ({ ...s }))))
     } else {
       if (form.startPeriod > form.endPeriod) {
         error.value = '结束节次不能早于起始节次'
         return
       }
-      if (form.weekType === 'custom' && form.weekList.length === 0) {
+      const weeks = weeksFromUI(weekMode.value, weekList.value, maxWeeks.value)
+      if (!weeks.length) {
         error.value = '请选择至少一个周次'
         return
       }
-      await store.addCourse({
-        type: form.type,
-        name,
-        teacher: form.teacher.trim(),
-        location: form.location.trim(),
-        weekType: form.weekType,
-        weekList: form.weekType === 'all' ? null : [...form.weekList].sort((a, b) => a - b),
-        weekday: form.weekday,
-        startPeriod: form.startPeriod,
-        endPeriod: form.endPeriod,
-        remark: form.remark.trim(),
-      })
+      await store.addCourse(
+        buildPayload([{ weekday: form.weekday, startPeriod: form.startPeriod, endPeriod: form.endPeriod, location: form.location, weeks }]),
+      )
     }
     if (keepOpen) {
-      // 保存并继续：清空已保存字段，预填常用字段（星期/地点/颜色保留）
-      Object.assign(form, {
-        name: '',
-        teacher: '',
-        remark: '',
-        weekType: 'all',
-        weekList: [],
-      })
+      Object.assign(form, { name: '', teacher: '', remark: '' })
+      weekMode.value = 'all'
+      weekList.value = []
+      sessions.value = [blankSession()]
       emit('done', name)
     } else {
       emit('done', name)
@@ -280,7 +344,7 @@ async function submit(keepOpen = false): Promise<void> {
           </div>
 
           <div class="step-body">
-            <div v-if="!isEdit" class="editor-tabs" role="tablist" aria-label="录入方式">
+            <div v-if="!form.noFixedTime" class="editor-tabs" role="tablist" aria-label="录入方式">
               <button
                 type="button"
                 role="tab"
@@ -353,7 +417,7 @@ async function submit(keepOpen = false): Promise<void> {
             </div>
 
             <!-- 固定课表：每周重复的时间安排 -->
-            <div v-if="activeTab === 'fixed'" class="form-grid tab-grid">
+            <div v-if="!form.noFixedTime && activeTab === 'fixed'" class="form-grid tab-grid">
               <label class="field">
                 <span class="field__label">上课地点</span>
                 <input v-model="form.location" class="text-input" type="text" placeholder="如：C3敏学楼501" maxlength="50" />
@@ -387,32 +451,32 @@ async function submit(keepOpen = false): Promise<void> {
               <fieldset class="field field--full">
                 <legend class="field__label">周次规则</legend>
                 <div class="seg">
-                  <label class="seg-item" :class="{ checked: form.weekType === 'all' }">
-                    <input v-model="form.weekType" type="radio" value="all" name="week-type" />
+                  <label class="seg-item" :class="{ checked: weekMode === 'all' }">
+                    <input v-model="weekMode" type="radio" value="all" name="week-type" />
                     <span class="seg-item__dot"></span>
                     <span>每周</span>
                   </label>
-                  <label class="seg-item" :class="{ checked: form.weekType === 'odd' }">
-                    <input v-model="form.weekType" type="radio" value="odd" name="week-type" />
+                  <label class="seg-item" :class="{ checked: weekMode === 'odd' }">
+                    <input v-model="weekMode" type="radio" value="odd" name="week-type" />
                     <span class="seg-item__dot"></span>
                     <span>单周</span>
                   </label>
-                  <label class="seg-item" :class="{ checked: form.weekType === 'even' }">
-                    <input v-model="form.weekType" type="radio" value="even" name="week-type" />
+                  <label class="seg-item" :class="{ checked: weekMode === 'even' }">
+                    <input v-model="weekMode" type="radio" value="even" name="week-type" />
                     <span class="seg-item__dot"></span>
                     <span>双周</span>
                   </label>
-                  <label class="seg-item" :class="{ checked: form.weekType === 'custom' }">
-                    <input v-model="form.weekType" type="radio" value="custom" name="week-type" />
+                  <label class="seg-item" :class="{ checked: weekMode === 'custom' }">
+                    <input v-model="weekMode" type="radio" value="custom" name="week-type" />
                     <span class="seg-item__dot"></span>
                     <span>自定义</span>
                   </label>
                 </div>
               </fieldset>
 
-              <div v-if="form.weekType === 'custom' || form.weekType === 'odd' || form.weekType === 'even'" class="field field--full">
+              <div v-if="weekMode === 'custom' || weekMode === 'odd' || weekMode === 'even'" class="field field--full">
                 <span class="field__label">
-                  {{ form.weekType === 'custom' ? '选择周次（1–' + maxWeeks + ' 周）' : '周数范围（选填，不选则为全学期' + (form.weekType === 'odd' ? '单周' : '双周') + '）' }}
+                  {{ weekMode === 'custom' ? '选择周次（1–' + maxWeeks + ' 周）' : '周数范围（选填，不选则为全学期' + (weekMode === 'odd' ? '单周' : '双周') + '）' }}
                 </span>
                 <div class="week-custom">
                   <button
@@ -420,7 +484,7 @@ async function submit(keepOpen = false): Promise<void> {
                     :key="w"
                     class="week-chip"
                     type="button"
-                    :class="{ checked: form.weekList.includes(w) }"
+                    :class="{ checked: weekList.includes(w) }"
                     @click="toggleWeek(w)"
                   >
                     {{ w }}
@@ -430,7 +494,7 @@ async function submit(keepOpen = false): Promise<void> {
             </div>
 
             <!-- 每节课调整：每节课独立指定时间与地点 -->
-            <div v-else class="per-tab">
+            <div v-else-if="!form.noFixedTime" class="per-tab">
               <div v-for="(s, i) in sessions" :key="i" class="session-card">
                 <div class="session-grid">
                   <label class="field">
@@ -462,7 +526,7 @@ async function submit(keepOpen = false): Promise<void> {
                       :key="w"
                       class="week-chip"
                       type="button"
-                      :class="{ checked: s.weekList.includes(w) }"
+                      :class="{ checked: s.weeks.includes(w) }"
                       @click="toggleSessionWeek(s, w)"
                     >
                       {{ w }}
@@ -473,6 +537,14 @@ async function submit(keepOpen = false): Promise<void> {
 
               <button class="btn btn--ghost add-session" type="button" @click="addSession">＋ 添加一节课</button>
             </div>
+
+            <label class="field field--full no-time-toggle">
+              <span class="field__label">无固定时间课程</span>
+              <span class="nt-row">
+                <input v-model="form.noFixedTime" type="checkbox" class="nt-check" />
+                <span class="nt-hint">实践 / 实习等不排入课表的课程：勾选后不设星期与节次，仅在「实践与其他」中展示</span>
+              </span>
+            </label>
 
             <label class="field field--full editor-remark">
               <span class="field__label">备注（选填）</span>
@@ -654,6 +726,26 @@ async function submit(keepOpen = false): Promise<void> {
 
 .add-session {
   align-self: flex-start;
+}
+
+.no-time-toggle .nt-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+}
+
+.nt-check {
+  margin-top: 3px;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  accent-color: var(--color-brand);
+}
+
+.nt-hint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  line-height: var(--line-height-normal, 1.5);
 }
 
 .editor-remark {

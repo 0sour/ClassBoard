@@ -2,55 +2,59 @@
 import { computed, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import { confirm, toast } from '@/utils/ui'
+import { periodsLabel, weeksLabel } from '@/utils/session'
 import type { Course } from '@/types'
 
-const props = defineProps<{ course: Course | null }>()
+const props = defineProps<{ courseId: number | null }>()
 
 const emit = defineEmits<{ (e: 'close'): void; (e: 'edit', course: Course): void }>()
 
 const store = useScheduleStore()
 const deleting = ref(false)
 
-/** 考试/作业 Tab（PRD 5.7：课程详情聚合该课程的记录） */
+/** 课程组（由 id 从 store 取，始终反映最新数据） */
+const course = computed<Course | null>(() =>
+  props.courseId === null ? null : store.courses.find((c) => c.id === props.courseId) ?? null,
+)
+
+/** 考试/作业 Tab（课程详情聚合该课程的记录） */
 const tab = ref<'exam' | 'homework'>('exam')
 
 const examsOf = computed(() =>
-  props.course ? store.exams.filter((e) => e.courseId === props.course!.id) : [],
+  props.courseId === null ? [] : store.exams.filter((e) => e.courseId === props.courseId),
 )
 
 const homeworkOf = computed(() =>
-  props.course ? store.homework.filter((h) => h.courseId === props.course!.id) : [],
+  props.courseId === null ? [] : store.homework.filter((h) => h.courseId === props.courseId),
 )
 
 const style = computed(() => ({
-  '--cbg': props.course ? `var(--${props.course.color}-bg)` : 'transparent',
-  '--cline': props.course ? `var(--${props.course.color}-line)` : 'transparent',
-  '--ctext': props.course ? `var(--${props.course.color}-text)` : 'transparent',
+  '--cbg': course.value ? `var(--${course.value.color}-bg)` : 'transparent',
+  '--cline': course.value ? `var(--${course.value.color}-line)` : 'transparent',
+  '--ctext': course.value ? `var(--${course.value.color}-text)` : 'transparent',
 }))
 
-const weekdayLabel = computed(() => {
-  if (!props.course) return ''
-  if (props.course.unscheduled) return '无固定时间'
-  return `周${'一二三四五六日'[props.course.weekday - 1]}`
+const hasFixedTime = computed(() => (course.value?.sessions.length ?? 0) > 0)
+
+/** 各上课时间的文案行：周一 · 第 3–4 节 · 第 1–16 周 */
+const sessionLines = computed(() => {
+  const c = course.value
+  if (!c) return []
+  return c.sessions.map((s) => ({
+    weekday: `周${'一二三四五六日'[s.weekday - 1]}`,
+    periods: periodsLabel(s.periods),
+    weeks: weeksLabel(s.weeks),
+    location: s.location || c.location,
+  }))
 })
 
-const periodLabel = computed(() => {
-  if (!props.course) return ''
-  if (props.course.unscheduled) return ''
-  const start = store.periods[props.course.startPeriod - 1]
-  const end = store.periods[props.course.endPeriod - 1]
-  const s = start ? start.startTime : ''
-  const e = end ? end.endTime : ''
-  return `${props.course.startPeriod}–${props.course.endPeriod} 节 · ${s}–${e}`
-})
-
-const weekLabel = computed(() => {
-  const c = props.course
-  if (!c) return ''
-  if (c.weekType === 'all') return '全部周'
-  if (c.weekType === 'odd') return '单周'
-  if (c.weekType === 'even') return '双周'
-  return c.weekList ? `第 ${c.weekList.join(',')} 周` : ''
+/** 周次汇总（多个时间组的并集文案） */
+const weekSummary = computed(() => {
+  const c = course.value
+  if (!c || !c.sessions.length) return ''
+  const set = new Set<number>()
+  for (const s of c.sessions) for (const w of s.weeks) set.add(w)
+  return weeksLabel([...set])
 })
 
 function onKeydown(e: KeyboardEvent): void {
@@ -61,25 +65,27 @@ function onMaskClick(event: MouseEvent): void {
   if (event.target === event.currentTarget) emit('close')
 }
 
-async function onDelete(): Promise<void> {
-  if (!props.course) return
-  const ok = await confirm({
+function onDelete(): void {
+  const c = course.value
+  if (!c) return
+  void confirm({
     title: '删除课程',
-    desc: `将删除课程「${props.course.name}」，其关联的考试与作业记录保留（课程关联置空），此操作不可撤销。`,
+    desc: `将删除课程「${c.name}」及其全部上课时间，其关联的考试与作业记录保留（课程关联置空），此操作不可撤销。`,
     danger: true,
     confirmText: '删除',
+  }).then(async (ok) => {
+    if (!ok) return
+    deleting.value = true
+    try {
+      await store.deleteCourse(c.id)
+      toast('已删除课程', 'success')
+      emit('close')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '删除失败，请重试', 'error')
+    } finally {
+      deleting.value = false
+    }
   })
-  if (!ok) return
-  deleting.value = true
-  try {
-    await store.deleteCourse(props.course.id)
-    toast('已删除课程', 'success')
-    emit('close')
-  } catch (e) {
-    toast(e instanceof Error ? e.message : '删除失败，请重试', 'error')
-  } finally {
-    deleting.value = false
-  }
 }
 </script>
 
@@ -124,21 +130,29 @@ async function onDelete(): Promise<void> {
               </span>
               <span class="v">{{ course.location || '—' }}</span>
             </div>
+
+            <!-- 上课时间：无固定时间 / 每个时间段一行 -->
             <div class="m-row">
               <span class="k">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" /></svg>
                 时间
               </span>
-              <span class="v" v-if="course.unscheduled">无固定时间</span>
-              <span class="v" v-else>{{ weekdayLabel }} · {{ periodLabel }}</span>
+              <span class="v" v-if="!hasFixedTime">无固定时间</span>
+              <span class="v slot-lines" v-else>
+                <span v-for="(s, i) in sessionLines" :key="i" class="slot-line">
+                  {{ s.weekday }} · {{ s.periods }}<template v-if="s.location"> · {{ s.location }}</template>
+                </span>
+              </span>
             </div>
-            <div class="m-row">
+
+            <div class="m-row" v-if="hasFixedTime">
               <span class="k">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2 4 4-4 4" /><path d="M3 11v-1a4 4 0 0 1 4-4h14" /><path d="m7 22-4-4 4-4" /><path d="M21 13v1a4 4 0 0 1-4 4H3" /></svg>
                 周次
               </span>
-              <span class="v">{{ weekLabel }}</span>
+              <span class="v">{{ weekSummary }}</span>
             </div>
+
             <div class="m-row" v-if="course.remark">
               <span class="k">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /></svg>
@@ -148,7 +162,7 @@ async function onDelete(): Promise<void> {
             </div>
           </div>
 
-          <!-- 考试/作业 Tab（PRD 5.7：聚合该课程的记录） -->
+          <!-- 考试/作业 Tab（聚合该课程的记录） -->
           <div class="rel-tabs" role="tablist" aria-label="关联记录">
             <button
               class="rel-tab"
@@ -157,9 +171,7 @@ async function onDelete(): Promise<void> {
               role="tab"
               :aria-selected="tab === 'exam'"
               @click="tab = 'exam'"
-            >
-              考试{{ examsOf.length ? `（${examsOf.length}）` : '' }}
-            </button>
+            >考试<span v-if="examsOf.length" class="rel-count">{{ examsOf.length }}</span></button>
             <button
               class="rel-tab"
               :class="{ active: tab === 'homework' }"
@@ -167,42 +179,35 @@ async function onDelete(): Promise<void> {
               role="tab"
               :aria-selected="tab === 'homework'"
               @click="tab = 'homework'"
-            >
-              作业{{ homeworkOf.length ? `（${homeworkOf.length}）` : '' }}
-            </button>
+            >作业<span v-if="homeworkOf.length" class="rel-count">{{ homeworkOf.length }}</span></button>
           </div>
 
-          <div class="rel-list">
+          <div class="rel-body">
             <template v-if="tab === 'exam'">
-              <div v-for="e in examsOf" :key="e.id" class="rel-item">
-                <span class="rel-tag rel-tag--exam">考试</span>
-                <span class="rel-main">
+              <div v-if="examsOf.length">
+                <div v-for="e in examsOf" :key="e.id" class="rel-item">
                   <span class="rel-name">{{ e.name }}</span>
-                  <span class="rel-meta num">{{ e.datetime.slice(0, 10) }} {{ e.datetime.slice(11, 16) }}</span>
-                </span>
+                  <span class="rel-meta num">{{ e.datetime.replace('T', ' ') }}<template v-if="e.location"> · {{ e.location }}</template></span>
+                </div>
               </div>
-              <p v-if="examsOf.length === 0" class="rel-empty">该课程暂无考试记录</p>
+              <div v-else class="rel-empty">暂无关联考试</div>
             </template>
             <template v-else>
-              <div v-for="h in homeworkOf" :key="h.id" class="rel-item">
-                <span class="rel-tag rel-tag--hw">作业</span>
-                <span class="rel-main">
-                  <span class="rel-name" :class="{ done: h.done }">{{ h.name }}</span>
-                  <span class="rel-meta num">{{ h.dueAt.slice(0, 10) }} 截止{{ h.done ? ' · 已完成' : '' }}</span>
-                </span>
+              <div v-if="homeworkOf.length">
+                <div v-for="h in homeworkOf" :key="h.id" class="rel-item">
+                  <span class="rel-name">{{ h.name }}</span>
+                  <span class="rel-meta num">{{ h.dueAt.slice(0, 16).replace('T', ' ') }} 截止{{ h.done ? ' · 已完成' : '' }}</span>
+                </div>
               </div>
-              <p v-if="homeworkOf.length === 0" class="rel-empty">该课程暂无作业记录</p>
+              <div v-else class="rel-empty">暂无关联作业</div>
             </template>
           </div>
 
-          <!-- 操作栏：编辑 / 删除（删除需二次确认） -->
           <div class="modal-foot">
-            <button class="btn btn--danger" type="button" :disabled="deleting" @click="onDelete">
-              {{ deleting ? '删除中…' : '删除' }}
+            <button class="btn-ghost" type="button" :disabled="deleting" @click="onDelete">
+              {{ deleting ? '正在删除…' : '删除课程' }}
             </button>
-            <button class="btn btn--primary" type="button" @click="emit('edit', course)">
-              编辑
-            </button>
+            <button class="btn-primary" type="button" @click="emit('edit', course)">编辑</button>
           </div>
         </div>
       </div>
@@ -218,202 +223,183 @@ async function onDelete(): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(15, 23, 42, 0.42);
-  backdrop-filter: blur(4px);
   padding: var(--spacing-lg);
+  background: rgba(17, 24, 39, 0.45);
+  backdrop-filter: blur(2px);
 }
 
 .modal {
-  width: min(400px, 100%);
-  max-height: 85vh;
-  overflow: auto;
+  width: min(420px, 100%);
+  max-height: min(88vh, 720px);
+  display: flex;
+  flex-direction: column;
   background: var(--color-bg-surface);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-pop);
-  padding: var(--spacing-xl);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
 }
 
 .modal-head {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-  margin-bottom: var(--spacing-lg);
+  padding: var(--spacing-lg) var(--spacing-xl);
+  border-bottom: 1px solid var(--color-border-default);
 }
 
 .dot {
   width: 10px;
   height: 10px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-full);
   flex-shrink: 0;
 }
 
 .m-title {
-  font-size: var(--font-size-xl);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
   color: var(--color-text-primary);
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-all;
 }
 
 .lab-chip {
+  flex-shrink: 0;
   font-size: var(--font-size-xs);
-  color: var(--course-3-text);
-  background: var(--course-3-bg);
-  border: 1px solid var(--course-3-line);
+  font-weight: var(--font-weight-bold);
+  color: var(--ctext);
+  background: var(--cbg);
+  border: 1px solid var(--cline);
   border-radius: var(--radius-full);
   padding: 1px 8px;
-  flex-shrink: 0;
 }
 
 .modal-close {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border-radius: var(--radius-sm);
   color: var(--color-text-tertiary);
-  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
+  flex-shrink: 0;
 }
 
 .modal-close:hover {
   background: var(--color-bg-hover);
 }
 
-.modal-close svg {
-  width: 16px;
-  height: 16px;
+.modal-body {
+  padding: var(--spacing-lg) var(--spacing-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  overflow-y: auto;
 }
 
 .m-row {
   display: flex;
+  align-items: flex-start;
   gap: var(--spacing-md);
-  padding: var(--spacing-sm) 0;
-  border-top: 1px solid var(--color-border-default);
+  font-size: var(--font-size-sm);
 }
 
-.m-row:first-of-type {
-  border-top: none;
-}
-
-.k {
-  display: flex;
+.m-row .k {
+  display: inline-flex;
   align-items: center;
-  gap: var(--spacing-xs);
-  width: 72px;
+  gap: 6px;
+  width: 60px;
   flex-shrink: 0;
-  font-size: var(--font-size-md);
   color: var(--color-text-tertiary);
 }
 
-.k svg {
+.m-row .k svg {
   width: 14px;
   height: 14px;
 }
 
-.v {
-  font-size: var(--font-size-body);
-  color: var(--color-text-body);
-  font-weight: var(--font-weight-medium);
+.m-row .v {
   flex: 1;
+  min-width: 0;
+  color: var(--color-text-primary);
   word-break: break-all;
 }
 
-.v.note {
-  background: var(--color-bg-page);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
-  padding: var(--spacing-sm) var(--spacing-md);
-  font-weight: var(--font-weight-regular);
+.m-row .v.note {
   color: var(--color-text-secondary);
 }
 
-/* 关联考试/作业 Tab */
+.slot-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.slot-line {
+  display: block;
+}
+
 .rel-tabs {
   display: flex;
-  gap: var(--spacing-xs);
-  margin-top: var(--spacing-lg);
-  padding-bottom: var(--spacing-sm);
+  gap: 2px;
+  padding: 0 var(--spacing-xl);
   border-bottom: 1px solid var(--color-border-default);
 }
 
 .rel-tab {
-  padding: 6px 14px;
-  border-radius: var(--radius-md);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 9px 12px;
   font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
-  transition: color var(--motion-duration-fast) var(--motion-easing-standard),
-    background var(--motion-duration-fast) var(--motion-easing-standard);
-}
-
-.rel-tab:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text-body);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
 }
 
 .rel-tab.active {
-  background: var(--color-brand-subtle);
   color: var(--color-brand);
+  border-bottom-color: var(--color-brand);
   font-weight: var(--font-weight-medium);
 }
 
-.rel-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm);
-  margin-top: var(--spacing-sm);
-  max-height: 180px;
+.rel-count {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background: var(--color-brand-subtle);
+  color: var(--color-brand);
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+}
+
+.rel-body {
+  padding: var(--spacing-md) var(--spacing-xl);
   overflow-y: auto;
+  min-height: 88px;
 }
 
 .rel-item {
   display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-sm);
-  background: var(--color-bg-page);
-  border-radius: var(--radius-sm);
-}
-
-.rel-tag {
-  flex: none;
-  font-size: 10px;
-  font-weight: var(--font-weight-bold);
-  border-radius: var(--radius-full);
-  padding: 1px 8px;
-}
-
-.rel-tag--exam {
-  color: var(--color-feedback-warning);
-  background: rgba(245, 158, 11, 0.12);
-}
-
-.rel-tag--hw {
-  color: var(--color-feedback-info);
-  background: rgba(6, 182, 212, 0.12);
-}
-
-.rel-main {
-  flex: 1;
-  display: flex;
   flex-direction: column;
-  min-width: 0;
+  gap: 2px;
+  padding: var(--spacing-sm) 0;
+  border-top: 1px solid var(--color-border-default);
+}
+
+.rel-item:first-of-type {
+  border-top: none;
 }
 
 .rel-name {
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
   color: var(--color-text-primary);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.rel-name.done {
-  text-decoration: line-through;
-  color: var(--color-text-tertiary);
 }
 
 .rel-meta {
@@ -422,101 +408,58 @@ async function onDelete(): Promise<void> {
 }
 
 .rel-empty {
-  padding: var(--spacing-md) 0;
+  padding: var(--spacing-lg) 0;
   text-align: center;
-  font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
 }
 
 .modal-foot {
   display: flex;
   justify-content: space-between;
   gap: var(--spacing-md);
-  margin-top: var(--spacing-xl);
+  padding: var(--spacing-md) var(--spacing-xl) var(--spacing-lg);
+  border-top: 1px solid var(--color-border-default);
 }
 
-.btn {
-  height: 38px;
-  padding: 0 var(--spacing-lg);
+.btn-ghost,
+.btn-primary {
+  padding: 8px 18px;
   border-radius: var(--radius-md);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
-  transition: background var(--motion-duration-fast) var(--motion-easing-standard),
-    opacity var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
-.btn--primary {
+.btn-ghost {
+  color: var(--color-feedback-danger, #dc2626);
+  border: 1px solid var(--color-border-default);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.btn-primary {
   background: var(--color-brand);
   color: var(--color-text-inverse);
 }
 
-.btn--primary:hover {
-  background: var(--color-brand-hover);
+.btn-primary:hover {
+  background: var(--color-brand-hover, var(--color-brand));
 }
 
-.btn--danger {
-  background: var(--color-bg-surface);
-  border: 1px solid var(--color-border-default);
-  color: var(--color-feedback-error);
+.btn-ghost:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
-.btn--danger:hover {
-  background: rgba(239, 68, 68, 0.08);
-}
-
-.btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-/* 桌面 pop 动画 */
-.modal-enter-active {
-  animation: pop var(--motion-duration-slow) var(--motion-easing-standard) both;
-}
-
+.modal-enter-active,
 .modal-leave-active {
-  transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);
+  transition: opacity var(--motion-duration-normal) var(--motion-easing-standard);
 }
 
+.modal-enter-from,
 .modal-leave-to {
   opacity: 0;
-}
-
-@keyframes pop {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@media (max-width: 767px) {
-  .modal-mask {
-    align-items: flex-end;
-    padding: 0;
-  }
-
-  .modal {
-    width: 100%;
-    max-height: 85vh;
-    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-    padding-bottom: calc(var(--spacing-xl) + env(safe-area-inset-bottom));
-  }
-
-  .modal-enter-active {
-    animation: sheetUp var(--motion-duration-normal) var(--motion-easing-standard) both;
-  }
-
-  @keyframes sheetUp {
-    from {
-      transform: translateY(100%);
-    }
-    to {
-      transform: translateY(0);
-    }
-  }
 }
 </style>

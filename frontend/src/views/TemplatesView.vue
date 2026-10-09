@@ -4,6 +4,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import AppSelect from '@/components/common/AppSelect.vue'
+import { MAX_WEEKS, periodRange } from '@/utils/session'
 import { api, type SemesterTemplateContent, type TemplateInfo } from '@/api/client'
 import type { ImportRow } from '@/utils/pdf'
 import { confirm, toast } from '@/utils/ui'
@@ -123,22 +124,23 @@ const courseForm = reactive({
   weekday: 1 as number,
   startPeriod: 1,
   endPeriod: 2,
-  weekType: 'all' as ImportRow['weekType'],
-  weekList: [] as number[],
   remark: '',
 })
-/** 每节课调整：一个时间段（同一门课的一节课），周次由 weekList 自定义 */
+/** 周次选择模式（界面用；保存时一律展开为逐周数组） */
+const courseWeekMode = ref<'all' | 'odd' | 'even' | 'custom'>('all')
+const courseWeekList = ref<number[]>([])
+/** 每节课调整：一个时间段（同一门课的一节课），各自选择周次 */
 interface CourseSession {
   weekday: number
   startPeriod: number
   endPeriod: number
   location: string
-  weekList: number[]
+  weeks: number[]
 }
 const courseSessions = ref<CourseSession[]>([])
 
 function blankCourseSession(): CourseSession {
-  return { weekday: 1, startPeriod: 1, endPeriod: 2, location: '', weekList: [] }
+  return { weekday: 1, startPeriod: 1, endPeriod: 2, location: '', weeks: [] }
 }
 
 function addCourseSession(): void {
@@ -150,9 +152,9 @@ function removeCourseSession(i: number): void {
 }
 
 function toggleCourseSessionWeek(s: CourseSession, w: number): void {
-  const i = s.weekList.indexOf(w)
-  if (i >= 0) s.weekList.splice(i, 1)
-  else s.weekList.push(w)
+  const i = s.weeks.indexOf(w)
+  if (i >= 0) s.weeks.splice(i, 1)
+  else s.weeks.push(w)
 }
 
 const courseFormError = ref('')
@@ -332,8 +334,35 @@ async function doImport(): Promise<void> {
   }
 }
 
+
+/** 行的首个上课时间（排序/比较用；无固定时间排最后） */
+function firstSessionOf(r: ImportRow) {
+  return r.sessions?.[0] ?? null
+}
+/** 行首日的星期（无固定时间 → 99，排最后） */
+function firstWeekdayOf(r: ImportRow): number {
+  return firstSessionOf(r)?.weekday ?? 99
+}
+/** 行的星期文案（无固定时间 → 「无固定时间」） */
+function displayWeekdayOf(r?: ImportRow | null): string {
+  if (!r) return '—'
+  const s0 = firstSessionOf(r)
+  return s0 ? WEEKDAY_LABELS[s0.weekday - 1] : '无固定时间'
+}
+/** 行的节次文案 */
+function displayPeriodsOf(r?: ImportRow | null): string {
+  if (!r) return '—'
+  const p = firstSessionOf(r)?.periods
+  if (!p || !p.length) return '—'
+  return p.length > 1 ? `第 ${p[0]}–${p[p.length - 1]} 节` : `第 ${p[0]} 节`
+}
+
+/** 行首节的起始节次（无固定时间 → 99） */
+function firstPeriodOf(r: ImportRow): number {
+  return firstSessionOf(r)?.periods?.[0] ?? 99
+}
+
 const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
-const MAX_WEEKS = 30
 
 const periodOptions = computed(() =>
   store.periods.map((p) => ({ value: p.index, label: `第 ${p.index} 节 ${p.startTime}–${p.endTime}` })),
@@ -341,11 +370,25 @@ const periodOptions = computed(() =>
 const weekdayOptions = WEEKDAY_LABELS.map((label, i) => ({ value: i + 1, label }))
 const weekChips = computed(() => Array.from({ length: MAX_WEEKS }, (_, i) => i + 1))
 
+/** 模板表单周次选择 → 逐周数组 */
+function courseWeeksFromUI(): number[] {
+  const all = Array.from({ length: MAX_WEEKS }, (_, i) => i + 1)
+  switch (courseWeekMode.value) {
+    case 'all':
+      return all
+    case 'odd':
+      return courseWeekList.value.length ? courseWeekList.value.filter((w) => w % 2 === 1) : all.filter((w) => w % 2 === 1)
+    case 'even':
+      return courseWeekList.value.length ? courseWeekList.value.filter((w) => w % 2 === 0) : all.filter((w) => w % 2 === 0)
+    default:
+      return [...courseWeekList.value].sort((a, b) => a - b)
+  }
+}
+
+/** 行周次文案（读取时派生；行的第一个上课时间的周次） */
 function weekLabelOf(r: ImportRow): string {
-  if (r.weekType === 'all') return '每周'
-  if (r.weekType === 'odd') return r.weekList?.length ? `单周（${compressWeeks(r.weekList)}）` : '单周'
-  if (r.weekType === 'even') return r.weekList?.length ? `双周（${compressWeeks(r.weekList)}）` : '双周'
-  return r.weekList?.length ? compressWeeks(r.weekList) : '每周'
+  const weeks = r.sessions[0]?.weeks ?? []
+  return weeks.length ? compressWeeks(weeks) : '每周'
 }
 
 /** 周次压缩：连续区间用「–」连接（如 1,2,3,5,7,8 → 1–3,5,7–8），前缀「第…周」 */
@@ -378,7 +421,7 @@ function openCreate(kind: 'course' | 'unit'): void {
     // 课程模板：直接打开完整课程表单（借鉴手动导入课程）
     Object.assign(courseForm, {
       name: '', type: 'course' as const, teacher: '', location: '',
-      weekday: 1, startPeriod: 1, endPeriod: 2, weekType: 'all' as const, weekList: [], remark: '',
+      weekday: 1, startPeriod: 1, endPeriod: 2, remark: '',
     })
     courseSessions.value = [blankCourseSession()]
     courseTab.value = 'fixed'
@@ -397,20 +440,28 @@ function openEdit(t: TemplateInfo): void {
     // 课程模板：直接打开完整课程表单（预填课程数据；多行 → 每节课调整模式）
     const rows = t.content as ImportRow[]
     const first = rows[0]
+    const f0 = first.sessions?.[0]
     Object.assign(courseForm, {
       name: first.name, type: first.type, teacher: first.teacher, location: first.location,
-      weekday: first.weekday, startPeriod: first.startPeriod, endPeriod: first.endPeriod,
-      weekType: first.weekType, weekList: first.weekList ? [...first.weekList] : [], remark: first.remark,
+      weekday: f0?.weekday ?? 1,
+      startPeriod: f0?.periods[0] ?? 1,
+      endPeriod: f0?.periods[f0.periods.length - 1] ?? 2,
+      remark: first.remark,
     })
+    courseWeekList.value = f0 ? [...f0.weeks] : []
+    courseWeekMode.value = 'custom'
     if (rows.length > 1) {
       courseTab.value = 'per'
-      courseSessions.value = rows.map((r) => ({
-        weekday: r.weekday,
-        startPeriod: r.startPeriod,
-        endPeriod: r.endPeriod,
-        location: r.location,
-        weekList: r.weekList ? [...r.weekList] : [],
-      }))
+      courseSessions.value = rows.map((r) => {
+        const s0 = r.sessions[0]
+        return {
+          weekday: s0?.weekday ?? 1,
+          startPeriod: s0?.periods[0] ?? 1,
+          endPeriod: s0?.periods[s0.periods.length - 1] ?? 2,
+          location: r.location,
+          weeks: s0 ? [...s0.weeks] : [],
+        }
+      })
     } else {
       courseTab.value = 'fixed'
       courseSessions.value = [blankCourseSession()]
@@ -442,22 +493,23 @@ async function saveCourseForm(): Promise<void> {
         courseFormError.value = `第 ${i + 1} 节课结束节次不能早于起始节次`
         return
       }
-      if (s.weekList.length === 0) {
+      if (s.weeks.length === 0) {
         courseFormError.value = `第 ${i + 1} 节课请至少选择一周`
         return
       }
     }
-    // 每个时间段生成一条同名课程记录（周次一律按自定义周次保存）
+    // 每个时间段生成一行（同一门课的多个上课时间）
     rows = courseSessions.value.map((s) => ({
       name: courseForm.name.trim(),
       type: courseForm.type,
       teacher: courseForm.teacher.trim(),
       location: s.location.trim(),
-      weekType: 'custom' as const,
-      weekList: [...s.weekList].sort((a, b) => a - b),
-      weekday: s.weekday as 1 | 2 | 3 | 4 | 5 | 6 | 7,
-      startPeriod: s.startPeriod,
-      endPeriod: s.endPeriod,
+      sessions: [{
+        weekday: s.weekday as 1 | 2 | 3 | 4 | 5 | 6 | 7,
+        location: s.location.trim(),
+        periods: periodRange(s.startPeriod, s.endPeriod),
+        weeks: [...s.weeks].sort((a, b) => a - b),
+      }],
       remark: courseForm.remark.trim(),
     }))
   } else {
@@ -465,7 +517,8 @@ async function saveCourseForm(): Promise<void> {
       courseFormError.value = '结束节次不能早于起始节次'
       return
     }
-    if (courseForm.weekType === 'custom' && courseForm.weekList.length === 0) {
+    const weeks = courseWeeksFromUI()
+    if (!weeks.length) {
       courseFormError.value = '请选择至少一个周次'
       return
     }
@@ -474,11 +527,12 @@ async function saveCourseForm(): Promise<void> {
       type: courseForm.type,
       teacher: courseForm.teacher.trim(),
       location: courseForm.location.trim(),
-      weekType: courseForm.weekType,
-      weekList: courseForm.weekType === 'all' ? null : [...courseForm.weekList].sort((a, b) => a - b),
-      weekday: courseForm.weekday as 1 | 2 | 3 | 4 | 5 | 6 | 7,
-      startPeriod: courseForm.startPeriod,
-      endPeriod: courseForm.endPeriod,
+      sessions: [{
+        weekday: courseForm.weekday as 1 | 2 | 3 | 4 | 5 | 6 | 7,
+        location: courseForm.location.trim(),
+        periods: periodRange(courseForm.startPeriod, courseForm.endPeriod),
+        weeks,
+      }],
       remark: courseForm.remark.trim(),
     }]
   }
@@ -519,9 +573,9 @@ function toggleUnitRef(id: number): void {
 
 /** 课程模板表单：自定义周次切换 */
 function toggleCourseWeek(w: number): void {
-  const i = courseForm.weekList.indexOf(w)
-  if (i >= 0) courseForm.weekList.splice(i, 1)
-  else courseForm.weekList.push(w)
+  const i = courseWeekList.value.indexOf(w)
+  if (i >= 0) courseWeekList.value.splice(i, 1)
+  else courseWeekList.value.push(w)
 }
 
 async function save(): Promise<void> {
@@ -602,7 +656,11 @@ const saveFromGroups = computed(() => {
 
 /** 组内时间段文本（如「周四 第5–8节 第15周」） */
 function sessionTextOf(c: ImportRow): string {
-  return `${WEEKDAY_LABELS[c.weekday - 1]} · 第 ${c.startPeriod}${c.endPeriod > c.startPeriod ? `–${c.endPeriod}` : ''} 节 · ${weekLabelOf(c)}`
+  const s0 = c.sessions[0]
+  if (!s0) return '无固定时间'
+  const p = s0.periods
+  const pText = p.length > 1 ? `第 ${p[0]}–${p[p.length - 1]} 节` : `第 ${p[0]} 节`
+  return `${WEEKDAY_LABELS[s0.weekday - 1]} · ${pText} · ${weekLabelOf(c)}`
 }
 
 /** 组是否全选 */
@@ -680,11 +738,12 @@ async function loadSaveFromCourses(): Promise<void> {
       type: c.type,
       teacher: c.teacher,
       location: c.location,
-      weekType: c.weekType,
-      weekList: c.weekList,
-      weekday: c.weekday,
-      startPeriod: c.startPeriod,
-      endPeriod: c.endPeriod,
+      sessions: c.sessions.map((s) => ({
+        weekday: s.weekday,
+        location: s.location,
+        periods: [...s.periods],
+        weeks: [...s.weeks],
+      })),
       remark: c.remark,
     }))
   } catch {
@@ -766,11 +825,13 @@ function groupRows(rows: ImportRow[]): { name: string; type: ImportRow['type']; 
     g.sessions.push(r)
   }
   const groups = [...map.values()]
-  for (const g of groups) g.sessions.sort((a, b) => a.weekday - b.weekday || a.startPeriod - b.startPeriod)
+  for (const g of groups) {
+    g.sessions.sort((a, b) => firstWeekdayOf(a) - firstWeekdayOf(b) || firstPeriodOf(a) - firstPeriodOf(b))
+  }
   groups.sort((a, b) => {
     const ka = a.sessions[0]
     const kb = b.sessions[0]
-    return ka.weekday - kb.weekday || ka.startPeriod - kb.startPeriod || a.name.localeCompare(b.name)
+    return firstWeekdayOf(ka) - firstWeekdayOf(kb) || firstPeriodOf(ka) - firstPeriodOf(kb) || a.name.localeCompare(b.name)
   })
   return groups
 }
@@ -965,11 +1026,11 @@ function resolvePreviewRows(t: TemplateInfo): ImportRow[] {
             <div class="tpl-course-card__grid">
               <div class="tpl-course-card__item">
                 <span class="tpl-course-card__label">星期</span>
-                <span class="tpl-course-card__value">{{ WEEKDAY_LABELS[r.weekday - 1] }}</span>
+                <span class="tpl-course-card__value">{{ displayWeekdayOf(r) }}</span>
               </div>
               <div class="tpl-course-card__item">
                 <span class="tpl-course-card__label">节次</span>
-                <span class="tpl-course-card__value num">第 {{ r.startPeriod }}{{ r.endPeriod > r.startPeriod ? `–${r.endPeriod}` : '' }} 节</span>
+                <span class="tpl-course-card__value num">{{ displayPeriodsOf(r) }}</span>
               </div>
               <div class="tpl-course-card__item">
                 <span class="tpl-course-card__label">周次</span>
@@ -1004,8 +1065,8 @@ function resolvePreviewRows(t: TemplateInfo): ImportRow[] {
             </div>
             <div class="tpl-combo-sessions">
               <div v-for="(r, i) in g.sessions" :key="i" class="tpl-combo-session">
-                <span class="tpl-combo-wd">{{ WEEKDAY_LABELS[r.weekday - 1] }}</span>
-                <span class="tpl-combo-period num">第 {{ r.startPeriod }}{{ r.endPeriod > r.startPeriod ? `–${r.endPeriod}` : '' }} 节</span>
+                <span class="tpl-combo-wd">{{ displayWeekdayOf(r) }}</span>
+                <span class="tpl-combo-period num">{{ displayPeriodsOf(r) }}</span>
                 <span class="tpl-combo-week">{{ weekLabelOf(r) }}</span>
                 <span v-if="r.location" class="tpl-combo-loc">{{ r.location }}</span>
               </div>
@@ -1036,8 +1097,8 @@ function resolvePreviewRows(t: TemplateInfo): ImportRow[] {
             </div>
             <div class="tpl-combo-sessions">
               <div v-for="(r, i) in g.sessions" :key="i" class="tpl-combo-session">
-                <span class="tpl-combo-wd">{{ WEEKDAY_LABELS[r.weekday - 1] }}</span>
-                <span class="tpl-combo-period num">第 {{ r.startPeriod }}{{ r.endPeriod > r.startPeriod ? `–${r.endPeriod}` : '' }} 节</span>
+                <span class="tpl-combo-wd">{{ displayWeekdayOf(r) }}</span>
+                <span class="tpl-combo-period num">{{ displayPeriodsOf(r) }}</span>
                 <span class="tpl-combo-week">{{ weekLabelOf(r) }}</span>
                 <span v-if="r.location" class="tpl-combo-loc">{{ r.location }}</span>
               </div>
@@ -1135,7 +1196,7 @@ function resolvePreviewRows(t: TemplateInfo): ImportRow[] {
             <input type="checkbox" :checked="unitIds.includes(ct.id)" @change="toggleUnitRef(ct.id)" />
             <span class="tpl-unit-main">
               <span class="tpl-unit-name">{{ ct.name }}</span>
-              <span class="tpl-unit-meta num">{{ (ct.content as ImportRow[])[0]?.name }} · {{ WEEKDAY_LABELS[((ct.content as ImportRow[])[0]?.weekday ?? 1) - 1] }} 第 {{ (ct.content as ImportRow[])[0]?.startPeriod }} 节</span>
+              <span class="tpl-unit-meta num">{{ (ct.content as ImportRow[])[0]?.name }} · {{ displayWeekdayOf((ct.content as ImportRow[])[0]) }} {{ displayPeriodsOf((ct.content as ImportRow[])[0]) }}</span>
             </span>
           </label>
         </div>
@@ -1237,32 +1298,32 @@ function resolvePreviewRows(t: TemplateInfo): ImportRow[] {
             <fieldset class="field field--full">
               <legend class="field__label">周次规则</legend>
               <div class="seg">
-                <label class="seg-item" :class="{ checked: courseForm.weekType === 'all' }">
-                  <input v-model="courseForm.weekType" type="radio" value="all" name="tpl-week-type" />
+                <label class="seg-item" :class="{ checked: courseWeekMode === 'all' }">
+                  <input v-model="courseWeekMode" type="radio" value="all" name="tpl-week-type" />
                   <span class="seg-item__dot"></span>
                   <span>每周</span>
                 </label>
-                <label class="seg-item" :class="{ checked: courseForm.weekType === 'odd' }">
-                  <input v-model="courseForm.weekType" type="radio" value="odd" name="tpl-week-type" />
+                <label class="seg-item" :class="{ checked: courseWeekMode === 'odd' }">
+                  <input v-model="courseWeekMode" type="radio" value="odd" name="tpl-week-type" />
                   <span class="seg-item__dot"></span>
                   <span>单周</span>
                 </label>
-                <label class="seg-item" :class="{ checked: courseForm.weekType === 'even' }">
-                  <input v-model="courseForm.weekType" type="radio" value="even" name="tpl-week-type" />
+                <label class="seg-item" :class="{ checked: courseWeekMode === 'even' }">
+                  <input v-model="courseWeekMode" type="radio" value="even" name="tpl-week-type" />
                   <span class="seg-item__dot"></span>
                   <span>双周</span>
                 </label>
-                <label class="seg-item" :class="{ checked: courseForm.weekType === 'custom' }">
-                  <input v-model="courseForm.weekType" type="radio" value="custom" name="tpl-week-type" />
+                <label class="seg-item" :class="{ checked: courseWeekMode === 'custom' }">
+                  <input v-model="courseWeekMode" type="radio" value="custom" name="tpl-week-type" />
                   <span class="seg-item__dot"></span>
                   <span>自定义</span>
                 </label>
               </div>
             </fieldset>
 
-            <div v-if="courseForm.weekType === 'custom' || courseForm.weekType === 'odd' || courseForm.weekType === 'even'" class="field field--full">
+            <div v-if="courseWeekMode === 'custom' || courseWeekMode === 'odd' || courseWeekMode === 'even'" class="field field--full">
               <span class="field__label">
-                {{ courseForm.weekType === 'custom' ? '选择周次（1–' + MAX_WEEKS + ' 周）' : '周数范围（选填，不选则为全学期' + (courseForm.weekType === 'odd' ? '单周' : '双周') + '）' }}
+                {{ courseWeekMode === 'custom' ? '选择周次（1–' + MAX_WEEKS + ' 周）' : '周数范围（选填，不选则为全学期' + (courseWeekMode === 'odd' ? '单周' : '双周') + '）' }}
               </span>
               <div class="week-custom">
                 <button
@@ -1270,7 +1331,7 @@ function resolvePreviewRows(t: TemplateInfo): ImportRow[] {
                   :key="w"
                   class="week-chip"
                   type="button"
-                  :class="{ checked: courseForm.weekList.includes(w) }"
+                  :class="{ checked: courseWeekList.includes(w) }"
                   @click="toggleCourseWeek(w)"
                 >{{ w }}</button>
               </div>
@@ -1311,7 +1372,7 @@ function resolvePreviewRows(t: TemplateInfo): ImportRow[] {
                       :key="w"
                       class="week-chip"
                       type="button"
-                      :class="{ checked: s.weekList.includes(w) }"
+                      :class="{ checked: s.weeks.includes(w) }"
                       @click="toggleCourseSessionWeek(s, w)"
                     >{{ w }}</button>
                   </div>

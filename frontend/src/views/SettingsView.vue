@@ -22,7 +22,8 @@ const TABS: { key: TabKey; label: string; adminOnly?: boolean }[] = [
   { key: 'semester', label: '学期' },
   { key: 'period', label: '节次' },
   { key: 'reminder', label: '提醒' },
-  { key: 'weather', label: '天气' },
+  // 天气为全站共享配置（存管理员名下），仅管理员可修改
+  { key: 'weather', label: '天气', adminOnly: true },
   { key: 'data', label: '数据' },
   { key: 'account', label: '账号' },
   { key: 'users', label: '用户管理', adminOnly: true },
@@ -288,16 +289,27 @@ function cancelPeriodEdit(): void {
 async function removePeriod(index: number): Promise<void> {
   const p = store.periods[index - 1]
   if (!p) return
+  // 该节次上仍有课程时，删除会一并移除这些上课时间并让后续节次前移
+  const affected = store.courses.filter((c) =>
+    c.sessions.some((s) => s.periods.includes(index)),
+  ).length
   const ok = await confirm({
     title: '删除节次',
-    desc: `将删除第 ${index} 节（${p.startTime}–${p.endTime}），其余节次自动重排。`,
+    desc: affected
+      ? `将删除第 ${index} 节（${p.startTime}–${p.endTime}），其余节次自动重排。有 ${affected} 门课在该节次上课，其这一节的上课时间会一并移除。`
+      : `将删除第 ${index} 节（${p.startTime}–${p.endTime}），其余节次自动重排。`,
     danger: true,
     confirmText: '删除',
   })
   if (!ok) return
   try {
-    await store.deletePeriod(p.id)
-    toast('节次已删除', 'success')
+    const res = await store.deletePeriod(p.id)
+    toast(
+      res.affectedCourses
+        ? `节次已删除，同时移除了 ${res.affectedCourses} 门课在该节次的上课时间`
+        : '节次已删除',
+      'success',
+    )
   } catch (e) {
     toast(e instanceof Error ? e.message : '删除失败，请重试', 'error')
   }

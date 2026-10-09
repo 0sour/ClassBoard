@@ -2,9 +2,11 @@
 // ClassBoard · 测试数据生成脚本（可重复运行）
 // 清空全部学期（级联删除课程/考试/作业/节次）后，重建一套
 // 覆盖所有功能的测试数据；通过 HTTP API 操作，无需重启服务。
-// 用法：node scripts/seed-test-data.mjs
+// 用法：node scripts/seed-test-data.mjs --yes
+// 安全：必须显式传 --yes；目标库已有数据时会打印警告并要求 --yes 确认。
 // ============================================================
 const BASE = process.env.CB_API ?? 'http://localhost:3000/api'
+const FORCE = process.argv.includes('--yes')
 
 async function req(method, path, body) {
   for (let attempt = 1; ; attempt++) {
@@ -28,6 +30,15 @@ async function req(method, path, body) {
 
 // ---- 1. 清空：删除所有学期（course/exam/homework/period_template 级联删除） ----
 const semesters = await req('GET', '/semesters')
+const existingCourses = semesters.length ? (await req('GET', '/courses')).length : 0
+if ((semesters.length || existingCourses) && !FORCE) {
+  console.error(
+    `\n[中止] 目标 ${BASE} 已有 ${semesters.length} 个学期 / ${existingCourses} 门课程。\n` +
+      `本脚本会清空全部数据。确认无误请追加 --yes 重新执行，例如：\n` +
+      `  node scripts/seed-test-data.mjs --yes\n`,
+  )
+  process.exit(1)
+}
 for (const s of semesters) {
   await req('DELETE', `/semesters/${s.id}`)
   console.log(`已删除学期 #${s.id} ${s.name}`)
@@ -64,13 +75,51 @@ const courses = [
   ['程序设计上机实验', 'lab', 'custom', [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], 2, 9, 10, '机房B401', '周明'],
 ]
 const colorNames = ['course-1', 'course-2', 'course-3', 'course-4', 'course-5', 'course-6', 'course-7', 'course-8']
+
+/** 周规则字符串 → 逐周数组（1-16周 / 1-7周(单) / 1-8周,10-16周(双)） */
+function expandWeeks(spec, totalWeeks = 16) {
+  const s = String(spec)
+  const isOdd = s.includes('(单)')
+  const isEven = s.includes('(双)')
+  const clean = s.replace(/\(单\)|\(双\)|周/g, '')
+  const list = []
+  for (const part of clean.split(',')) {
+    if (!part) continue
+    if (part.includes('-')) {
+      const [a, b] = part.split('-').map(Number)
+      for (let i = a; i <= b; i++) list.push(i)
+    } else {
+      list.push(Number(part))
+    }
+  }
+  const all = list.length ? list : Array.from({ length: totalWeeks }, (_, i) => i + 1)
+  if (isOdd) return all.filter((w) => w % 2 === 1)
+  if (isEven) return all.filter((w) => w % 2 === 0)
+  return [...new Set(all)].sort((a, b) => a - b)
+}
+
+/** 节次区间 → 逐节数组 */
+function expandPeriods(start, end) {
+  const out = []
+  for (let p = start; p <= end; p++) out.push(p)
+  return out
+}
+
 const createdCourses = []
 for (let i = 0; i < courses.length; i++) {
   const [name, type, weekType, weekList, weekday, startPeriod, endPeriod, location, teacher] = courses[i]
+  const weeks = weekType === 'custom' && weekList
+    ? weekList
+    : expandWeeks(
+        weekType === 'odd' ? '1-16周(单)'
+        : weekType === 'even' ? '1-16周(双)'
+        : weekList && weekList.length ? `${weekList[0]}-${weekList[weekList.length - 1]}周`
+        : '1-16周',
+      )
   const c = await req('POST', '/courses', {
     type, name, teacher, location,
     color: colorNames[i % colorNames.length],
-    weekType, weekList, weekday, startPeriod, endPeriod,
+    sessions: [{ weekday, location, periods: expandPeriods(startPeriod, endPeriod), weeks }],
   })
   createdCourses.push(c)
 }

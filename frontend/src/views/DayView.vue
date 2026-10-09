@@ -4,10 +4,11 @@ import { useScheduleStore } from '@/stores/schedule'
 import WeatherCard from '@/components/schedule/WeatherCard.vue'
 import CourseModal from '@/components/schedule/CourseModal.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
+import { periodsLabel } from '@/utils/session'
 import type { Course } from '@/types'
 
 const store = useScheduleStore()
-const selected = ref<Course | null>(null)
+const selectedId = ref<number | null>(null)
 const editing = ref<Course | null>(null)
 const showEditor = ref(false)
 
@@ -27,15 +28,14 @@ const todayLabel = computed(() => {
   return `${d.getMonth() + 1}月${d.getDate()}日 周${'一二三四五六日'[(d.getDay() + 6) % 7]}`
 })
 
-// 今天的课程按今天真实所在周过滤，与周课表切换的展示周互不影响
-const todayCourses = computed(() => {
+// 今天的课程块按今天真实所在周过滤，与周课表切换的展示周互不影响
+const todayBlocks = computed(() => {
   const wd = ((today.value.getDay() + 6) % 7 + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7
   return store.todayCoursesByWeekday[wd]
 })
 
 const todayHomework = computed(() => {
-  const wd = ((today.value.getDay() + 6) % 7 + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7
-  const ids = store.todayCoursesByWeekday[wd].map((c) => c.id)
+  const ids = todayBlocks.value.map((c) => c.id)
   return store.homework.filter((h) => !h.done && (h.courseId === null || ids.includes(h.courseId)))
 })
 
@@ -43,12 +43,12 @@ onMounted(() => {
   void store.refreshToday()
 })
 
-function openCourse(course: Course): void {
-  selected.value = course
+function openCourse(courseId: number): void {
+  selectedId.value = courseId
 }
 
 function editCourse(course: Course): void {
-  selected.value = null
+  selectedId.value = null
   editing.value = course
   showEditor.value = true
 }
@@ -58,7 +58,7 @@ function editCourse(course: Course): void {
   <div class="page day-view">
     <div class="today-head reveal">
       <h2>今天 · {{ todayLabel }}</h2>
-      <span class="today-count num">共 {{ todayCourses.length }} 节课</span>
+      <span class="today-count num">共 {{ todayBlocks.length }} 节课</span>
     </div>
 
     <!-- 天气卡（仅移动端显示；桌面端由周课表侧栏承担） -->
@@ -66,25 +66,25 @@ function editCourse(course: Course): void {
 
     <div class="today-list">
       <button
-        v-for="c in todayCourses"
-        :key="c.id"
+        v-for="b in todayBlocks"
+        :key="`${b.id}:${b.sessionId}`"
         class="today-card reveal"
         type="button"
-        @click="openCourse(c)"
+        @click="openCourse(b.id)"
       >
-        <span class="tc-dot" :style="{ background: `var(--${c.color}-text)` }"></span>
+        <span class="tc-dot" :style="{ background: `var(--${b.color}-text)` }"></span>
         <span class="tc-time num">
-          {{ store.periods[c.startPeriod - 1]?.startTime }}–{{ store.periods[c.endPeriod - 1]?.endTime }}
+          {{ store.periods[b.startPeriod - 1]?.startTime }}–{{ store.periods[b.endPeriod - 1]?.endTime }}
         </span>
         <span class="tc-main">
-          <span class="tc-name">{{ c.name }}</span>
-          <span class="tc-loc">{{ c.location }} · {{ c.teacher }}</span>
+          <span class="tc-name">{{ b.name }}</span>
+          <span class="tc-loc">{{ b.location }} · {{ b.teacher }}</span>
         </span>
-        <span class="tc-slot num">第 {{ c.startPeriod }}–{{ c.endPeriod }} 节</span>
+        <span class="tc-slot num">{{ periodsLabel(b.periods) }}</span>
       </button>
     </div>
 
-    <div class="today-empty" v-if="todayCourses.length === 0">
+    <div class="today-empty" v-if="todayBlocks.length === 0">
       今天没有排课，享受空闲时光
     </div>
 
@@ -96,7 +96,7 @@ function editCourse(course: Course): void {
       </div>
     </div>
 
-    <CourseModal :course="selected" @close="selected = null" @edit="editCourse" />
+    <CourseModal :course-id="selectedId" @close="selectedId = null" @edit="editCourse" />
     <CourseEditor
       :open="showEditor"
       :course="editing"

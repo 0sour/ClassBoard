@@ -5,11 +5,14 @@
 .freebuff
 docs
 examples
-data
 *.log
 **/node_modules
 frontend/dist
 frontend/public/sample.pdf
 frontend/scripts
-*.db
-*.db-*
+
+# 本地数据与快照：Docker 的 filepath.Match 不跨目录，模式需加 **/ 前缀
+# （否则 server/lib/data/ 与 data/snapshots/ 会随 COPY 进入构建上下文与镜像）
+**/data
+**/*.db
+**/*.db-*

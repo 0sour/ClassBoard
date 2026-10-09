@@ -9,6 +9,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import { calcWeekNumber, formatMonthDay, isOddWeek, parseDate } from '@/utils/week'
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- defineProps 返回值仅在模板中使用
 const props = withDefaults(
   defineProps<{
     /** 当前展示周号（null=不在学期内，如假期/未开学） */

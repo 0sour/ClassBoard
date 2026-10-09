@@ -49,14 +49,39 @@ export interface ScheduleWeek {
   weekNumber: number | null
   isOddWeek: boolean
   isHoliday: boolean
+  /** 未开学（早于学期起始日）：weekNumber 为 null 但语义区别于假期 */
+  isBeforeSemester?: boolean
   startDate: string | null
   endDate: string | null
   semester: Semester | null
 }
 
+/** 周聚合返回的课程块（服务端已按周过滤；同一课程多个上课时间=多块） */
+export interface ScheduleCourseBlock {
+  id: number
+  sessionId: number
+  semesterId: number
+  type: 'course' | 'lab'
+  name: string
+  teacher: string
+  location: string
+  color: string
+  remark: string
+  weekday: number
+  /** 该周实际出现的节次（逐项） */
+  periods: number[]
+  /** 完整节次集合（不限周次）：定位与冲突检测用 */
+  allPeriods: number[]
+  startPeriod: number
+  endPeriod: number
+  runs: [number, number][]
+  startTime: string | null
+  endTime: string | null
+}
+
 export interface ScheduleResponse {
   week: ScheduleWeek
-  courses: Course[]
+  courses: ScheduleCourseBlock[]
   exams: Exam[]
   homework: Homework[]
 }
@@ -81,7 +106,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
-/** 课程创建/更新请求体（id 由服务端决定；semesterId 缺省为当前学期） */
+/** 课程创建/更新请求体：元数据 + 上课时间组（节次/周次逐项数组） */
 export interface CoursePayload {
   semesterId?: number
   type: 'course' | 'lab'
@@ -89,12 +114,14 @@ export interface CoursePayload {
   teacher: string
   location: string
   color: string
-  weekType: 'all' | 'odd' | 'even' | 'custom'
-  weekList: number[] | null
-  weekday: number
-  startPeriod: number
-  endPeriod: number
   remark?: string
+  /** 空数组 = 无固定时间课程 */
+  sessions: {
+    weekday: number
+    location: string
+    periods: number[]
+    weeks: number[]
+  }[]
 }
 
 export const api = {
@@ -104,7 +131,6 @@ export const api = {
     request<ScheduleResponse>(`/schedule${date ? `?date=${encodeURIComponent(date)}` : ''}`),
 
   // ---- 学期 ----
-  listSemesters: () => request<Semester[]>('/semesters'),
 
   createSemester: (body: { name: string; startDate: string; endDate: string; weekStartDay: 1 | 7 }) =>
     request<Semester>('/semesters', { method: 'POST', body: JSON.stringify(body) }),
@@ -126,7 +152,7 @@ export const api = {
     request<Period>(`/periods/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   deletePeriod: (id: number) =>
-    request<void>(`/periods/${id}`, { method: 'DELETE' }),
+    request<{ removedPeriod: number; affectedCourses: number }>(`/periods/${id}`, { method: 'DELETE' }),
 
   // ---- 课程 ----
   listCourses: (semesterId?: number) =>
@@ -173,12 +199,13 @@ export const api = {
     request<void>(`/homework/${id}`, { method: 'DELETE' }),
 
   // ---- 导入 ----
-  importConfirm: (body: { mode: 'append' | 'overwrite'; semesterId: number; rows: ImportRow[] }) =>
-    request<{ count: number }>('/import/confirm', { method: 'POST', body: JSON.stringify(body) }),
+  importConfirm: (body: { mode: 'append' | 'overwrite'; semesterId: number; rows: ImportRow[]; keepLabs?: boolean }) =>
+    request<{ count: number; removed?: number; keptLabs?: number; snapshot?: string }>('/import/confirm', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   // ---- 设置 ----
-  getSettings: () => request<SettingsPayload>('/settings'),
-
   updateSettings: (patch: Partial<SettingsPayload>) =>
     request<SettingsPayload>('/settings', { method: 'PUT', body: JSON.stringify(patch) }),
 
@@ -213,7 +240,7 @@ export const api = {
     URL.revokeObjectURL(url)
   },
 
-  restoreBackup: async (file: File): Promise<{ restored: Record<string, number> }> => {
+  restoreBackup: async (file: File): Promise<{ restored: Record<string, unknown> }> => {
     const form = new FormData()
     form.append('file', file)
     const res = await fetch(BASE + '/backup/restore', { method: 'POST', body: form })
@@ -230,18 +257,6 @@ export const api = {
     return res.json()
   },
 
-  // ---- 访问口令 ----
-  verifyAccess: (passphrase: string) =>
-    request<{ ok: true }>('/access/verify', { method: 'POST', body: JSON.stringify({ passphrase }) }),
-
-  logoutAccess: () => request<void>('/access/logout', { method: 'POST' }),
-
-  enableAccess: (passphrase: string) =>
-    request<{ ok: true }>('/access/enable', { method: 'POST', body: JSON.stringify({ passphrase }) }),
-
-  disableAccess: (passphrase: string) =>
-    request<{ ok: true }>('/access/disable', { method: 'POST', body: JSON.stringify({ passphrase }) }),
-
   // ---- 多用户认证 ----
   login: (username: string, password: string, remember: boolean) =>
     request<{ ok: true; user: UserInfo }>('/access/login', { method: 'POST', body: JSON.stringify({ username, password, remember }) }),
@@ -251,7 +266,6 @@ export const api = {
 
   logout: () => request<void>('/access/logout', { method: 'POST' }),
 
-  getMe: () => request<{ user: UserInfo }>('/access/me'),
 
   getSignupEnabled: () => request<{ enabled: boolean }>('/access/signup-enabled'),
 
@@ -280,7 +294,6 @@ export const api = {
   // ---- 课程模板 ----
   listTemplates: () => request<{ templates: TemplateInfo[] }>('/templates'),
 
-  getTemplate: (id: number) => request<{ template: TemplateInfo }>(`/templates/${id}`),
 
   createTemplate: (body: { kind: 'course' | 'unit' | 'semester'; name: string; category: string; description: string; content: ImportRow[] | number[] | SemesterTemplateContent }) =>
     request<{ template: TemplateInfo }>('/templates', { method: 'POST', body: JSON.stringify(body) }),
@@ -291,10 +304,32 @@ export const api = {
   deleteTemplate: (id: number) => request<void>(`/templates/${id}`, { method: 'DELETE' }),
 
   importTemplate: (id: number, body: { semesterId: number; mode: 'append' | 'overwrite' | 'dedupe' }) =>
-    request<{ count: number; skipped: number; templateCount: number; semesterId?: number; semesterName?: string }>(`/templates/${id}/import`, { method: 'POST', body: JSON.stringify(body) }),
+    request<{ count: number; skipped: number; templateCount: number; removed?: number; semesterId?: number; semesterName?: string }>(`/templates/${id}/import`, { method: 'POST', body: JSON.stringify(body) }),
 
   importTemplateBatch: (body: { semesterId: number; mode: 'append' | 'overwrite' | 'dedupe'; templateIds: number[] }) =>
-    request<{ count: number; skipped: number; templateCount: number }>('/templates/import-batch', { method: 'POST', body: JSON.stringify(body) }),
+    request<{ count: number; skipped: number; templateCount: number; removed?: number }>('/templates/import-batch', { method: 'POST', body: JSON.stringify(body) }),
+}
+
+/** 模板课程行：新结构（元数据 + sessions）；旧格式字段仅为读取兼容 */
+export interface TemplateRow {
+  type: 'course' | 'lab'
+  name: string
+  teacher: string
+  location: string
+  color?: string
+  remark?: string
+  sessions?: {
+    weekday: number
+    location: string
+    periods: number[]
+    weeks: number[]
+  }[]
+  /** 旧格式（weekType/weekList/weekday/startPeriod/endPeriod）——服务端读取时自动升级 */
+  weekType?: 'all' | 'odd' | 'even' | 'custom'
+  weekList?: number[] | null
+  weekday?: number
+  startPeriod?: number
+  endPeriod?: number
 }
 
 /** 学期模板内容：学期信息 + 节次时间模板 */

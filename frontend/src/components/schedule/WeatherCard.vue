@@ -8,6 +8,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- defineProps 返回值仅在模板中使用
 const props = withDefaults(
   defineProps<{
     /** 形态：glass=毛玻璃（桌面侧栏）/ slim=简约条（移动端今日页） */

@@ -4,7 +4,8 @@
 //       实测 getTextContent 返回空，故弃用 pdfjs-dist，见技术设计文档 3.3.3）
 // 解析：基于真实样本《严子辰(2026-2027-1)课表.pdf》的表格重建规则
 // ============================================================
-import type { CourseType, WeekType, Weekday } from '@/types'
+import type { CourseType, Weekday } from '@/types'
+import { MAX_WEEKS, periodRange } from '@/utils/session'
 
 /** PDF 单行文本（mupdf stext 输出） */
 export interface PdfSpan {
@@ -22,17 +23,19 @@ export interface PdfPageData {
   spans: PdfSpan[]
 }
 
-/** 规范化后的导入行（与 Course 同构，缺 id/semesterId；color 由前端轮询分配后随行提交） */
+/** 规范化后的导入行（与 Course 同构，缺 id/semesterId；color 由前端轮询分配后随行提交）
+ * 上课时间为逐项展开的节次/周次数组；PDF 解析结果一律为单个 session。 */
 export interface ImportRow {
   name: string
   type: CourseType
   teacher: string
   location: string
-  weekType: WeekType
-  weekList: number[] | null
-  weekday: Weekday
-  startPeriod: number
-  endPeriod: number
+  sessions: {
+    weekday: Weekday
+    location: string
+    periods: number[]
+    weeks: number[]
+  }[]
   remark: string
   /** 颜色：前端按 8 色轮询规则分配（服务端缺省 course-1） */
   color?: string
@@ -79,7 +82,8 @@ const LINE_GAP = 2
 /** 表头文本宽 36（3 全角 × 12pt），列宽 104 → 左缘偏移 34 */
 const COL_LEFT_OFFSET = 34
 /** 默认节次模板上限（技术文档 3.3.3：默认 1-12） */
-const MAX_PERIOD = 12
+/** PDF 解析的节次上限（教务课表通常 12 节；与存储层 MAX_PERIODS 不同义） */
+const PDF_MAX_PERIOD = 12
 
 // ============================================================
 // 提取（依赖 mupdf，动态导入以便单测不加载 wasm）
@@ -246,7 +250,7 @@ export function parseCellText(text: string, weekday: Weekday, fallback: [number,
   const parts = text.split('/')
 
   // 课程名与节次段同处第一段（如「Matlab工程应用▲(7-8节)1-15周(单)」），需先剥离节次段
-  let name = (parts[0] ?? '').replace(/\([\d\-]+节\)[\d,\-周单双()]*/g, '').trim()
+  let name = (parts[0] ?? '').replace(/\([\d-]+节\)[\d,周单双()-]*/g, '').trim()
   name = name.replace(/^[▲●■○△◆▪□]+|[▲●■○△◆▪□]+$/g, '').trim()
   if (!name) return { name: '', error: '课程名为空' }
 
@@ -260,7 +264,7 @@ export function parseCellText(text: string, weekday: Weekday, fallback: [number,
   }
 
   // 周次规则：1-16周 / 1-15周(单) / 1-8周,10-16周(双) / 1-10周,12周,15周 / 6-13周
-  const weekMatch = /\((?:\d+-\d+|\d+)节\)([\d,\-周单双()]+)/.exec(text)
+  const weekMatch = /\((?:\d+-\d+|\d+)节\)([\d,周单双()-]+)/.exec(text)
   const weeks = parseWeeks(weekMatch ? weekMatch[1] : '')
 
   // 键值字段
@@ -283,10 +287,10 @@ export function parseCellText(text: string, weekday: Weekday, fallback: [number,
   const type: CourseType = 'course'
 
   // 校验节次
-  if (startPeriod < 1 || endPeriod < startPeriod || endPeriod > MAX_PERIOD) {
+  if (startPeriod < 1 || endPeriod < startPeriod || endPeriod > PDF_MAX_PERIOD) {
     return {
       name,
-      error: `节次范围无效（第 ${startPeriod}-${endPeriod} 节，超出 1-${MAX_PERIOD}）`,
+      error: `节次范围无效（第 ${startPeriod}-${endPeriod} 节，超出 1-${PDF_MAX_PERIOD}）`,
     }
   }
 
@@ -295,29 +299,25 @@ export function parseCellText(text: string, weekday: Weekday, fallback: [number,
     type,
     teacher,
     location,
-    weekType: weeks.weekType,
-    weekList: weeks.weekList,
-    weekday,
-    startPeriod,
-    endPeriod,
+    // 节次与周次均为逐项展开数组（存储不写区间、不写单双周简写）
+    sessions: [{ weekday, location, periods: periodRange(startPeriod, endPeriod), weeks }],
     remark: buildRemark(hours, weeklyHours, credit),
   }
 }
 
-/** 周次规则字符串 → weekType/weekList
- * 语义（正方教务系统）：(单)/(双) 只修饰最后一段；
- * 单段时若覆盖全学期奇偶（1-16 内全部单/双周）归约为 odd/even，
- * 否则展开为 custom（如 1-7周(单) → 1,3,5,7，不含 9-15 周）；
- * 多段时仅最后一段按奇偶过滤（如 1-8周,10-16周(双) → 1-8 全周 + 10,12,14,16）。 */
-export function parseWeeks(spec: string): { weekType: WeekType; weekList: number[] | null } {
+/**
+ * 周次规则字符串 → 逐项周次数组（不写简写）。
+ * 语义（正方教务系统）：(单)/(双) 只修饰最后一段。
+ * 例：'1-16周' → [1..16]；'1-7周(单)' → [1,3,5,7]；'1-8周,10-16周(双)' → [1..8,10,12,14,16]。
+ */
+export function parseWeeks(spec: string): number[] {
   const s = spec.trim()
-  if (!s) return { weekType: 'all', weekList: null }
+  if (!s) return []
   const isOdd = s.endsWith('(单)')
   const isEven = s.endsWith('(双)')
   const clean = s.replace(/周/g, '').replace(/\(单\)/g, '').replace(/\(双\)/g, '')
   const segs = clean.split(',')
 
-  // 展开：奇偶标记只作用于最后一段，其余段全部展开
   const list: number[] = []
   for (let i = 0; i < segs.length; i++) {
     const seg = segs[i].trim()
@@ -335,21 +335,7 @@ export function parseWeeks(spec: string): { weekType: WeekType; weekList: number
       list.push(Number(seg))
     }
   }
-  const unique = [...new Set(list)].sort((a, b) => a - b)
-  if (unique.length === 0) return { weekType: 'all', weekList: null }
-  // 全学期（1-16 全周）→ all
-  const full = unique.length === 16 && unique[0] === 1 && unique[15] === 16
-  if (full) return { weekType: 'all', weekList: null }
-  // 全学期奇偶（1-16 内全部单/双周）→ odd/even（无范围）
-  const ALL_ODD = [1, 3, 5, 7, 9, 11, 13, 15]
-  const ALL_EVEN = [2, 4, 6, 8, 10, 12, 14, 16]
-  if (unique.length === 8 && unique.every((w, i) => w === ALL_ODD[i])) return { weekType: 'odd', weekList: null }
-  if (unique.length === 8 && unique.every((w, i) => w === ALL_EVEN[i])) return { weekType: 'even', weekList: null }
-  // 单段奇偶 + 范围（如 1-15周(单) → odd + [1,3,5,7,9,11,13,15]；8-14周(单) → odd + [9,11,13]）
-  if (segs.length === 1 && (isOdd || isEven)) {
-    return { weekType: isOdd ? 'odd' : 'even', weekList: unique }
-  }
-  return { weekType: 'custom', weekList: unique }
+  return [...new Set(list)].sort((a, b) => a - b).filter((w) => w >= 1 && w <= MAX_WEEKS)
 }
 
 /** 学时组成「讲课:48」/「讲课:24,实验:8」→ 备注摘要 */
@@ -378,7 +364,7 @@ function detectSemesterName(spans: PdfSpan[]): string {
     .sort((a, b) => a.x - b.x)
     .map((s) => s.t.trim())
     .join('')
-  const m = /([\d\-]+学年第[一二三四五六七八九十\d]+学期)/.exec(line)
+  const m = /([\d-]+学年第[一二三四五六七八九十\d]+学期)/.exec(line)
   return m ? m[1] : ''
 }
 

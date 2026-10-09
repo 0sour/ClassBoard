@@ -2,8 +2,8 @@
 // ClassBoard · 字段校验（前后端共享同一套约束，见技术文档 4.1.3）
 // ============================================================
 import { badRequest } from './errors.js'
+import { MAX_PERIODS, MAX_WEEKS, normalizeInts } from './weekspan.js'
 
-export const WEEK_TYPES = ['all', 'odd', 'even', 'custom']
 export const COURSE_TYPES = ['course', 'lab']
 export const COLOR_NAMES = [
   'course-1', 'course-2', 'course-3', 'course-4',
@@ -13,8 +13,6 @@ export const COLOR_NAMES = [
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/
 const DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/
-/** 学期最长跨度（周序号计算的合理上限） */
-const MAX_WEEKS = 30
 
 /** 严格校验日期存在性（如 2026-02-30 非法） */
 export function isValidDate(s) {
@@ -85,9 +83,11 @@ export function periodRules() {
 
 /**
  * 课程校验（导入行与手动录入共用）。
+ * 结构：{ type, name, teacher, location, color, remark, sessions:[{ weekday, location, periods[], weeks[] }] }
+ * 节次与周次一律为逐项展开的整数数组；sessions 为空表示「无固定时间」课程。
  * 返回清洗后的课程字段。
  */
-export function validateCourse(body, { maxPeriod = 12, requireSemester = false } = {}) {
+export function validateCourse(body, { maxPeriod = MAX_PERIODS, maxWeek = MAX_WEEKS } = {}) {
   const out = {}
   const issues = []
 
@@ -103,48 +103,49 @@ export function validateCourse(body, { maxPeriod = 12, requireSemester = false }
   out.location = typeof body.location === 'string' ? body.location.slice(0, 50) : ''
   out.remark = typeof body.remark === 'string' ? body.remark.slice(0, 200) : ''
 
-  const color = body.color ?? 'course-1'
-  out.color = COLOR_NAMES.includes(color) ? color : 'course-1'
+  // 颜色：非法值回退 course-1；未提供时保持 undefined，交给调用方按轮询规则分配
+  // （lib/colors.js 的 assignCourseColors）——否则所有未指定颜色的导入行都会落成同色
+  if (body.color === undefined || body.color === null || body.color === '') {
+    out.color = undefined
+  } else {
+    out.color = COLOR_NAMES.includes(body.color) ? body.color : 'course-1'
+  }
 
-  const weekType = body.weekType ?? 'all'
-  if (!WEEK_TYPES.includes(weekType)) issues.push({ field: 'weekType', message: '周规则取值无效' })
-  out.weekType = weekType
-
-  let weekList = null
-  if (body.weekList != null) {
-    if (!Array.isArray(body.weekList)) {
-      issues.push({ field: 'weekList', message: 'weekList 须为数组' })
-    } else {
-      const uniq = [...new Set(body.weekList)].sort((a, b) => a - b)
-      const bad = uniq.some((w) => !Number.isInteger(w) || w < 1 || w > MAX_WEEKS)
-      if (bad) issues.push({ field: 'weekList', message: `周次须在 1-${MAX_WEEKS} 内` })
-      else weekList = uniq
+  const rawSessions = body.sessions
+  if (rawSessions !== undefined && !Array.isArray(rawSessions)) {
+    issues.push({ field: 'sessions', message: 'sessions 须为数组' })
+    out.sessions = []
+  } else {
+    const sessions = []
+    for (const [i, s] of (rawSessions ?? []).entries()) {
+      const at = `sessions[${i}]`
+      if (!s || typeof s !== 'object') {
+        issues.push({ field: at, message: '上课时间须为对象' })
+        continue
+      }
+      if (![1, 2, 3, 4, 5, 6, 7].includes(s.weekday)) {
+        issues.push({ field: `${at}.weekday`, message: '星期取值必须为 1-7' })
+        continue
+      }
+      const periods = normalizeInts(s.periods)
+      if (!periods.length || periods.some((p) => p > maxPeriod)) {
+        issues.push({ field: `${at}.periods`, message: `节次须为 1-${maxPeriod} 的整数数组且非空` })
+        continue
+      }
+      const weeks = normalizeInts(s.weeks)
+      if (!weeks.length || weeks.some((w) => w > maxWeek)) {
+        issues.push({ field: `${at}.weeks`, message: `周次须为 1-${maxWeek} 的整数数组且非空` })
+        continue
+      }
+      sessions.push({
+        weekday: s.weekday,
+        location: typeof s.location === 'string' ? s.location.slice(0, 50) : '',
+        periods,
+        weeks,
+      })
     }
+    out.sessions = sessions
   }
-  if (weekType === 'custom' && !weekList) {
-    issues.push({ field: 'weekList', message: 'custom 周规则必须提供 weekList' })
-  }
-  out.weekList = weekList
-
-  if (body.weekday !== 1 && body.weekday !== 2 && body.weekday !== 3 && body.weekday !== 4 &&
-      body.weekday !== 5 && body.weekday !== 6 && body.weekday !== 7) {
-    issues.push({ field: 'weekday', message: '星期取值必须为 1-7' })
-  }
-  out.weekday = body.weekday
-
-  const sp = body.startPeriod
-  const ep = body.endPeriod
-  if (!Number.isInteger(sp) || sp < 1 || sp > maxPeriod) {
-    issues.push({ field: 'startPeriod', message: `起始节次须在 1-${maxPeriod} 内` })
-  }
-  if (!Number.isInteger(ep) || ep < 1 || ep > maxPeriod) {
-    issues.push({ field: 'endPeriod', message: `结束节次须在 1-${maxPeriod} 内` })
-  }
-  if (Number.isInteger(sp) && Number.isInteger(ep) && ep < sp) {
-    issues.push({ field: 'endPeriod', message: '结束节次不能小于起始节次' })
-  }
-  out.startPeriod = sp
-  out.endPeriod = ep
 
   if (issues.length) throw badRequest('课程字段校验失败', issues)
   return out

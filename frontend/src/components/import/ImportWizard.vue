@@ -18,6 +18,10 @@ const fileName = ref('')
 const result = ref<PdfParseResult | null>(null)
 const parseError = ref('')
 const doneCount = ref(0)
+const removedCount = ref(0)
+const keptLabCount = ref(0)
+/** 覆盖导入时保留该学期已有实验课（PDF 只解析理论课） */
+const keepLabs = ref(true)
 
 const importMode = ref<'append' | 'overwrite'>('append')
 const targetSemesterId = ref<number>(store.currentSemesterId ?? 0)
@@ -30,7 +34,8 @@ const validCount = computed(() => result.value?.rows.length ?? 0)
 const errorCount = computed(() => result.value?.errors.length ?? 0)
 
 /** 预览网格：10 节 × 7 天 */
-const GRID_PERIODS = 10
+/** 预览网格行数：目标学期的实际节次数（回退 12） */
+const GRID_PERIODS = computed(() => (store.periods.length > 0 ? store.periods.length : 12))
 
 interface PreviewCell {
   name: string
@@ -42,14 +47,16 @@ interface PreviewCell {
 const grid = computed<Record<number, PreviewCell[]>>(() => {
   const map: Record<number, PreviewCell[]> = {}
   for (const r of result.value?.rows ?? []) {
-    const key = r.weekday
-    map[key] ??= []
-    map[key].push({
-      name: r.name,
-      type: r.type,
-      startPeriod: r.startPeriod,
-      endPeriod: r.endPeriod,
-    })
+    for (const sess of r.sessions) {
+      const key = sess.weekday
+      map[key] ??= []
+      map[key].push({
+        name: r.name,
+        type: r.type,
+        startPeriod: sess.periods[0] ?? 1,
+        endPeriod: sess.periods[sess.periods.length - 1] ?? 1,
+      })
+    }
   }
   return map
 })
@@ -139,8 +146,10 @@ async function confirmImport(): Promise<void> {
   busy.value = true
   parseError.value = ''
   try {
-    const added = await store.importCourses(result.value.rows, importMode.value, targetSemesterId.value)
-    doneCount.value = added
+    const res = await store.importCourses(result.value.rows, importMode.value, targetSemesterId.value, keepLabs.value)
+    doneCount.value = res.count
+    removedCount.value = res.removed
+    keptLabCount.value = res.keptLabs
     step.value = 4
   } catch (e) {
     parseError.value = e instanceof Error ? e.message : '导入失败，请重试'
@@ -322,8 +331,13 @@ function formatIssue(e: ImportError): string {
               </label>
             </fieldset>
 
+            <label v-if="importMode === 'overwrite'" class="keep-labs-option">
+              <input v-model="keepLabs" type="checkbox" />
+              <span>保留本学期的实验课（PDF 课表只能解析出理论课，勾选可避免已有实验课被覆盖删除）</span>
+            </label>
+
             <div v-if="importMode === 'overwrite'" class="overwrite-warn" role="alert">
-              将删除本学期已导入的全部课程并导入新数据，此操作不可撤销。考试与作业记录将保留，关联课程置空。
+              将删除本学期已导入的{{ keepLabs ? '理论课' : '全部课程' }}并导入新数据，此操作不可撤销（导入前会自动生成数据快照，可从「设置 → 数据」找回）。考试与作业记录将保留，关联课程置空。
             </div>
 
             <div class="footer">
@@ -338,6 +352,9 @@ function formatIssue(e: ImportError): string {
           <div v-else-if="step === 4" class="step-body done-state">
             <svg class="done-state__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><path d="m9 11 3 3L22 4" /></svg>
             <p class="done-state__title">已成功导入 {{ doneCount }} 门课程</p>
+            <p v-if="removedCount" class="done-state__hint">
+              已替换原有 {{ removedCount - keptLabCount }} 门课程<template v-if="keptLabCount">，并保留 {{ keptLabCount }} 门实验课</template>
+            </p>
             <p class="done-state__hint">可在周课表 / 今天视图中查看</p>
             <button class="btn btn--primary" type="button" @click="emit('done', doneCount)">完成</button>
           </div>
@@ -833,6 +850,28 @@ function formatIssue(e: ImportError): string {
 .mode-option__desc {
   font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
+}
+
+.keep-labs-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-subtle);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.keep-labs-option input {
+  margin-top: 2px;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  accent-color: var(--color-brand);
 }
 
 .overwrite-warn {

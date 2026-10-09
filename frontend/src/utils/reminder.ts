@@ -47,7 +47,7 @@ function check(store: ReturnType<typeof useScheduleStore>): void {
     { enabled: store.settings.labReminder.enabled, config: store.settings.labReminder, type: 'lab' as const },
   ]
 
-  for (const c of store.coursesByWeekday[wd]) {
+  for (const c of store.blocksByWeekday[wd]) {
     const cfg = c.type === 'lab' ? reminders[1] : reminders[0]
     if (!cfg.enabled) continue
     const period = store.periods[c.startPeriod - 1]

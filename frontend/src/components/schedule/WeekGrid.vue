@@ -2,9 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import CourseBlock from './CourseBlock.vue'
-import { computeOverlapGroups, isOverlap } from '@/utils/course'
-import { calcWeekNumber, parseDate } from '@/utils/week'
-import type { Course, Weekday } from '@/types'
+import { blockKey, computeBlockOverlapGroups, isOverlap } from '@/utils/course'
+import { periodRange } from '@/utils/session'
+import type { CourseBlock as CourseBlockModel, Weekday } from '@/types'
 
 const store = useScheduleStore()
 
@@ -17,7 +17,7 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  (e: 'open', course: Course): void
+  (e: 'open', courseId: number): void
   (e: 'create', slot: { weekday: Weekday; period: number }): void
   /** 移动端滑动切日：next=左滑（更晚一天），prev=右滑（更早一天） */
   (e: 'swipe', dir: 'next' | 'prev'): void
@@ -33,11 +33,11 @@ const isCurrentWeek = computed(() => store.weekOffset === 0)
 /** 今天列高亮（仅当前周生效） */
 const highlightedWeekday = computed<Weekday | null>(() => (isCurrentWeek.value ? todayWeekday.value : null))
 
-/** 最后停留的冲突课程 id（不随 mouseleave 清空）；null = 从未 hover 过（均分） */
-const hovered = ref<number | null>(null)
+/** 最后停留的冲突课程键（不随 mouseleave 清空）；null = 从未 hover 过（均分） */
+const hovered = ref<string | null>(null)
 
 /** 动画后的 flex-grow 实时值，驱动模板 style 绑定 */
-const growValues = ref<Record<number, number>>({})
+const growValues = ref<Record<string, number>>({})
 let animRaf = 0
 
 /** 缓动函数：easeOutCubic */
@@ -46,33 +46,31 @@ function ease(t: number): number {
 }
 
 /** 对当前所有冲突课程执行 rAF 补间动画 */
-function animateGrow(targetGrow: Record<number, number>, duration = 200): void {
+function animateGrow(targetGrow: Record<string, number>, duration = 200): void {
   cancelAnimationFrame(animRaf)
-  const from: Record<number, number> = {}
-  for (const id of Object.keys(targetGrow)) {
-    from[Number(id)] = growValues.value[Number(id)] ?? 1
+  const from: Record<string, number> = {}
+  for (const key of Object.keys(targetGrow)) {
+    from[key] = growValues.value[key] ?? 1
   }
   const t0 = performance.now()
   const tick = (now: number): void => {
     const p = Math.min(1, (now - t0) / duration)
     const e = ease(p)
-    for (const id of Object.keys(targetGrow)) {
-      const nid = Number(id)
-      const f = from[nid] ?? 1
-      const t = targetGrow[nid]
-      growValues.value[nid] = f + (t - f) * e
+    for (const key of Object.keys(targetGrow)) {
+      const f = from[key] ?? 1
+      const t = targetGrow[key]
+      growValues.value[key] = f + (t - f) * e
     }
     if (p < 1) animRaf = requestAnimationFrame(tick)
   }
   animRaf = requestAnimationFrame(tick)
 }
 
-function handleHoverEnter(id: number): void {
-  hovered.value = id
-  // 计算该组所有课程的目标 grow：hover 的 2/3，其余 1/3
-  const targets: Record<number, number> = {}
+function handleHoverEnter(key: string): void {
+  hovered.value = key
+  const targets: Record<string, number> = {}
   for (const g of allConflictGroupsFlat.value) {
-    targets[g.id] = g.id === id ? 2 : 1
+    targets[g] = g === key ? 2 : 1
   }
   animateGrow(targets)
 }
@@ -81,38 +79,39 @@ function handleHoverLeave(): void {
   // 不清空 hovered——保留最后停留的课程为 2/3
 }
 
-/** 所有冲突课程 id 列表（供动画目标计算用） */
+/** 所有冲突课程键列表（供动画目标计算用） */
 const allConflictGroupsFlat = computed(() => {
-  const result: { id: number }[] = []
-  const seen = new Set<number>()
+  const result: string[] = []
+  const seen = new Set<string>()
   for (const col of columns.value) {
     for (const item of col) {
-      if (item.conflict && !seen.has(item.course.id)) {
-        result.push({ id: item.course.id })
-        seen.add(item.course.id)
+      const k = blockKey(item.block)
+      if (item.conflict && !seen.has(k)) {
+        result.push(k)
+        seen.add(k)
       }
     }
   }
   return result
 })
 
-/** 获取某课程的 flex-grow 值（动画补间驱动） */
-function getGrow(id: number): number {
-  return growValues.value[id] ?? 1
+/** 获取某块的 flex-grow 值（动画补间驱动） */
+function getGrow(key: string): number {
+  return growValues.value[key] ?? 1
 }
 
-type ColItem = { course: Course; offset: boolean; conflict: boolean }
+type ColItem = { block: CourseBlockModel; offset: boolean; conflict: boolean }
 
-/** 每列课程（仅标注是否冲突；错位布局已改为 flex 分栏，offset 不再用于定位） */
+/** 每列课程块（仅标注是否冲突；错位布局已改为 flex 分栏） */
 const columns = computed(() => {
   const out: ColItem[][] = []
   for (let wd = 1; wd <= 7; wd++) {
-    const list = store.coursesByWeekday[wd as Weekday]
-    const groups = computeOverlapGroups(list)
+    const list = store.blocksByWeekday[wd as Weekday]
+    const groups = computeBlockOverlapGroups(list)
     out.push(
-      list.map((c) => {
-        const conflicts = groups.get(c.id) ?? []
-        return { course: c, offset: conflicts.some((o) => o.id > c.id), conflict: conflicts.length > 0 }
+      list.map((b) => {
+        const conflicts = groups.get(b) ?? []
+        return { block: b, offset: conflicts.length > 0 && conflicts.some((o) => blockKey(o) > blockKey(b)), conflict: conflicts.length > 0 }
       }),
     )
   }
@@ -122,15 +121,15 @@ const columns = computed(() => {
 /** 非冲突课程（单独渲染，跨全列） */
 const soloItems = (idx: number): ColItem[] => columns.value[idx].filter((i) => !i.conflict)
 
-/** 双日视图列（移动端）：按传入日期逐日过滤课程（跨周正确），冲突标注与桌面一致 */
+/** 双日视图列（移动端）：按传入日期逐日过滤课程块（跨周正确） */
 const mobileColumns = computed<ColItem[][]>(() => {
   const days = props.days ?? []
   return days.map((date) => {
     const list = store.coursesOfDate(date)
-    const groups = computeOverlapGroups(list)
-    return list.map((c) => {
-      const conflicts = groups.get(c.id) ?? []
-      return { course: c, offset: conflicts.some((o) => o.id > c.id), conflict: conflicts.length > 0 }
+    const groups = computeBlockOverlapGroups(list)
+    return list.map((b) => {
+      const conflicts = groups.get(b) ?? []
+      return { block: b, offset: conflicts.length > 0 && conflicts.some((o) => blockKey(o) > blockKey(b)), conflict: conflicts.length > 0 }
     })
   })
 })
@@ -159,33 +158,34 @@ function isTodayCol(idx: number): boolean {
   return idx + 1 === highlightedWeekday.value
 }
 
-/** 冲突课程按重叠关系分组成连通分量：每组渲染为一个 flex 分栏容器
- * computed 缓存：仅随 columns 变化重算，避免模板每次渲染重复计算 */
+/** 冲突课程按重叠关系分组成连通分量：每组渲染为一个 flex 分栏容器 */
 const conflictGroups = computed(() => {
   return displayColumns.value.map((col) => {
-    const used = new Set<number>()
-    const groups: { course: Course }[][] = []
+    const used = new Set<string>()
+    const groups: { block: CourseBlockModel }[][] = []
     for (const item of col) {
-      if (!item.conflict || used.has(item.course.id)) continue
-      const group: { course: Course }[] = []
+      const itemKey = blockKey(item.block)
+      if (!item.conflict || used.has(itemKey)) continue
+      const group: { block: CourseBlockModel }[] = []
       let frontier: ColItem[] = [item]
-      used.add(item.course.id)
+      used.add(itemKey)
       while (frontier.length) {
         const next: ColItem[] = []
         for (const cur of frontier) {
           group.push(cur)
           for (const other of col) {
-            if (!other.conflict || used.has(other.course.id)) continue
-            if (isOverlap(cur.course, other.course)) {
+            const otherKey = blockKey(other.block)
+            if (!other.conflict || used.has(otherKey)) continue
+            if (isOverlap(cur.block, other.block)) {
               next.push(other)
-              used.add(other.course.id)
+              used.add(otherKey)
             }
           }
         }
         frontier = next
       }
-      // 无 hover 时第一门展开为 2/3，按节次与 id 排序保证稳定
-      group.sort((a, b) => a.course.startPeriod - b.course.startPeriod || a.course.id - b.course.id)
+      // 无 hover 时按节次与课程 id 排序保证稳定
+      group.sort((a, b) => a.block.startPeriod - b.block.startPeriod || a.block.id - b.block.id)
       groups.push(group)
     }
     return groups
@@ -213,7 +213,7 @@ onBeforeUnmount(() => {
 // 保持原跨节宽度，允许与已有课程重叠（沿用冲突分栏约定）
 // ============================================================
 const gridEl = ref<HTMLElement | null>(null)
-const draggingCourse = ref<Course | null>(null)
+const draggingBlock = ref<CourseBlockModel | null>(null)
 const dragSource = ref<{ startPeriod: number; endPeriod: number } | null>(null)
 const dragPos = ref<{ x: number; y: number } | null>(null)
 const dragTarget = ref<{ weekday: Weekday; startPeriod: number; endPeriod: number } | null>(null)
@@ -248,28 +248,28 @@ const MOVE_THRESHOLD_PX = 8
 const HEADER_H = 44 // day-head 高度（网格首行）
 
 /** 课程卡 pointerdown：启动长按计时，进入潜在拖拽（双日视图禁用拖拽，避免与滑动冲突） */
-function onCoursePointerDown(course: Course, e: PointerEvent): void {
-  if (course.unscheduled) return
+function onBlockPointerDown(block: CourseBlockModel, e: PointerEvent): void {
   if (props.days) return
+  if (!block.periods.length) return
   dragAnchor = { x: e.clientX, y: e.clientY, active: true }
   suppressClickUntil.value = 0
   if (longPressTimer !== null) window.clearTimeout(longPressTimer)
-  longPressTimer = window.setTimeout(() => beginDrag(course), LONG_PRESS_MS)
+  longPressTimer = window.setTimeout(() => beginDrag(block), LONG_PRESS_MS)
   window.addEventListener('pointermove', onWindowPointerMove)
   window.addEventListener('pointerup', onWindowPointerUp)
   window.addEventListener('keydown', onWindowKeyDown)
 }
 
 /** 长按达成：进入拖拽模式（原卡半透明占位 + 幽灵卡跟随） */
-function beginDrag(course: Course): void {
+function beginDrag(block: CourseBlockModel): void {
   if (!dragAnchor.active) return
-  draggingCourse.value = course
-  dragSource.value = { startPeriod: course.startPeriod, endPeriod: course.endPeriod }
+  draggingBlock.value = block
+  dragSource.value = { startPeriod: block.startPeriod, endPeriod: block.endPeriod }
   dragPos.value = { x: dragAnchor.x, y: dragAnchor.y }
   dragTarget.value = {
-    weekday: course.weekday,
-    startPeriod: course.startPeriod,
-    endPeriod: course.endPeriod,
+    weekday: block.weekday,
+    startPeriod: block.startPeriod,
+    endPeriod: block.endPeriod,
   }
   dragMoved = false
   suppressClickUntil.value = Date.now() + 300
@@ -280,27 +280,27 @@ function onWindowPointerMove(e: PointerEvent): void {
   const dx = e.clientX - dragAnchor.x
   const dy = e.clientY - dragAnchor.y
   // 未进入长按前移动超阈值：取消长按（视为点击/滚动）
-  if (!draggingCourse.value && longPressTimer !== null && Math.hypot(dx, dy) > MOVE_THRESHOLD_PX) {
+  if (!draggingBlock.value && longPressTimer !== null && Math.hypot(dx, dy) > MOVE_THRESHOLD_PX) {
     window.clearTimeout(longPressTimer)
     longPressTimer = null
     dragAnchor.active = false
     cleanupDrag()
     return
   }
-  if (!draggingCourse.value) return
+  if (!draggingBlock.value) return
   dragMoved = true
   dragPos.value = { x: e.clientX, y: e.clientY }
   dragTarget.value = findTargetCell(e.clientX, e.clientY)
 }
 
 function onWindowPointerUp(): void {
-  const course = draggingCourse.value
+  const block = draggingBlock.value
   const target = dragTarget.value
   // 长按后原地松手（无移动）视为误触，不落库
   const didMove = dragMoved
   cleanupDrag()
-  if (course && target && didMove) {
-    void applyDrag(course, target)
+  if (block && target && didMove) {
+    void applyDrag(block, target)
   }
 }
 
@@ -310,7 +310,7 @@ function onWindowKeyDown(e: KeyboardEvent): void {
 
 /** 结束拖拽：清 ghost/目标，恢复原卡 */
 function cleanupDrag(): void {
-  draggingCourse.value = null
+  draggingBlock.value = null
   dragSource.value = null
   dragPos.value = null
   dragTarget.value = null
@@ -351,7 +351,10 @@ function onSwipePointerCancel(): void {
   swipeStart = null
 }
 
-/** 指针坐标 → 目标格子（保持跨节宽度，clamp 1..12） */
+/** 学期实际节次数（拖拽落位与行高计算的上限，随用户自定义节次变化） */
+const periodCount = computed(() => (store.periods.length > 0 ? store.periods.length : 12))
+
+/** 指针坐标 → 目标格子（保持跨节宽度，clamp 到 1..periodCount） */
 function findTargetCell(clientX: number, clientY: number): { weekday: Weekday; startPeriod: number; endPeriod: number } | null {
   const grid = gridEl.value
   if (!grid) return null
@@ -368,13 +371,14 @@ function findTargetCell(clientX: number, clientY: number): { weekday: Weekday; s
   const gridRect = grid.getBoundingClientRect()
   const relY = clientY - gridRect.top
   const rowH = getRowHeight()
-  const startPeriod = Math.min(12, Math.max(1, Math.floor((relY - HEADER_H) / rowH) + 1))
+  const maxPeriod = periodCount.value
+  const startPeriod = Math.min(maxPeriod, Math.max(1, Math.floor((relY - HEADER_H) / rowH) + 1))
   const span = dragSource.value.endPeriod - dragSource.value.startPeriod + 1
   let end = startPeriod + span - 1
   let start = startPeriod
-  if (end > 12) {
-    start = 12 - span + 1
-    end = 12
+  if (end > maxPeriod) {
+    start = Math.max(1, maxPeriod - span + 1)
+    end = maxPeriod
   }
   return { weekday, startPeriod: start, endPeriod: end }
 }
@@ -390,109 +394,110 @@ function getRowHeight(): number {
 }
 
 /** 点击课程：拖拽刚落格后 300ms 内抑制 click（避免误开详情） */
-function handleOpen(course: Course): void {
+function handleOpen(courseId: number): void {
   if (Date.now() < suppressClickUntil.value) return
-  emit('open', course)
+  emit('open', courseId)
 }
 
-/** 学期总周数（节次模板编辑器同款逻辑；上限 30 与服务端校验一致） */
-const MAX_WEEKS = 30
-const maxWeeks = computed(() => {
-  const sem = store.currentSemester
-  if (!sem) return 16
-  return Math.min(calcWeekNumber(parseDate(sem.endDate), sem) ?? 16, MAX_WEEKS)
-})
-
-/** 生成「除某周外的保留周」：按原课周规则决定哪些周保留原位置 */
-function restWeeksOf(course: Course, exclude: number): number[] {
-  const total = maxWeeks.value
-  const isOdd = (w: number): boolean => w % 2 === 1
-  const all = Array.from({ length: total }, (_, i) => i + 1)
-  switch (course.weekType) {
-    case 'all':
-      return all.filter((w) => w !== exclude)
-    case 'odd':
-      return all.filter((w) => w !== exclude && isOdd(w))
-    case 'even':
-      return all.filter((w) => w !== exclude && !isOdd(w))
-    case 'custom':
-      return (course.weekList ?? []).filter((w) => w !== exclude)
-  }
+/** 拖动落点换算的节次集合（保留原块节数，clamp 到 1..12） */
+function targetPeriods(target: { startPeriod: number; endPeriod: number }): number[] {
+  return periodRange(target.startPeriod, target.endPeriod)
 }
 
-/** 落库：仅调整当周（单周例外）——原课缩小周范围保持原位置，新增本周新位置副本 */
-async function applyDrag(course: Course, target: { weekday: Weekday; startPeriod: number; endPeriod: number }): Promise<void> {
+/**
+ * 落库：只改动被拖动的那个上课时间块。
+ * 该块本周若上课 → 把它本周的格子移到新位置（同组其余周次不动）；
+ * 该块本周若不上课（周次里没有本周）→ 在目标位置追加本周格子。
+ * 不再像旧实现那样「缩小原行 + 新增一行散课程」，因此课程组始终唯一、不会被拆散。
+ */
+async function applyDrag(
+  block: CourseBlockModel,
+  target: { weekday: Weekday; startPeriod: number; endPeriod: number },
+): Promise<void> {
   const weekNo = store.weekNumber
   const slot = target.endPeriod > target.startPeriod ? `第 ${target.startPeriod}–${target.endPeriod} 节` : `第 ${target.startPeriod} 节`
-  const base = {
-    type: course.type,
-    name: course.name,
-    teacher: course.teacher,
-    location: course.location,
-    color: course.color,
-    weekType: course.weekType,
-    weekList: course.weekList,
-    remark: course.remark,
-  }
   let step = '准备调整'
   try {
     if (!Number.isInteger(target.weekday) || !Number.isInteger(target.startPeriod) || !Number.isInteger(target.endPeriod)) {
       throw new Error('目标节次无效，请重新拖到课表格内')
     }
-    // 无周号（假期等）时退回全局调整
-    if (weekNo === null) {
-      step = '更新课程'
-      await store.updateCourse(course.id, {
-        ...base,
-        weekday: target.weekday,
-        startPeriod: target.startPeriod,
-        endPeriod: target.endPeriod,
-      })
-      void import('@/utils/ui').then(({ toast }) => toast(`已调整至 ${DAY_LABELS[target.weekday - 1]} ${slot}`, 'success'))
-      return
+    const course = store.courses.find((c) => c.id === block.id)
+    if (!course) throw new Error('课程不存在，请刷新后重试')
+
+    const newPeriods = targetPeriods(target)
+    if (!newPeriods.length) throw new Error('目标节次无效')
+
+    // 定位被拖动的上课时间组。sessionId 由服务端在每次写入时重建（replaceCourseSessions
+    // 先删再建），若本地 courses 已过期可能与服务端不一致；此时退回按
+    // 「星期 + 完整节次」匹配，避免 source 落空导致「旧块未删 + 新块追加」的静默重复。
+    let source = course.sessions.find((s) => s.id === block.sessionId)
+    if (!source) {
+      const bySlot = course.sessions.filter(
+        (s) => s.weekday === block.weekday && s.periods.join('.') === block.allPeriods.join('.'),
+      )
+      // 仅在该组合唯一时采用回退匹配，避免误改其他时间组
+      if (bySlot.length === 1) source = bySlot[0]
     }
-    const rest = restWeeksOf(course, weekNo)
-    // 课程仅出现在本周：直接改时间（原位置被覆盖）
-    if (rest.length === 0) {
-      step = '更新本周课程'
-      await store.updateCourse(course.id, {
-        ...base,
-        weekType: 'custom',
-        weekList: [weekNo],
-        weekday: target.weekday,
-        startPeriod: target.startPeriod,
-        endPeriod: target.endPeriod,
-      })
-      void import('@/utils/ui').then(({ toast }) => toast(`已调整至 ${DAY_LABELS[target.weekday - 1]} ${slot}`, 'success'))
-      return
+    if (!source) {
+      throw new Error('课程数据已变化，请刷新页面后重试')
     }
-    // 单周例外：原课保留「除本周外」的周在原位置；新增本周新位置副本
-    step = '保留其他周课程'
-    await store.updateCourse(course.id, {
-      ...base,
-      weekday: course.weekday,
-      startPeriod: course.startPeriod,
-      endPeriod: course.endPeriod,
-      weekType: 'custom',
-      weekList: rest,
+
+    step = weekNo === null ? '更新课程' : '调整本周课程'
+    const sessions = course.sessions.map((s) => {
+      if (weekNo === null) {
+        // 假期/无周号：整块移动（全部周次跟着走）
+        if (s === source) {
+          return { ...s, weekday: target.weekday, periods: newPeriods }
+        }
+        return s
+      }
+      if (s === source) {
+        // 本周上课：移除本周格子；同组其余周次保留在原位置
+        const weeks = s.weeks.filter((w) => w !== weekNo)
+        return { ...s, weeks }
+      }
+      return s
     })
-    step = '创建本周课程'
-    await store.addCourse({
+    const cleaned = sessions.filter((s) => s.weeks.length > 0)
+
+    if (weekNo !== null) {
+      // 在目标位置追加本周格子
+      const reuse = cleaned.find(
+        (s) => s.weekday === target.weekday && s.periods.join('.') === newPeriods.join('.'),
+      )
+      if (reuse) {
+        reuse.weeks = [...new Set([...reuse.weeks, weekNo])].sort((a, b) => a - b)
+      } else {
+        cleaned.push({
+          weekday: target.weekday,
+          location: block.location ?? '',
+          periods: newPeriods,
+          weeks: [weekNo],
+        })
+      }
+    }
+
+    await store.updateCourse(course.id, {
       type: course.type,
       name: course.name,
       teacher: course.teacher,
       location: course.location,
-      weekType: 'custom',
-      weekList: [weekNo],
-      weekday: target.weekday,
-      startPeriod: target.startPeriod,
-      endPeriod: target.endPeriod,
+      color: course.color,
       remark: course.remark,
+      sessions: cleaned.map((s) => ({
+        weekday: s.weekday,
+        location: s.location ?? '',
+        periods: s.periods,
+        weeks: s.weeks,
+      })),
     })
-    void import('@/utils/ui').then(({ toast }) => toast(`本周已调整至 ${DAY_LABELS[target.weekday - 1]} ${slot}，其余周不变`, 'success'))
+    const msg = weekNo === null
+      ? `已调整至 ${DAY_LABELS[target.weekday - 1]} ${slot}`
+      : `本周已调整至 ${DAY_LABELS[target.weekday - 1]} ${slot}，其余周不变`
+    void import('@/utils/ui').then(({ toast }) => toast(msg, 'success'))
   } catch (error) {
     const message = error instanceof Error ? error.message : '未知错误'
-    console.error('[WeekGrid] 调整课程失败', { step, courseId: course.id, target, error })
+    console.error('[WeekGrid] 调整课程失败', { step, courseId: block.id, target, error })
     void import('@/utils/ui').then(({ toast }) => toast(`${step}失败：${message}`, 'error'))
   }
 }
@@ -511,13 +516,14 @@ function onResize(): void {
 
 const rowHeight = computed(() => {
   if (!isDesktop.value) return null
-  const h = Math.floor((viewportH.value - 244) / 12)
+  // 按学期实际节次数均分行高，保证一屏完整显示
+  const h = Math.floor((viewportH.value - 244) / periodCount.value)
   return Math.min(64, Math.max(36, h))
 })
 </script>
 
 <template>
-  <div ref="gridEl" class="weekgrid" :class="{ 'is-dragging': draggingCourse, 'is-days': props.days }" :style="rowHeight ? { '--ph-row-dyn': rowHeight + 'px' } : undefined" @pointerdown="onSwipePointerDown">
+  <div ref="gridEl" class="weekgrid" data-export-target="week-grid" :class="{ 'is-dragging': draggingBlock, 'is-days': props.days }" :style="rowHeight ? { '--ph-row-dyn': rowHeight + 'px' } : undefined" @pointerdown="onSwipePointerDown">
     <!-- 时间列 -->
     <div class="col time-col" aria-hidden="true">
       <div class="day-head corner"></div>
@@ -559,14 +565,14 @@ const rowHeight = computed(() => {
       <!-- 非冲突课程：跨全列 -->
       <CourseBlock
         v-for="item in soloItems(idx)"
-        :key="'c-' + item.course.id"
+        :key="'c-' + blockKey(item.block)"
         :style="{
-          gridRow: `${item.course.startPeriod + 1} / ${item.course.endPeriod + 2}`,
+          gridRow: `${item.block.startPeriod + 1} / ${item.block.endPeriod + 2}`,
           gridColumn: '1',
         }"
-        :course="item.course"
-        :dragging="draggingCourse?.id === item.course.id"
-        @pointerdown="(e: PointerEvent) => onCoursePointerDown(item.course, e)"
+        :course="item.block"
+        :dragging="draggingBlock ? blockKey(draggingBlock) === blockKey(item.block) : false"
+        @pointerdown="(e: PointerEvent) => onBlockPointerDown(item.block, e)"
         @open="handleOpen"
       />
 
@@ -576,20 +582,20 @@ const rowHeight = computed(() => {
         :key="'grp-' + gi"
         class="overlap"
         :style="{
-          gridRow: `${group[0].course.startPeriod + 1} / ${group[0].course.endPeriod + 2}`,
+          gridRow: `${group[0].block.startPeriod + 1} / ${group[0].block.endPeriod + 2}`,
           gridColumn: '1',
         }"
         @mouseleave="handleHoverLeave"
       >
         <CourseBlock
           v-for="item in group"
-          :key="'g-' + item.course.id"
-          :style="{ flexGrow: getGrow(item.course.id), flexBasis: '0%' }"
-          :collapsed="getGrow(item.course.id) < Math.max(...group.map((c) => getGrow(c.course.id))) - 0.01"
-          :course="item.course"
-          :dragging="draggingCourse?.id === item.course.id"
-          @pointerdown="(e: PointerEvent) => onCoursePointerDown(item.course, e)"
-          @mouseenter="handleHoverEnter(item.course.id)"
+          :key="'g-' + blockKey(item.block)"
+          :style="{ flexGrow: getGrow(blockKey(item.block)), flexBasis: '0%' }"
+          :collapsed="getGrow(blockKey(item.block)) < Math.max(...group.map((c) => getGrow(blockKey(c.block)))) - 0.01"
+          :course="item.block"
+          :dragging="draggingBlock ? blockKey(draggingBlock) === blockKey(item.block) : false"
+          @pointerdown="(e: PointerEvent) => onBlockPointerDown(item.block, e)"
+          @mouseenter="handleHoverEnter(blockKey(item.block))"
           @open="handleOpen"
         />
       </div>
@@ -605,11 +611,11 @@ const rowHeight = computed(() => {
     <!-- 拖拽幽灵卡（body 顶层，跟手半透明） -->
     <Teleport to="body">
       <div
-        v-if="draggingCourse && dragPos"
+        v-if="draggingBlock && dragPos"
         class="course-ghost"
         :style="{ left: dragPos.x + 'px', top: dragPos.y + 'px' }"
       >
-        <span class="ghost-name">{{ draggingCourse.name }}</span>
+        <span class="ghost-name">{{ draggingBlock.name }}</span>
         <span class="ghost-slot" v-if="dragTarget">
           {{ DAY_LABELS[dragTarget.weekday - 1] }} ·
           {{ dragTarget.endPeriod > dragTarget.startPeriod ? `第 ${dragTarget.startPeriod}–${dragTarget.endPeriod} 节` : `第 ${dragTarget.startPeriod} 节` }}

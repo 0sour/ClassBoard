@@ -2,13 +2,20 @@
 // ClassBoard · 模板路由（两级模板体系）
 // course 模板：单门课程定义（同学勾选批量导入）
 // unit 模板：组合模板，引用课程模板 id 数组（一键批量导入）
+// semester 模板：学期信息 + 节次时间
 // 列表/详情/导入：所有登录用户；创建/编辑/删除：仅 admin
+// 模板内容结构：课程组行 { type,name,teacher,location,color,remark,sessions[] }
+// 旧格式（weekType/weekList/weekday/startPeriod/endPeriod）读取时自动转换。
 // ============================================================
 import { Router } from 'express'
-import { db, setCurrentSemesterId } from '../lib/db.js'
+import { db, DATA_DIR, replaceCourseSessions, setCurrentSemesterId } from '../lib/db.js'
 import { badRequest, notFound, wrap } from '../lib/errors.js'
 import { requireAdmin } from '../lib/access.js'
 import { validateCourse } from '../lib/validate.js'
+import { assignCourseColors } from '../lib/colors.js'
+import { periodLimitOf, weekLimitOf } from '../lib/semesters.js'
+import { createSnapshot } from '../lib/snapshot.js'
+import { expandWeeks, normalizeInts, periodRange, MAX_PERIODS, MAX_WEEKS } from '../lib/weekspan.js'
 
 export const templatesRouter = Router()
 
@@ -30,7 +37,56 @@ function toTemplate(row) {
   }
 }
 
-/** 校验课程模板内容（1-N 门课程行；固定课表 1 行 / 每节课调整 N 行） */
+/** 是否为旧格式课程行（含 weekType/weekday/startPeriod 等已废弃字段） */
+export function isLegacyCourseRow(row) {
+  return row && typeof row === 'object' && !Array.isArray(row.sessions)
+    && ('weekType' in row || 'weekday' in row || 'startPeriod' in row)
+}
+
+/**
+ * 旧格式课程行 → 新结构（无损转换）。
+ * weekType/weekList 展开为逐周；startPeriod..endPeriod 展开为逐节。
+ * @param maxWeeks 无 weekList 时的周次上限（学期总周数）
+ */
+export function convertLegacyRow(row, maxWeeks = 16) {
+  const weeks = expandWeeks(row.weekType ?? 'all', row.weekList ?? null, maxWeeks)
+  const periods = periodRange(row.startPeriod, row.endPeriod)
+  return {
+    type: row.type ?? 'course',
+    name: row.name,
+    teacher: row.teacher ?? '',
+    location: row.location ?? '',
+    color: row.color,
+    remark: row.remark ?? '',
+    sessions: weeks.length && periods.length
+      ? [{ weekday: row.weekday, location: row.location ?? '', periods, weeks }]
+      : [],
+  }
+}
+
+/**
+ * 把任意形态的课程行统一转成新结构后校验。
+ * sessions 允许为空数组（无固定时间课程，如实践/实习类）——与手动录入一致。
+ * @param maxWeeks 周次上限；调用方应传目标学期实际周数（见 lib/semesters.js 的 weekLimitOf），
+ *                 否则超过默认值的课程会被误判为非法
+ */
+function validateRowsWithConversion(rows, { maxPeriod = MAX_PERIODS, maxWeeks = MAX_WEEKS } = {}) {
+  const validated = []
+  const errors = []
+  const weekLimit = Math.min(Math.max(maxWeeks, 1), MAX_WEEKS)
+  rows.forEach((row, i) => {
+    try {
+      const normalized = isLegacyCourseRow(row) ? convertLegacyRow(row, weekLimit) : row
+      validated.push(validateCourse(normalized, { maxPeriod, maxWeek: weekLimit }))
+    } catch (e) {
+      const first = e?.details?.[0]
+      errors.push({ row: i + 1, message: first ? `${first.field}：${first.message}` : e.message })
+    }
+  })
+  return { validated, errors }
+}
+
+/** 校验课程模板内容（1-N 门课程行） */
 function validateCourseTemplate(content) {
   if (!Array.isArray(content) || content.length === 0) {
     throw badRequest('课程模板须包含至少一门课程')
@@ -38,13 +94,9 @@ function validateCourseTemplate(content) {
   if (content.length > MAX_ROWS) {
     throw badRequest(`课程模板课程数超过 ${MAX_ROWS} 上限`)
   }
-  return content.map((row, i) => {
-    try {
-      return validateCourse(row)
-    } catch (e) {
-      throw badRequest(`第 ${i + 1} 行课程数据无效：${e.message}`)
-    }
-  })
+  const { validated, errors } = validateRowsWithConversion(content)
+  if (errors.length) throw badRequest('课程模板存在无效行', errors)
+  return validated
 }
 
 /** 校验组合模板内容：课程模板 id 数组（引用）或课程行数组（快照） */
@@ -69,14 +121,9 @@ function validateUnitContent(content) {
     if (missing.length) throw badRequest(`引用的课程模板不存在：id=${missing.join(',')}`)
     return [...new Set(ids)]
   }
-  // 课程行数组 → 快照（逐行校验）
-  return content.map((row, i) => {
-    try {
-      return validateCourse(row)
-    } catch (e) {
-      throw badRequest(`第 ${i + 1} 行课程数据无效：${e.message}`)
-    }
-  })
+  const { validated, errors } = validateRowsWithConversion(content)
+  if (errors.length) throw badRequest('组合模板存在无效行', errors)
+  return validated
 }
 
 /** 校验学期模板内容：{ name, startDate, endDate, weekStartDay, periods: [{startTime, endTime}] } */
@@ -104,17 +151,70 @@ function validateSemesterTemplate(content) {
   return { name, startDate: content.startDate, endDate: content.endDate, weekStartDay, periods: validatedPeriods }
 }
 
-/** 解析模板为课程行数组（course 直接返回；unit 展开引用或快照；semester 返回空） */
-function resolveTemplateRows(row) {
+/** 解析模板为课程组行数组（course 直接返回；unit 展开引用或快照；semester 返回空） */
+function resolveTemplateRows(row, maxWeeks = 16) {
   if (row.kind === 'semester') return []
   const content = JSON.parse(row.content)
-  if (row.kind === 'course') return content
-  // 快照（课程行数组）直接返回
-  if (content.length > 0 && typeof content[0] !== 'number') return content
-  // 引用（id 数组）展开课程模板
-  const placeholders = content.map(() => '?').join(',')
-  const refs = db.prepare(`SELECT * FROM template WHERE id IN (${placeholders})`).all(...content)
-  return refs.flatMap((r) => JSON.parse(r.content))
+  const rows = row.kind === 'course'
+    ? content
+    : content.length > 0 && typeof content[0] !== 'number'
+      ? content
+      : db
+          .prepare(`SELECT * FROM template WHERE id IN (${content.map(() => '?').join(',')})`)
+          .all(...content)
+          .flatMap((r) => JSON.parse(r.content))
+  return rows.map((r) => (isLegacyCourseRow(r) ? convertLegacyRow(r, maxWeeks) : r))
+}
+
+/**
+ * 去重键：类型 + 课程名 + 教师 + 星期 + 完整节次集合 + 完整周次集合。
+ * 不含 type/周次会让同名实验课与理论课互判重复（历史 bug）。
+ */
+export function courseDedupeKey(row) {
+  const sessions = (row.sessions ?? [])
+    .map((s) => `${s.weekday}:${normalizeInts(s.periods).join('.')}:${normalizeInts(s.weeks).join('.')}`)
+    .sort()
+    .join('|')
+  return `${row.type}|${row.name}|${row.teacher ?? ''}|${sessions}`
+}
+
+/** 既有课程的去重键集合 */
+function existingKeysOf(semesterId, userId) {
+  const existing = db
+    .prepare('SELECT * FROM course WHERE semester_id = ? AND user_id = ?')
+    .all(semesterId, userId)
+  const sessions = existing.length
+    ? db
+        .prepare(
+          `SELECT * FROM course_session WHERE course_id IN (${existing.map(() => '?').join(',')})`,
+        )
+        .all(...existing.map((c) => c.id))
+    : []
+  const slotRows = sessions.length
+    ? db
+        .prepare(
+          `SELECT session_id, period, week FROM course_slot WHERE session_id IN (${sessions.map(() => '?').join(',')})`,
+        )
+        .all(...sessions.map((s) => s.id))
+    : []
+  const bySession = new Map()
+  for (const r of slotRows) {
+    if (!bySession.has(r.session_id)) bySession.set(r.session_id, { periods: [], weeks: [] })
+    const b = bySession.get(r.session_id)
+    b.periods.push(r.period)
+    b.weeks.push(r.week)
+  }
+  const sessionsByCourse = new Map()
+  for (const s of sessions) {
+    if (!sessionsByCourse.has(s.course_id)) sessionsByCourse.set(s.course_id, [])
+    const b = bySession.get(s.id) ?? { periods: [], weeks: [] }
+    sessionsByCourse.get(s.course_id).push({ weekday: s.weekday, periods: b.periods, weeks: b.weeks })
+  }
+  return new Set(
+    existing.map((c) => courseDedupeKey({
+      type: c.type, name: c.name, teacher: c.teacher, sessions: sessionsByCourse.get(c.id) ?? [],
+    })),
+  )
 }
 
 /** 模板列表（所有登录用户；含导入统计） */
@@ -220,13 +320,11 @@ templatesRouter.delete(
     const row = db.prepare('SELECT * FROM template WHERE id = ?').get(id)
     if (!row) throw notFound('模板不存在')
     const del = db.transaction(() => {
-      // 删除课程模板时，从引用它的组合模板中移除该 id（避免残留失效引用）
       if (row.kind === 'course') {
         const units = db.prepare("SELECT * FROM template WHERE kind = 'unit'").all()
         const update = db.prepare('UPDATE template SET content = ?, version = version + 1, updated_at = ? WHERE id = ?')
         for (const u of units) {
           const content = JSON.parse(u.content)
-          // 仅处理引用形态（id 数组）；快照形态（课程行数组）不受影响
           if (content.length > 0 && typeof content[0] === 'number' && content.includes(id)) {
             const next = content.filter((x) => x !== id)
             update.run(JSON.stringify(next), new Date().toISOString(), u.id)
@@ -239,6 +337,63 @@ templatesRouter.delete(
     res.status(204).end()
   }),
 )
+
+/**
+ * 导入课程组行到目标学期（共享实现）。
+ * sessions 允许为空（无固定时间课程），与手动录入一致。
+ * @returns { added, skipped, removed, snapshot }
+ */
+async function importRows(rows, { semesterId, userId, mode, maxPeriod, maxWeek }) {
+  const validated = []
+  const errors = []
+  rows.forEach((r, i) => {
+    try {
+      validated.push(validateCourse(r, { maxPeriod, maxWeek }))
+    } catch (e) {
+      const first = e?.details?.[0]
+      errors.push({ row: i + 1, message: first ? `${first.field}：${first.message}` : e.message })
+    }
+  })
+  if (errors.length) throw badRequest('模板存在无效行', errors)
+
+  assignCourseColors(validated, semesterId, userId, { overwrite: true })
+
+  const existingKeys = mode === 'dedupe' ? existingKeysOf(semesterId, userId) : new Set()
+
+  let snapshot = null
+  let removed = 0
+  if (mode === 'overwrite') {
+    snapshot = await createSnapshot(db, DATA_DIR, 'template-overwrite')
+    removed = db
+      .prepare('SELECT COUNT(*) AS n FROM course WHERE semester_id = ? AND user_id = ?')
+      .get(semesterId, userId).n
+  }
+
+  const run = db.transaction(() => {
+    if (mode === 'overwrite') {
+      db.prepare('DELETE FROM course WHERE semester_id = ? AND user_id = ?').run(semesterId, userId)
+    }
+    const insCourse = db.prepare(
+      `INSERT INTO course (semester_id, user_id, type, name, teacher, location, color, remark)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    let added = 0
+    let skipped = 0
+    for (const c of validated) {
+      if (mode === 'dedupe' && existingKeys.has(courseDedupeKey(c))) {
+        skipped++
+        continue
+      }
+      const info = insCourse.run(semesterId, userId, c.type, c.name, c.teacher, c.location, c.color, c.remark)
+      replaceCourseSessions(info.lastInsertRowid, c.sessions)
+      added++
+      existingKeys.add(courseDedupeKey(c))
+    }
+    return { added, skipped }
+  })
+  const { added, skipped } = run()
+  return { added, skipped, removed, snapshot }
+}
 
 /** 批量导入多个课程模板（所有登录用户；复制快照到目标学期）
  * body: { semesterId, mode, templateIds: number[] } */
@@ -261,76 +416,12 @@ templatesRouter.post(
     const badKind = refs.find((r) => r.kind !== 'course')
     if (badKind) throw badRequest(`批量导入仅支持课程模板：${badKind.name}`)
 
-    const rows = refs.flatMap((r) => JSON.parse(r.content))
-    const periodCount = db
-      .prepare('SELECT COUNT(*) AS n FROM period_template WHERE semester_id = ?')
-      .get(semesterId).n
+    const maxWeeks = weekLimitOf(semesterId)
+    const rows = refs.flatMap((r) => resolveTemplateRows(r, maxWeeks))
 
-    const validated = []
-    const errors = []
-    rows.forEach((r, i) => {
-      try {
-        const c = validateCourse(r)
-        if (c.endPeriod > periodCount) {
-          errors.push({ row: i + 1, message: `节次 ${c.endPeriod} 超出目标学期节次模板（共 ${periodCount} 节）` })
-          return
-        }
-        validated.push(c)
-      } catch (e) {
-        errors.push({ row: i + 1, message: e.message })
-      }
+    const { added, skipped, removed, snapshot } = await importRows(rows, {
+      semesterId, userId: req.user.id, mode, maxPeriod: periodLimitOf(semesterId), maxWeek: weekLimitOf(semesterId),
     })
-    if (errors.length) throw badRequest('模板存在无效行', errors)
-
-    // 颜色分配：同名复用已有颜色，不同名按 8 色轮询（与手动录入一致）
-    const colorRows = db
-      .prepare('SELECT name, color FROM course WHERE semester_id = ? AND user_id = ?')
-      .all(semesterId, req.user.id)
-    const colorByName = new Map(colorRows.map((c) => [c.name, c.color]))
-    const COLOR_NAMES = ['course-1', 'course-2', 'course-3', 'course-4', 'course-5', 'course-6', 'course-7', 'course-8']
-    let autoCount = colorRows.length
-    for (const c of validated) {
-      if (colorByName.has(c.name)) {
-        c.color = colorByName.get(c.name)
-      } else {
-        c.color = COLOR_NAMES[autoCount % COLOR_NAMES.length]
-        autoCount++
-        colorByName.set(c.name, c.color)
-      }
-    }
-
-    const existing = db
-      .prepare('SELECT name, weekday, start_period AS startPeriod, end_period AS endPeriod FROM course WHERE semester_id = ? AND user_id = ?')
-      .all(semesterId, req.user.id)
-    const dupKey = (c) => `${c.name}|${c.weekday}|${c.startPeriod}-${c.endPeriod}`
-    const existingKeys = new Set(existing.map(dupKey))
-
-    const run = db.transaction(() => {
-      if (mode === 'overwrite') {
-        db.prepare('DELETE FROM course WHERE semester_id = ? AND user_id = ?').run(semesterId, req.user.id)
-      }
-      const insert = db.prepare(
-        `INSERT INTO course (semester_id, user_id, type, name, teacher, location, color, week_type, week_list, weekday, start_period, end_period, remark)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      let added = 0
-      let skipped = 0
-      for (const c of validated) {
-        if (mode === 'dedupe' && existingKeys.has(dupKey(c))) {
-          skipped++
-          continue
-        }
-        insert.run(
-          semesterId, req.user.id, c.type, c.name, c.teacher, c.location, c.color, c.weekType,
-          c.weekList ? JSON.stringify(c.weekList) : null,
-          c.weekday, c.startPeriod, c.endPeriod, c.remark,
-        )
-        added++
-        existingKeys.add(dupKey(c))
-      }
-      return { added, skipped }
-    })
-    const { added, skipped } = run()
 
     const insLog = db.prepare(
       `INSERT INTO import_log (template_id, template_version, semester_id, user_id, mode, count, imported_at)
@@ -340,7 +431,7 @@ templatesRouter.post(
       insLog.run(t.id, t.version, semesterId, req.user.id, mode, added, new Date().toISOString())
     }
 
-    res.json({ count: added, skipped, templateCount: refs.length })
+    res.json({ count: added, skipped, templateCount: refs.length, removed, snapshot })
   }),
 )
 
@@ -384,93 +475,18 @@ templatesRouter.post(
       return res.json({ count: 0, skipped: 0, templateCount: 1, semesterId: newSemId, semesterName: tpl.name })
     }
 
-    const rows = resolveTemplateRows(row)
-    const logTargets = [row]
+    const maxWeeks = weekLimitOf(semesterId)
+    const rows = resolveTemplateRows(row, maxWeeks)
 
-    // 目标学期节次行数（节次越界校验）
-    const periodCount = db
-      .prepare('SELECT COUNT(*) AS n FROM period_template WHERE semester_id = ?')
-      .get(semesterId).n
-
-    // 服务端逐行校验 + 节次越界检查
-    const validated = []
-    const errors = []
-    rows.forEach((r, i) => {
-      try {
-        const c = validateCourse(r)
-        if (c.endPeriod > periodCount) {
-          errors.push({ row: i + 1, message: `节次 ${c.endPeriod} 超出目标学期节次模板（共 ${periodCount} 节）` })
-          return
-        }
-        validated.push(c)
-      } catch (e) {
-        errors.push({ row: i + 1, message: e.message })
-      }
+    const { added, skipped, removed, snapshot } = await importRows(rows, {
+      semesterId, userId: req.user.id, mode, maxPeriod: periodLimitOf(semesterId), maxWeek: weekLimitOf(semesterId),
     })
-    if (errors.length) {
-      throw badRequest('模板存在无效行', errors)
-    }
 
-    // 颜色分配：同名复用已有颜色，不同名按 8 色轮询（与手动录入一致）
-    const colorRows = db
-      .prepare('SELECT name, color FROM course WHERE semester_id = ? AND user_id = ?')
-      .all(semesterId, req.user.id)
-    const colorByName = new Map(colorRows.map((c) => [c.name, c.color]))
-    const COLOR_NAMES = ['course-1', 'course-2', 'course-3', 'course-4', 'course-5', 'course-6', 'course-7', 'course-8']
-    let autoCount = colorRows.length
-    for (const c of validated) {
-      if (colorByName.has(c.name)) {
-        c.color = colorByName.get(c.name)
-      } else {
-        c.color = COLOR_NAMES[autoCount % COLOR_NAMES.length]
-        autoCount++
-        colorByName.set(c.name, c.color)
-      }
-    }
-
-    // 去重：同名 + 同星期 + 同节次视为重复
-    const existing = db
-      .prepare('SELECT name, weekday, start_period AS startPeriod, end_period AS endPeriod FROM course WHERE semester_id = ? AND user_id = ?')
-      .all(semesterId, req.user.id)
-    const dupKey = (c) => `${c.name}|${c.weekday}|${c.startPeriod}-${c.endPeriod}`
-    const existingKeys = new Set(existing.map(dupKey))
-
-    const run = db.transaction(() => {
-      if (mode === 'overwrite') {
-        db.prepare('DELETE FROM course WHERE semester_id = ? AND user_id = ?').run(semesterId, req.user.id)
-      }
-      const insert = db.prepare(
-        `INSERT INTO course (semester_id, user_id, type, name, teacher, location, color, week_type, week_list, weekday, start_period, end_period, remark)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      let added = 0
-      let skipped = 0
-      for (const c of validated) {
-        if (mode === 'dedupe' && existingKeys.has(dupKey(c))) {
-          skipped++
-          continue
-        }
-        insert.run(
-          semesterId, req.user.id, c.type, c.name, c.teacher, c.location, c.color, c.weekType,
-          c.weekList ? JSON.stringify(c.weekList) : null,
-          c.weekday, c.startPeriod, c.endPeriod, c.remark,
-        )
-        added++
-        existingKeys.add(dupKey(c))
-      }
-      return { added, skipped }
-    })
-    const { added, skipped } = run()
-
-    // 记录导入日志（每个模板一条）
-    const insLog = db.prepare(
+    db.prepare(
       `INSERT INTO import_log (template_id, template_version, semester_id, user_id, mode, count, imported_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    for (const t of logTargets) {
-      insLog.run(t.id, t.version, semesterId, req.user.id, mode, added, new Date().toISOString())
-    }
+    ).run(row.id, row.version, semesterId, req.user.id, mode, added, new Date().toISOString())
 
-    res.json({ count: added, skipped, templateCount: logTargets.length })
+    res.json({ count: added, skipped, templateCount: 1, removed, snapshot })
   }),
 )

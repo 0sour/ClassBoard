@@ -3,13 +3,12 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import WeatherCard from './WeatherCard.vue'
-import type { Course } from '@/types'
 
 const router = useRouter()
 const store = useScheduleStore()
 
 const emit = defineEmits<{
-  (e: 'openCourse', course: Course): void
+  (e: 'openCourse', courseId: number): void
   (e: 'openHomework', homework: { id: number; name: string; courseId?: number | null }): void
 }>()
 
@@ -32,24 +31,26 @@ const todayCourseCount = computed(() => {
   return store.todayCoursesByWeekday[wd].length
 })
 
-const courseCount = computed(() => store.visibleCourses.length)
-const labCount = computed(() => store.visibleCourses.filter((c) => c.type === 'lab').length)
+const courseCount = computed(() => store.visibleCourseBlocks.length)
+const labCount = computed(() => store.visibleCourseBlocks.filter((c) => c.type === 'lab').length)
 
 /** 待交作业：当前学期未完成（真实接口 /api/homework） */
 const pendingHomework = computed(() => store.homework.filter((h) => !h.done))
 
-/** 实践课程条目（无固定时间语义，见 types.Course.unscheduled） */
+/** 实践课程条目（无固定时间 = sessions 为空的课程） */
 interface PracticeItem {
+  id: number
   name: string
   teacher: string
   weeks: string
 }
 
-/** 实践课程：当前学期中无固定时间的课程（unscheduled），无数据时显示空态 */
+/** 实践课程：当前学期中无固定时间的课程，无数据时显示空态 */
 const practiceItems = computed<PracticeItem[]>(() =>
   store.courses
-    .filter((c) => c.semesterId === store.currentSemesterId && c.unscheduled)
+    .filter((c) => c.semesterId === store.currentSemesterId && c.sessions.length === 0)
     .map((c) => ({
+      id: c.id,
       name: c.name,
       teacher: c.teacher,
       weeks: c.remark || '无固定时间',
@@ -66,26 +67,9 @@ function openHomeworkItem(h: { id: number; name: string; courseId?: number | nul
   emit('openHomework', h)
 }
 
-/** 点击实践课程条目：emit 事件给父组件打开课程详情（mock 数据转为 Course 格式） */
+/** 点击实践课程条目：打开课程详情（按课程 id 查 store） */
 function openPracticeItem(p: PracticeItem): void {
-  const mockCourse = {
-    id: 0,
-    semesterId: 0,
-    type: 'course' as const,
-    name: p.name,
-    teacher: p.teacher,
-    location: '',
-    color: 'course-1',
-    weekType: 'all' as const,
-    weekList: null,
-    weekday: 1,
-    startPeriod: 1,
-    endPeriod: 1,
-    remark: p.weeks,
-    // 实践课程无固定时间：详情显示「无固定时间」，不进入课表网格/冲突检测
-    unscheduled: true,
-  } as Course
-  emit('openCourse', mockCourse)
+  emit('openCourse', p.id)
 }
 </script>
 
@@ -141,7 +125,7 @@ function openPracticeItem(p: PracticeItem): void {
       </template>
 
       <template v-else>
-        <div v-for="p in practiceItems" :key="p.name" class="sp-item clickable" @click="openPracticeItem(p)">
+        <div v-for="p in practiceItems" :key="p.id" class="sp-item clickable" @click="openPracticeItem(p)">
           <div class="sp-item-title">{{ p.name }}</div>
           <div class="sp-item-meta">{{ p.teacher }} · {{ p.weeks }}</div>
         </div>

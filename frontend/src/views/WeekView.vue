@@ -12,12 +12,13 @@ import Skeleton from '@/components/common/Skeleton.vue'
 import { exportElementAsPng } from '@/utils/exportPng'
 import { parseDate, toMonday } from '@/utils/week'
 import { toast } from '@/utils/ui'
+import { periodsLabel } from '@/utils/session'
 import type { Course, Weekday } from '@/types'
 
 const store = useScheduleStore()
 const router = useRouter()
 
-const selected = ref<Course | null>(null)
+const selectedId = ref<number | null>(null)
 const editing = ref<Course | null>(null)
 const showEditor = ref(false)
 const exporting = ref(false)
@@ -100,7 +101,7 @@ const dayTitle = computed(() => {
 })
 
 /** 当前展示日的课程（按节次排序） */
-const dayCourses = computed(() => {
+const dayBlocks = computed(() => {
   const list = store.coursesOfDate(activeDay.value)
   return [...list].sort((a, b) => a.startPeriod - b.startPeriod)
 })
@@ -255,8 +256,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
 })
 
-function openCourse(course: Course): void {
-  selected.value = course
+function openCourse(courseId: number): void {
+  selectedId.value = courseId
 }
 
 /** 打开事项页并导航到对应作业 tab */
@@ -265,17 +266,17 @@ function openHomework(h: { id: number; name: string; courseId?: number | null })
 }
 
 function closeModal(): void {
-  selected.value = null
+  selectedId.value = null
 }
 
 function editCourse(course: Course): void {
-  selected.value = null
+  selectedId.value = null
   editing.value = course
   showEditor.value = true
 }
 
 function createFromSlot(slot: { weekday: Weekday; period: number }): void {
-  selected.value = null
+  selectedId.value = null
   editing.value = null
   createSlot.value = slot
   showEditor.value = true
@@ -286,7 +287,8 @@ function printWeek(): void {
 }
 
 async function exportPng(): Promise<void> {
-  const grid = document.querySelector('.week-grid')
+  // 按稳定属性定位周课表网格（WeekGrid 根节点的 data-export-target）
+  const grid = document.querySelector('[data-export-target="week-grid"]')
   if (!grid || !(grid instanceof HTMLElement)) {
     toast('未找到课表网格', 'error')
     return
@@ -365,11 +367,11 @@ async function exportPng(): Promise<void> {
             >
               <div :key="activeDay.getTime()" class="dv-list__inner">
                 <button
-                  v-for="c in dayCourses"
-                  :key="c.id"
+                  v-for="c in dayBlocks"
+                  :key="`${c.id}:${c.sessionId}`"
                   class="dv-card"
                   type="button"
-                  @click="openCourse(c)"
+                  @click="openCourse(c.id)"
                 >
                   <span class="dv-dot-color" :style="{ background: `var(--${c.color}-text)` }"></span>
                   <span class="dv-time num">{{ periodTime(c.startPeriod).split('–')[0] }}<small>–{{ periodTime(c.endPeriod).split('–')[1] }}</small></span>
@@ -384,9 +386,9 @@ async function exportPng(): Promise<void> {
                     </span>
                     <span class="dv-loc">{{ c.location }} · {{ c.teacher }}</span>
                   </span>
-                  <span class="dv-slot num">第 {{ c.startPeriod }}{{ c.endPeriod > c.startPeriod ? `–${c.endPeriod}` : '' }} 节</span>
+                  <span class="dv-slot num">{{ periodsLabel(c.periods) }}</span>
                 </button>
-                <div v-if="dayCourses.length === 0" class="dv-empty">
+                <div v-if="dayBlocks.length === 0" class="dv-empty">
                   这一天没有排课
                 </div>
               </div>
@@ -427,7 +429,7 @@ async function exportPng(): Promise<void> {
       <SidePanel @open-course="openCourse" @open-homework="openHomework" />
     </div>
 
-    <CourseModal :course="selected" @close="closeModal" @edit="editCourse" />
+    <CourseModal :course-id="selectedId" @close="closeModal" @edit="editCourse" />
     <CourseEditor
       :open="showEditor"
       :course="editing"
