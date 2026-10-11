@@ -5,7 +5,7 @@ import { useScheduleStore } from '@/stores/schedule'
 import AppSelect from '@/components/common/AppSelect.vue'
 import ImportWizard from '@/components/import/ImportWizard.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
-import { formatMonthDay } from '@/utils/week'
+import { formatMonthDay, parseDate } from '@/utils/week'
 
 const route = useRoute()
 const router = useRouter()
@@ -77,16 +77,26 @@ const isSettings = computed(() => route.name === 'settings')
 const isMatters = computed(() => route.name === 'matters')
 
 const reminders = computed(() => {
-  const list: { id: string; title: string; meta: string; kind: '课程' | '作业' }[] = []
-  // 今日上课课程（今天真实所在周，不随周视图切换变化）
-  const wd = ((store.today.getDay() + 6) % 7 + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7
-  for (const c of store.todayCoursesByWeekday[wd]) {
+  const list: { id: string; title: string; meta: string; kind: '课程' | '作业'; badge?: string }[] = []
+  // 今日上课课程：走统一解析（含放假 / 调休按周几课表 / 调课与补课），不随周视图切换变化
+  const day = store.todayResolved
+  if (day.rule?.kind === 'holiday') {
+    list.push({ id: 'holiday', title: '今天放假', meta: `${formatMonthDay(store.today)} 无课`, kind: '课程' })
+  }
+  for (const c of day.blocks) {
     const p = store.periods[c.startPeriod - 1]
+    const suffix =
+      c.source === 'moved' && c.fromDate
+        ? `（由 ${formatMonthDay(parseDate(c.fromDate))} 调来）`
+        : c.source === 'extra'
+          ? '（补课）'
+          : ''
     list.push({
-      id: `c${c.id}`,
+      id: `c${c.id}:${c.adjustmentId ?? c.sessionId ?? ''}`,
       title: c.name,
-      meta: p ? `${formatMonthDay(store.today)} ${p.startTime} 上课` : '今日上课',
+      meta: p ? `${formatMonthDay(store.today)} ${p.startTime} 上课${suffix}` : '今日上课',
       kind: '课程',
+      badge: c.source === 'moved' ? '调课' : c.source === 'extra' ? '补课' : undefined,
     })
   }
   // 未完成作业
@@ -208,7 +218,10 @@ const reminders = computed(() => {
           >
             <span class="reminder-item__kind">{{ r.kind }}</span>
             <span class="reminder-item__main">
-              <span class="reminder-item__title">{{ r.title }}</span>
+              <span class="reminder-item__title">
+                {{ r.title }}
+                <span v-if="r.badge" class="reminder-item__badge">{{ r.badge }}</span>
+              </span>
               <span class="reminder-item__meta">{{ r.meta }}</span>
             </span>
           </button>
@@ -599,6 +612,19 @@ const reminders = computed(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 「调课 / 补课」角标 */
+.reminder-item__badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  vertical-align: 1px;
 }
 
 .reminder-item__meta {

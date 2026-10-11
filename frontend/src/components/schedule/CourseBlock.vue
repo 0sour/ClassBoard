@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { CourseBlock } from '@/types'
+import type { CourseBlock, ResolvedBlock } from '@/types'
+import AdjustBadge from './AdjustBadge.vue'
 
 const props = defineProps<{
-  /** 课程块（一个上课时间一组；同一课程多个时间段渲染为多块） */
-  course: CourseBlock
+  /** 课程块（一个上课时间一组；同一课程多个时间段渲染为多块）；带 source 表示由调整而来 */
+  course: CourseBlock & Partial<ResolvedBlock>
   conflict?: boolean
   /** 折叠态（冲突分栏 1/3）：只显示名称；未传为 false，非冲突课程不受影响 */
   collapsed?: boolean
@@ -20,6 +21,9 @@ const style = computed(() => ({
   '--cline': `var(--${props.course.color}-line)`,
   '--ctext': `var(--${props.course.color}-text)`,
 }))
+
+/** 调整来源（调课 / 补课）：任何显示课程块的地方都要能看出「这门课是调过来的」 */
+const adjusted = computed(() => props.course.source === 'moved' || props.course.source === 'extra')
 </script>
 
 <template>
@@ -27,7 +31,7 @@ const style = computed(() => ({
     class="course"
     type="button"
     :style="style"
-    :class="{ lab: course.type === 'lab', conflict, collapsed, dragging }"
+    :class="{ lab: course.type === 'lab', conflict, collapsed, dragging, adjusted }"
     :aria-label="`${course.name}，${course.location}`"
     @click="emit('open', course.id)"
   >
@@ -35,6 +39,7 @@ const style = computed(() => ({
     <span v-if="conflict" class="conflict-dot" aria-hidden="true"></span>
     <span class="c-name">{{ course.name }}</span>
     <span v-if="!collapsed" class="c-loc">{{ course.location }}</span>
+    <span v-if="adjusted" class="adjust-corner"><AdjustBadge :block="course" compact /></span>
   </button>
 </template>
 
@@ -142,5 +147,14 @@ const style = computed(() => ({
 
 .course.lab .lab-tag {
   display: block;
+}
+
+/* 「调课 / 补课」角标：右下角小胶囊（不与右上角的实验标签 / 冲突点打架）。
+   空角标时不占位（AdjustBadge 内部 v-if 不渲染） */
+.adjust-corner {
+  position: absolute;
+  right: 4px;
+  bottom: 3px;
+  display: flex;
 }
 </style>

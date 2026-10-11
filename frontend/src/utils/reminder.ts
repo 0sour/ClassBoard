@@ -38,7 +38,6 @@ function check(store: ReturnType<typeof useScheduleStore>): void {
   if (!store.remote || !store.settings) return
 
   const today = store.today
-  const wd = ((today.getDay() + 6) % 7 + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7
   const dateKey = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
 
   // 课程提醒（普通课 / 实验课分流）
@@ -47,7 +46,9 @@ function check(store: ReturnType<typeof useScheduleStore>): void {
     { enabled: store.settings.labReminder.enabled, config: store.settings.labReminder, type: 'lab' as const },
   ]
 
-  for (const c of store.blocksByWeekday[wd]) {
+  // 今日课程走统一解析：放假不提醒；调休日按有效星期；调来的课与补课照常提醒并注明
+  const day = store.todayResolved
+  for (const c of day.blocks) {
     const cfg = c.type === 'lab' ? reminders[1] : reminders[0]
     if (!cfg.enabled) continue
     const period = store.periods[c.startPeriod - 1]
@@ -57,10 +58,11 @@ function check(store: ReturnType<typeof useScheduleStore>): void {
     const triggerAt = start.getTime() - advance
     const now = Date.now()
     if (now >= triggerAt && now < start.getTime()) {
-      const key = `${dateKey}:${cfg.type}:${c.id}`
+      const key = `${dateKey}:${cfg.type}:${c.id}:${c.adjustmentId ?? c.sessionId ?? ''}`
       if (!fired.has(key)) {
         fired.add(key)
-        notify(`课程提醒：${c.name}`, `${period.startTime} 上课 · ${c.location || '未填地点'}`)
+        const tag = c.source === 'moved' ? '（调课）' : c.source === 'extra' ? '（补课）' : ''
+        notify(`课程提醒：${c.name}${tag}`, `${period.startTime} 上课 · ${c.location || '未填地点'}`)
       }
     }
   }

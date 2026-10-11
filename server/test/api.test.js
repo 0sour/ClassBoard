@@ -47,7 +47,7 @@ after(() => {
 
 beforeEach(async () => {
   db.exec(
-    'DELETE FROM homework; DELETE FROM exam; DELETE FROM course_session; DELETE FROM course; DELETE FROM period_template; DELETE FROM semester; DELETE FROM session; DELETE FROM user_setting;',
+    'DELETE FROM course_adjustment; DELETE FROM semester_day_rule; DELETE FROM homework; DELETE FROM exam; DELETE FROM course_session; DELETE FROM course; DELETE FROM period_template; DELETE FROM semester; DELETE FROM session; DELETE FROM user_setting;',
   )
   const res = await fetch(base + '/api/access/login', {
     method: 'POST',
@@ -390,7 +390,7 @@ test('考试与作业 CRUD 及周聚合联动', async () => {
   assert.equal(exams.body[0].courseId, null)
 })
 
-test('备份导出 v4 与恢复；天气 Key 脱敏', async () => {
+test('备份导出 v5 与恢复；天气 Key 脱敏', async () => {
   await createSemester()
   await authApi('POST', '/api/courses', courseBody(undefined, {
     name: '备份课程', type: 'lab', weekday: 1, periods: [1, 2], weeks: [1, 2, 3],
@@ -400,7 +400,7 @@ test('备份导出 v4 与恢复；天气 Key 脱敏', async () => {
   const out = await fetch(base + '/api/backup', { headers: { Cookie: `classboard_session=${adminCookie}` } })
   const payload = await out.json()
   assert.equal(out.status, 200)
-  assert.equal(payload.version, 4)
+  assert.equal(payload.version, 5)
   assert.equal(payload.courses.length, 1)
   assert.deepEqual(payload.courses[0].sessions[0].periods, [1, 2])
   assert.deepEqual(payload.courses[0].sessions[0].weeks, [1, 2, 3])
@@ -1099,4 +1099,250 @@ test('迁移：旧模型课程行 → 组 + sessions，实验课不丢、关联�
   assert.equal(out.examCourse, out.hwCourse)
 
   rmSync(migDir, { recursive: true, force: true })
+})
+// ============================================================
+// 学期日历（放假 / 调休按周几上课）
+// ============================================================
+
+test('学期日历：区间逐日展开、覆盖更新、清除与越界拒绝', async () => {
+  const sem = await createSemester()
+  const semId = sem.body.id
+
+  // 国庆放假 10/1–10/3 → 逐日三行
+  const r1 = await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-01', to: '2026-10-03', kind: 'holiday', note: '国庆节' })
+  assert.equal(r1.status, 200)
+  assert.deepEqual(r1.body.map((x) => x.date), ['2026-10-01', '2026-10-02', '2026-10-03'])
+  assert.equal(r1.body[0].kind, 'holiday')
+  assert.equal(r1.body[0].note, '国庆节')
+
+  // 调休：10/10（周六）按周三课表上课
+  const r2 = await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-10', to: '2026-10-10', kind: 'follow', followWeekday: 3 })
+  assert.equal(r2.body.length, 4)
+  const follow = r2.body.find((x) => x.date === '2026-10-10')
+  assert.equal(follow.kind, 'follow')
+  assert.equal(follow.followWeekday, 3)
+
+  // 覆盖：把 10/2 单独改成「按周五课表」
+  const r3 = await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-02', to: '2026-10-02', kind: 'follow', followWeekday: 5 })
+  const oct2 = r3.body.find((x) => x.date === '2026-10-02')
+  assert.equal(oct2.kind, 'follow')
+  assert.equal(oct2.followWeekday, 5)
+  assert.equal(r3.body.length, 4, '覆盖不应新增行')
+
+  // 清除区间（10/1–10/3）：区间内规则（含被覆盖过的 10/2）整体删除，只剩 10/10
+  const r4 = await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-01', to: '2026-10-03', kind: 'clear' })
+  assert.deepEqual(r4.body.map((x) => x.date), ['2026-10-10'])
+
+  // 读取一致
+  const list = await authApi('GET', `/api/calendar?semesterId=${semId}`)
+  assert.equal(list.body.length, 1)
+
+  // 学期范围外 / 非法星期 → 400 且不改动数据
+  const bad1 = await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-08-01', to: '2026-08-02', kind: 'holiday' })
+  assert.equal(bad1.status, 400)
+  const bad2 = await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-05', to: '2026-10-05', kind: 'follow', followWeekday: 9 })
+  assert.equal(bad2.status, 400)
+  const after = await authApi('GET', `/api/calendar?semesterId=${semId}`)
+  assert.equal(after.body.length, 1, '校验失败不应写入')
+})
+
+test('学期日历：跨用户隔离、删学期级联清理', async () => {
+  const sem = await createSemester()
+  const semId = sem.body.id
+  await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-01', to: '2026-10-01', kind: 'holiday' })
+
+  await authApi('PUT', '/api/users/signup', { enabled: true })
+  const reg = await fetch(base + '/api/access/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'caluser', password: 'pass123' }),
+  })
+  const cookieB = reg.headers.get('set-cookie').split(';')[0].split('=')[1]
+
+  // 别人的学期（admin 的）→ 404；不带参数时是自己的（空）
+  const denied = await api('GET', `/api/calendar?semesterId=${semId}`, undefined, { Cookie: `classboard_session=${cookieB}` })
+  assert.equal(denied.status, 404)
+  const own = await api('GET', '/api/calendar', undefined, { Cookie: `classboard_session=${cookieB}` })
+  assert.deepEqual(own.body, [])
+
+  // 删学期 → 规则级联清理
+  await authApi('DELETE', `/api/semesters/${semId}`)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM semester_day_rule').get().n, 0)
+})
+
+// ============================================================
+// 单课调整（停课 / 调课 / 补课）
+// ============================================================
+
+test('单课调整：停课 / 调课 / 补课的创建、更新、删除与校验', async () => {
+  const sem = await createSemester()
+  const semId = sem.body.id
+  const created = await authApi('POST', '/api/courses', courseBody(semId, { weekday: 4, periods: [5, 6], weeks: [6, 7, 8] }))
+  const courseId = created.body.id
+
+  // 停课：第 7 周周四 5–6 节
+  const cancel = await authApi('POST', '/api/adjustments', {
+    courseId, date: '2026-10-15', kind: 'cancel', fromWeekday: 4, fromPeriods: [5, 6], note: '老师出差',
+  })
+  assert.equal(cancel.status, 201)
+  assert.equal(cancel.body.kind, 'cancel')
+  assert.deepEqual(cancel.body.fromPeriods, [5, 6])
+  assert.equal(cancel.body.toDate, null)
+
+  // 调课：10/22 的课改到 10/24（周六）3–4 节
+  const move = await authApi('POST', '/api/adjustments', {
+    courseId, date: '2026-10-22', kind: 'move', fromWeekday: 4, fromPeriods: [5, 6], toDate: '2026-10-24', periods: [3, 4],
+  })
+  assert.equal(move.status, 201)
+  assert.equal(move.body.toDate, '2026-10-24')
+  assert.deepEqual(move.body.periods, [3, 4])
+
+  // 补课：10/31（周六）3–4 节
+  const extra = await authApi('POST', '/api/adjustments', {
+    courseId, date: '2026-10-31', kind: 'extra', periods: [3, 4], location: '实验楼302',
+  })
+  assert.equal(extra.status, 201)
+  assert.equal(extra.body.location, '实验楼302')
+  assert.equal(extra.body.fromWeekday, null)
+
+  const list = await authApi('GET', `/api/adjustments?semesterId=${semId}`)
+  assert.equal(list.body.length, 3)
+  assert.deepEqual(list.body.map((x) => x.date), ['2026-10-15', '2026-10-22', '2026-10-31'])
+
+  // 更新：把调课目标改到 10/25 5–6 节
+  const upd = await authApi('PUT', `/api/adjustments/${move.body.id}`, {
+    date: '2026-10-22', kind: 'move', fromWeekday: 4, fromPeriods: [5, 6], toDate: '2026-10-25', periods: [5, 6],
+  })
+  assert.equal(upd.status, 200)
+  assert.equal(upd.body.toDate, '2026-10-25')
+
+  // 撤销
+  const del = await authApi('DELETE', `/api/adjustments/${extra.body.id}`)
+  assert.equal(del.status, 204)
+  const after = await authApi('GET', `/api/adjustments?semesterId=${semId}`)
+  assert.equal(after.body.length, 2)
+
+  // 非法：move 缺目标日期 / 停课缺原时间组 / 节次超上限 / 日期在学期外
+  const bad1 = await authApi('POST', '/api/adjustments', { courseId, date: '2026-10-15', kind: 'move', fromWeekday: 4, fromPeriods: [5], periods: [3] })
+  assert.equal(bad1.status, 400)
+  const bad2 = await authApi('POST', '/api/adjustments', { courseId, date: '2026-10-15', kind: 'cancel' })
+  assert.equal(bad2.status, 400)
+  const bad3 = await authApi('POST', '/api/adjustments', { courseId, date: '2026-10-15', kind: 'move', fromWeekday: 4, fromPeriods: [5], toDate: '2026-10-16', periods: [99] })
+  assert.equal(bad3.status, 400)
+  const bad4 = await authApi('POST', '/api/adjustments', { courseId, date: '2027-03-01', kind: 'cancel', fromWeekday: 4, fromPeriods: [5] })
+  assert.equal(bad4.status, 400)
+  const still = await authApi('GET', `/api/adjustments?semesterId=${semId}`)
+  assert.equal(still.body.length, 2, '非法请求不应写入')
+})
+
+test('单课调整：跨用户不可见；删课程级联清理；基准课表不受影响', async () => {
+  const sem = await createSemester()
+  const semId = sem.body.id
+  const created = await authApi('POST', '/api/courses', courseBody(semId, { weekday: 4, periods: [5, 6], weeks: [6, 7, 8] }))
+  const courseId = created.body.id
+  const slotCountBefore = db.prepare('SELECT COUNT(*) AS n FROM course_slot').get().n
+
+  await authApi('POST', '/api/adjustments', {
+    courseId, date: '2026-10-15', kind: 'cancel', fromWeekday: 4, fromPeriods: [5, 6],
+  })
+
+  // 调整是「日期覆盖层」：基准课表的节×周格子一格未动
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM course_slot').get().n, slotCountBefore)
+
+  // 另一个用户看不到、也改不了
+  await authApi('PUT', '/api/users/signup', { enabled: true })
+  const reg = await fetch(base + '/api/access/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'adjuser', password: 'pass123' }),
+  })
+  const cookieB = reg.headers.get('set-cookie').split(';')[0].split('=')[1]
+  const listB = await api('GET', `/api/adjustments?semesterId=${semId}`, undefined, { Cookie: `classboard_session=${cookieB}` })
+  assert.equal(listB.status, 404, '别人的学期 → 学期不存在')
+  const delB = await api('DELETE', '/api/adjustments/1', undefined, { Cookie: `classboard_session=${cookieB}` })
+  assert.equal(delB.status, 404)
+
+  // 删课程 → 调整级联清理
+  await authApi('DELETE', `/api/courses/${courseId}`)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM course_adjustment').get().n, 0)
+})
+
+test('备份 v5：日历与调整随备份导出并还原（含计数）', async () => {
+  const sem = await createSemester()
+  const semId = sem.body.id
+  const created = await authApi('POST', '/api/courses', courseBody(semId, { weekday: 4, periods: [5, 6], weeks: [6, 7, 8] }))
+  const courseId = created.body.id
+  await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-01', to: '2026-10-02', kind: 'holiday', note: '国庆' })
+  await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-10', to: '2026-10-10', kind: 'follow', followWeekday: 3 })
+  await authApi('POST', '/api/adjustments', { courseId, date: '2026-10-15', kind: 'cancel', fromWeekday: 4, fromPeriods: [5, 6], note: '出差' })
+  await authApi('POST', '/api/adjustments', { courseId, date: '2026-10-22', kind: 'move', fromWeekday: 4, fromPeriods: [5, 6], toDate: '2026-10-24', periods: [3, 4] })
+
+  const out = await fetch(base + '/api/backup', { headers: { Cookie: `classboard_session=${adminCookie}` } })
+  const payload = await out.json()
+  assert.equal(payload.version, 5)
+  assert.equal(payload.calendar.length, 3)
+  assert.equal(payload.adjustments.length, 2)
+  const follow = payload.calendar.find((r) => r.date === '2026-10-10')
+  assert.equal(follow.followWeekday, 3)
+  assert.equal(payload.adjustments.find((a) => a.kind === 'move').toDate, '2026-10-24')
+
+  // 清空全部业务数据后还原
+  db.exec('DELETE FROM course_adjustment; DELETE FROM semester_day_rule; DELETE FROM homework; DELETE FROM exam; DELETE FROM course_session; DELETE FROM course; DELETE FROM period_template; DELETE FROM semester')
+  const form = new FormData()
+  form.append('file', new Blob([JSON.stringify(payload)], { type: 'application/json' }), 'backup.json')
+  const res = await fetch(base + '/api/backup/restore', { method: 'POST', headers: { Cookie: `classboard_session=${adminCookie}` }, body: form })
+  const body = await res.json()
+  assert.equal(res.status, 200, JSON.stringify(body))
+  assert.equal(body.restored.calendar, 3)
+  assert.equal(body.restored.adjustments, 2)
+
+  const rules = await authApi('GET', `/api/calendar?semesterId=${semId}`)
+  assert.equal(rules.body.length, 3)
+  assert.equal(rules.body.find((r) => r.date === '2026-10-10').followWeekday, 3)
+  const adjs = await authApi('GET', `/api/adjustments?semesterId=${semId}`)
+  assert.equal(adjs.body.length, 2)
+  assert.equal(adjs.body.find((a) => a.kind === 'move').toDate, '2026-10-24')
+  assert.deepEqual(adjs.body.find((a) => a.kind === 'cancel').fromPeriods, [5, 6])
+})
+
+test('恢复：v4 备份缺日历与调整字段 → 按空处理，课程照常恢复', async () => {
+  await createSemester()
+  const v4 = {
+    version: 4,
+    semesters: [{ id: 7, name: 'v4 学期', startDate: '2026-09-01', endDate: '2027-01-15', weekStartDay: 1 }],
+    periods: [],
+    courses: [{ id: 70, semesterId: 7, type: 'course', name: 'v4 课程', sessions: [{ weekday: 1, periods: [1, 2], weeks: [1, 2] }] }],
+    exams: [], homework: [], settings: {}, templates: [],
+  }
+  const form = new FormData()
+  form.append('file', new Blob([JSON.stringify(v4)], { type: 'application/json' }), 'v4.json')
+  const res = await fetch(base + '/api/backup/restore', { method: 'POST', headers: { Cookie: `classboard_session=${adminCookie}` }, body: form })
+  const body = await res.json()
+  assert.equal(res.status, 200, JSON.stringify(body))
+  assert.equal(body.restored.upgradedFrom, null, 'v4 与新版本课程结构一致，不算旧结构升级')
+  assert.equal(body.restored.calendar, 0)
+  assert.equal(body.restored.adjustments, 0)
+  const courses = await authApi('GET', '/api/courses?semesterId=7')
+  assert.equal(courses.body.length, 1)
+  assert.deepEqual(courses.body[0].sessions[0].weeks, [1, 2])
+})
+
+test('恢复：调整引用了不存在的课程 → 整批拒绝', async () => {
+  await createSemester()
+  const bad = {
+    version: 5,
+    semesters: [{ id: 9, name: 'S', startDate: '2026-09-01', endDate: '2027-01-15', weekStartDay: 1 }],
+    periods: [],
+    courses: [{ id: 90, semesterId: 9, type: 'course', name: '课', sessions: [{ weekday: 1, periods: [1], weeks: [1] }] }],
+    exams: [], homework: [], settings: {}, templates: [],
+    calendar: [{ semesterId: 9, date: '2026-10-01', kind: 'holiday', followWeekday: null, note: '' }],
+    adjustments: [{ courseId: 999, date: '2026-10-15', kind: 'cancel', fromWeekday: 4, fromPeriods: [5], toDate: null, periods: [] }],
+  }
+  const form = new FormData()
+  form.append('file', new Blob([JSON.stringify(bad)], { type: 'application/json' }), 'bad.json')
+  const res = await fetch(base + '/api/backup/restore', { method: 'POST', headers: { Cookie: `classboard_session=${adminCookie}` }, body: form })
+  assert.equal(res.status, 400)
+  assert.equal((await res.json()).code, 'BAD_FILE')
+  const sems = await authApi('GET', '/api/semesters')
+  assert.equal(sems.body.length, 1, '原有数据未被清空')
 })

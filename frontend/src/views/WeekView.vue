@@ -8,11 +8,13 @@ import WeekPicker from '@/components/schedule/WeekPicker.vue'
 import SidePanel from '@/components/schedule/SidePanel.vue'
 import CourseModal from '@/components/schedule/CourseModal.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
+import AdjustBadge from '@/components/schedule/AdjustBadge.vue'
 import Skeleton from '@/components/common/Skeleton.vue'
 import { exportElementAsPng } from '@/utils/exportPng'
 import { parseDate, toMonday } from '@/utils/week'
 import { toast } from '@/utils/ui'
 import { periodsLabel } from '@/utils/session'
+import { dayRuleLabel, markerLabel } from '@/utils/calendar'
 import type { Course, Weekday } from '@/types'
 
 const store = useScheduleStore()
@@ -100,10 +102,21 @@ const dayTitle = computed(() => {
   return `${DAY_LABELS[d.getDay() === 0 ? 6 : d.getDay() - 1]} · ${d.getMonth() + 1}月${d.getDate()}日`
 })
 
-/** 当前展示日的课程（按节次排序） */
-const dayBlocks = computed(() => {
-  const list = store.coursesOfDate(activeDay.value)
-  return [...list].sort((a, b) => a.startPeriod - b.startPeriod)
+/** 当前展示日的解析结果（含放假 / 调休按周几课表 / 调课补课；已按节次排序） */
+const dayResolved = computed(() => store.resolvedDay(activeDay.value))
+const dayBlocks = computed(() => dayResolved.value.blocks)
+const dayMarkers = computed(() => dayResolved.value.markers)
+
+/** 单日提示：假期 / 按周几课表 / 有几门课是调整过来的 */
+const dayNotice = computed(() => {
+  const r = dayResolved.value
+  const parts: string[] = []
+  if (r.rule?.kind === 'holiday') parts.push(dayRuleLabel(r.rule))
+  else if (r.rule?.kind === 'follow') parts.push(dayRuleLabel(r.rule))
+  const adjusted = r.blocks.filter((b) => b.source !== 'base').length
+  if (adjusted) parts.push(`${adjusted} 门课为调课/补课`)
+  if (r.markers.length) parts.push(`${r.markers.length} 门课停课或调走`)
+  return parts.join(' · ')
 })
 
 /** 节次时间（按节次模板） */
@@ -366,9 +379,12 @@ async function exportPng(): Promise<void> {
               :duration="200"
             >
               <div :key="activeDay.getTime()" class="dv-list__inner">
+                <div v-if="dayNotice" class="dv-notice" :class="{ holiday: dayResolved.rule?.kind === 'holiday' }">
+                  {{ dayNotice }}
+                </div>
                 <button
                   v-for="c in dayBlocks"
-                  :key="`${c.id}:${c.sessionId}`"
+                  :key="`${c.id}:${c.sessionId ?? c.adjustmentId ?? 'x'}`"
                   class="dv-card"
                   type="button"
                   @click="openCourse(c.id)"
@@ -378,6 +394,7 @@ async function exportPng(): Promise<void> {
                   <span class="dv-main">
                     <span class="dv-name-row">
                       <span class="dv-name">{{ c.name }}</span>
+                      <AdjustBadge :block="c" />
                       <span
                         v-if="c.type === 'lab'"
                         class="dv-lab"
@@ -388,8 +405,19 @@ async function exportPng(): Promise<void> {
                   </span>
                   <span class="dv-slot num">{{ periodsLabel(c.periods) }}</span>
                 </button>
-                <div v-if="dayBlocks.length === 0" class="dv-empty">
-                  这一天没有排课
+                <!-- 原位置淡显：这一天本有课但停课 / 调走了 -->
+                <div v-for="m in dayMarkers" :key="`marker:${m.adjustmentId}`" class="dv-card dv-card--marker">
+                  <span class="dv-dot-color dv-faint" :style="{ background: `var(--${m.color}-text)` }"></span>
+                  <span class="dv-time num dv-faint">{{ periodsLabel(m.periods) }}</span>
+                  <span class="dv-main">
+                    <span class="dv-name-row">
+                      <span class="dv-name dv-faint">{{ m.name }}</span>
+                    </span>
+                  </span>
+                  <span class="dv-slot num">{{ markerLabel(m) }}</span>
+                </div>
+                <div v-if="dayBlocks.length === 0 && dayMarkers.length === 0" class="dv-empty">
+                  {{ dayResolved.rule?.kind === 'holiday' ? '这一天放假' : '这一天没有排课' }}
                 </div>
               </div>
             </Transition>
@@ -757,6 +785,33 @@ async function exportPng(): Promise<void> {
   border: 1px dashed var(--color-border-strong);
   border-radius: var(--radius-lg);
   font-size: var(--font-size-sm);
+}
+
+/* 单日提示条（假期 / 按周几课表 / 有调整） */
+.dv-notice {
+  margin-bottom: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-default);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.dv-notice.holiday {
+  border-style: dashed;
+  color: var(--color-text-tertiary);
+}
+
+/* 原位置淡显（停课 / 已调走） */
+.dv-card--marker {
+  border-style: dashed;
+  border-color: var(--color-border-strong);
+  box-shadow: none;
+  background: transparent;
+}
+
+.dv-faint {
+  opacity: 0.55;
 }
 
 /* 打印 / 导出操作条（文档 4.7：操作对象仅限课表网格） */

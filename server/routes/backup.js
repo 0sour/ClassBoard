@@ -1,8 +1,8 @@
 // ============================================================
 // ClassBoard · 备份路由
-// 导出：version 4（课程为「组 + sessions」结构）；天气 API Key 脱敏
+// 导出：version 5（课程为「组 + sessions」结构；含学期日历与单课调整）；天气 API Key 脱敏
 // 恢复：仅 admin；只清理该用户自己的数据（user_id 过滤）；校验失败逐行报错整批回滚
-// 兼容：version 2 / 3 旧备份由转换器无损升级
+// 兼容：version 2 / 3 旧课程结构由转换器无损升级；version 4 缺日历与调整字段按空处理
 // ============================================================
 import { Router } from 'express'
 import multer from 'multer'
@@ -10,7 +10,9 @@ import {
   db,
   DATA_DIR,
   replaceCourseSessions,
+  toAdjustment,
   toCoursesWithSessions,
+  toDayRule,
   toExam,
   toHomework,
   toPeriod,
@@ -25,10 +27,14 @@ import { requireAdmin } from '../lib/access.js'
 import { createSnapshot } from '../lib/snapshot.js'
 import { expandWeeks, periodRange, semesterWeekCount, MAX_PERIODS, MAX_WEEKS } from '../lib/weekspan.js'
 import { isValidColor } from '../lib/colors.js'
+import { ADJUSTMENT_KINDS } from '../lib/validate.js'
 
 export const backupRouter = Router()
 
-export const BACKUP_VERSION = 4
+export const BACKUP_VERSION = 5
+
+/** 引入日历与单课调整的版本（更早的备份缺少这两个数据集） */
+const CALENDAR_VERSION = 5
 
 const COURSE_TYPES = ['course', 'lab']
 function vStr(v, mx) { return typeof v === 'string' && v.trim().length > 0 && (mx ? v.length <= mx : true) }
@@ -36,10 +42,32 @@ function vNum(v, mn, mx) { return typeof v === 'number' && Number.isInteger(v) &
 function vDate(v) { return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}($|T\d{2}:\d{2})$/.test(v) }
 function vTime(v) { return typeof v === 'string' && /^\d{2}:\d{2}$/.test(v) }
 function vWeekday(v) { return vNum(v, 1, 7) }
+function vIntArray(v, mx) { return Array.isArray(v) && v.every((n) => vNum(n, 1, mx)) }
 function vSem(s) { if (!s) return false; return vNum(s.id, 1) && vStr(s.name, 50) && vDate(s.startDate) && vDate(s.endDate) && vWeekday(s.weekStartDay) }
 function vPeriod(p) { if (!p) return false; return vNum(p.id, 1) && vNum(p.semesterId, 1) && vNum(p.index, 1, 30) && vTime(p.startTime) && vTime(p.endTime) }
 function vExam(e) { if (!e) return false; return vNum(e.id, 1) && vNum(e.semesterId, 1) && vStr(e.name, 50) && vDate(e.datetime) && (e.courseId === null || vNum(e.courseId, 1)) }
 function vHw(h) { if (!h) return false; return vNum(h.id, 1) && vNum(h.semesterId, 1) && vStr(h.name, 50) && vDate(h.dueAt) && (h.courseId === null || vNum(h.courseId, 1)) && (typeof h.done === 'boolean' || typeof h.done === 'number') }
+/** 学期日历规则：放假 / 调休按周几上课 */
+function vDayRule(r) {
+  if (!r) return false
+  if (!vNum(r.semesterId, 1) || !vDate(r.date)) return false
+  if (!['holiday', 'follow'].includes(r.kind)) return false
+  if (r.kind === 'follow' && !vWeekday(r.followWeekday)) return false
+  return r.note === undefined || r.note === null || typeof r.note === 'string'
+}
+/** 单课调整：停课 / 调课 / 补课（fromPeriods / periods 为逐项整数数组） */
+function vAdjustment(a) {
+  if (!a) return false
+  if (!vNum(a.courseId, 1) || !vDate(a.date)) return false
+  if (!ADJUSTMENT_KINDS.includes(a.kind)) return false
+  if (a.fromWeekday !== null && a.fromWeekday !== undefined && !vWeekday(a.fromWeekday)) return false
+  if (a.fromPeriods !== undefined && !vIntArray(a.fromPeriods, MAX_PERIODS)) return false
+  if (a.toDate !== null && a.toDate !== undefined && !vDate(a.toDate)) return false
+  if (a.periods !== undefined && !vIntArray(a.periods, MAX_PERIODS)) return false
+  if (a.kind === 'move' && !a.toDate) return false
+  if (a.kind !== 'cancel' && !(Array.isArray(a.periods) && a.periods.length)) return false
+  return true
+}
 
 /** 新结构课程行校验：元数据 + sessions（节次/周次逐项数组） */
 function vCourseV4(c) {
@@ -100,6 +128,21 @@ backupRouter.get(
       ),
       exams: db.prepare('SELECT * FROM exam WHERE user_id = ? ORDER BY id ASC').all(uid).map(toExam),
       homework: db.prepare('SELECT * FROM homework WHERE user_id = ? ORDER BY id ASC').all(uid).map(toHomework),
+      // 学期日历（放假 / 调休按周几上课）与单课调整（停课 / 调课 / 补课）
+      calendar: db
+        .prepare(
+          `SELECT r.* FROM semester_day_rule r JOIN semester s ON s.id = r.semester_id
+            WHERE s.user_id = ? ORDER BY r.semester_id ASC, r.date ASC`,
+        )
+        .all(uid)
+        .map(toDayRule),
+      adjustments: db
+        .prepare(
+          `SELECT a.* FROM course_adjustment a JOIN course c ON c.id = a.course_id
+            WHERE c.user_id = ? ORDER BY a.course_id ASC, a.date ASC, a.id ASC`,
+        )
+        .all(uid)
+        .map(toAdjustment),
       // readSettings 已按 maskSecrets 脱敏天气 API Key（恢复时保留本地已有配置）
       settings,
       // 当前学期指向：随备份带走，还原后优先恢复到同一学期
@@ -144,12 +187,14 @@ backupRouter.post(
     } catch {
       throw badFile('备份文件格式不符（须为 JSON）')
     }
-    if (![2, 3, BACKUP_VERSION].includes(data.version) || !Array.isArray(data.semesters) || !Array.isArray(data.courses)) {
+    if (![2, 3, 4, BACKUP_VERSION].includes(data.version) || !Array.isArray(data.semesters) || !Array.isArray(data.courses)) {
       throw badFile('备份文件版本或结构无法识别')
     }
 
     const uid = req.user.id
-    const legacy = data.version < BACKUP_VERSION
+    // v2/v3 的课程是旧「一行一时间」结构；v4 起为「组 + sessions」；v5 起附带日历与调整
+    const legacy = data.version < 4
+    const hasCalendar = data.version >= CALENDAR_VERSION
 
     // 恢复会清空该用户全部数据：先做一致性快照
     const snapshot = await createSnapshot(db, DATA_DIR, 'backup-restore')
@@ -175,6 +220,12 @@ backupRouter.post(
     }
     for (const e of data.exams ?? []) if (!vExam(e)) problems.push(`考试数据无效：${JSON.stringify(e).slice(0, 80)}`)
     for (const h of data.homework ?? []) if (!vHw(h)) problems.push(`作业数据无效：${JSON.stringify(h).slice(0, 80)}`)
+
+    // 学期日历与单课调整（v4 及更旧备份没有这两个数据集，按空处理）
+    const ruleRows = hasCalendar ? (data.calendar ?? []) : []
+    const adjRows = hasCalendar ? (data.adjustments ?? []) : []
+    for (const r of ruleRows) if (!vDayRule(r)) problems.push(`日历规则无效：${JSON.stringify(r).slice(0, 80)}`)
+    for (const a of adjRows) if (!vAdjustment(a)) problems.push(`调整记录无效：${JSON.stringify(a).slice(0, 80)}`)
     if (problems.length) {
       throw badFile(`备份文件存在 ${problems.length} 条无法识别的数据，已中止恢复（未改动任何数据）`, problems.slice(0, 20))
     }
@@ -184,6 +235,16 @@ backupRouter.post(
     const dangling = courseRows.filter((c) => !semIds.has(c.semesterId))
     if (dangling.length) {
       throw badFile(`备份文件不完整：${dangling.length} 门课程引用了不存在的学期，已中止恢复`)
+    }
+    // 日历 / 调整的引用同样必须落在备份集合内
+    const courseIdSet = new Set(courseRows.map((c) => c.id))
+    const badRules = ruleRows.filter((r) => !semIds.has(r.semesterId))
+    if (badRules.length) {
+      throw badFile(`备份文件不完整：${badRules.length} 条日历规则引用了不存在的学期，已中止恢复`)
+    }
+    const badAdjust = adjRows.filter((a) => !courseIdSet.has(a.courseId))
+    if (badAdjust.length) {
+      throw badFile(`备份文件不完整：${badAdjust.length} 条调整记录引用了不存在的课程，已中止恢复`)
     }
 
     const restore = db.transaction(() => {
@@ -228,6 +289,37 @@ backupRouter.post(
       )
       for (const h of data.homework ?? []) {
         insHw.run(h.id, h.semesterId, uid, h.courseId ?? null, h.name, h.dueAt, h.done ? 1 : 0, h.remark ?? '')
+      }
+
+      // 学期日历：随学期级联清理（旧数据已删），这里按备份重建（逐日一行）
+      const insRule = db.prepare(
+        `INSERT OR REPLACE INTO semester_day_rule (semester_id, date, kind, follow_weekday, note)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      for (const r of ruleRows) {
+        insRule.run(r.semesterId, r.date, r.kind, r.kind === 'follow' ? r.followWeekday : null, r.note ?? '')
+      }
+
+      // 单课调整：随课程级联清理（旧数据已删），按备份重建；
+      // id 不沿用（无外部引用，交由 SQLite 分配以避免跨用户主键冲突）
+      const insAdj = db.prepare(
+        `INSERT INTO course_adjustment
+           (course_id, date, kind, from_weekday, from_periods, to_date, periods, location, note, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      for (const a of adjRows) {
+        insAdj.run(
+          a.courseId,
+          a.date,
+          a.kind,
+          a.fromWeekday ?? null,
+          JSON.stringify(a.fromPeriods ?? []),
+          a.toDate ?? null,
+          JSON.stringify(a.periods ?? []),
+          a.location ?? '',
+          a.note ?? '',
+          a.createdAt ?? new Date().toISOString(),
+        )
       }
 
       // 设置（不恢复口令哈希；API Key 若为脱敏值则保留本地现有配置）
@@ -307,6 +399,8 @@ backupRouter.post(
         courses: courseRows.length,
         exams: (data.exams ?? []).length,
         homework: (data.homework ?? []).length,
+        calendar: ruleRows.length,
+        adjustments: adjRows.length,
         snapshot,
       },
     })

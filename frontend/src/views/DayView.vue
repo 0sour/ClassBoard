@@ -4,7 +4,9 @@ import { useScheduleStore } from '@/stores/schedule'
 import WeatherCard from '@/components/schedule/WeatherCard.vue'
 import CourseModal from '@/components/schedule/CourseModal.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
+import AdjustBadge from '@/components/schedule/AdjustBadge.vue'
 import { periodsLabel } from '@/utils/session'
+import { dayRuleLabel, markerLabel } from '@/utils/calendar'
 import type { Course } from '@/types'
 
 const store = useScheduleStore()
@@ -28,10 +30,22 @@ const todayLabel = computed(() => {
   return `${d.getMonth() + 1}月${d.getDate()}日 周${'一二三四五六日'[(d.getDay() + 6) % 7]}`
 })
 
-// 今天的课程块按今天真实所在周过滤，与周课表切换的展示周互不影响
-const todayBlocks = computed(() => {
-  const wd = ((today.value.getDay() + 6) % 7 + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7
-  return store.todayCoursesByWeekday[wd]
+// 今天的课：走统一解析——含学期日历（放假 / 调休按周几上课）与单课调整（调课 / 补课）
+const todayResolved = computed(() => store.todayResolved)
+const todayBlocks = computed(() => todayResolved.value.blocks)
+const todayMarkers = computed(() => todayResolved.value.markers)
+
+/** 今日提示：放假 / 按周几课表 / 有几门课是调整过来的 */
+const todayNotice = computed(() => {
+  const r = todayResolved.value
+  if (r.rule?.kind === 'holiday') return { text: dayRuleLabel(r.rule), kind: 'holiday' as const }
+  const adjusted = r.blocks.filter((b) => b.source !== 'base').length
+  const parts: string[] = []
+  if (r.rule?.kind === 'follow') parts.push(dayRuleLabel(r.rule))
+  if (adjusted) parts.push(`今日 ${adjusted} 门课为调课/补课`)
+  if (r.markers.length) parts.push(`${r.markers.length} 门课停课或调走`)
+  if (!parts.length) return null
+  return { text: parts.join(' · '), kind: r.rule?.kind === 'follow' ? ('follow' as const) : ('adjust' as const) }
 })
 
 const todayHomework = computed(() => {
@@ -64,10 +78,15 @@ function editCourse(course: Course): void {
     <!-- 天气卡（仅移动端显示；桌面端由周课表侧栏承担） -->
     <WeatherCard v-if="isMobile && store.weatherData" variant="slim" class="reveal" />
 
+    <!-- 今日提示：放假 / 调休按周几课表 / 有几门课是调整过来的 -->
+    <div v-if="todayNotice" class="today-notice reveal" :class="todayNotice.kind">
+      {{ todayNotice.text }}
+    </div>
+
     <div class="today-list">
       <button
         v-for="b in todayBlocks"
-        :key="`${b.id}:${b.sessionId}`"
+        :key="`${b.id}:${b.sessionId ?? b.adjustmentId ?? 'x'}:${b.weekday}`"
         class="today-card reveal"
         type="button"
         @click="openCourse(b.id)"
@@ -77,15 +96,28 @@ function editCourse(course: Course): void {
           {{ store.periods[b.startPeriod - 1]?.startTime }}–{{ store.periods[b.endPeriod - 1]?.endTime }}
         </span>
         <span class="tc-main">
-          <span class="tc-name">{{ b.name }}</span>
+          <span class="tc-name">
+            {{ b.name }}
+            <AdjustBadge :block="b" />
+          </span>
           <span class="tc-loc">{{ b.location }} · {{ b.teacher }}</span>
         </span>
         <span class="tc-slot num">{{ periodsLabel(b.periods) }}</span>
       </button>
+
+      <!-- 原位置淡显：今天本有课但停课 / 调走了 -->
+      <div v-for="m in todayMarkers" :key="`marker:${m.adjustmentId}`" class="today-card today-marker reveal">
+        <span class="tc-dot faint" :style="{ background: `var(--${m.color}-text)` }"></span>
+        <span class="tc-time num faint">{{ periodsLabel(m.periods) }}</span>
+        <span class="tc-main">
+          <span class="tc-name faint">{{ m.name }}</span>
+        </span>
+        <span class="tc-slot num">{{ markerLabel(m) }}</span>
+      </div>
     </div>
 
-    <div class="today-empty" v-if="todayBlocks.length === 0">
-      今天没有排课，享受空闲时光
+    <div class="today-empty" v-if="todayBlocks.length === 0 && todayMarkers.length === 0">
+      {{ todayResolved.rule?.kind === 'holiday' ? '今天放假，没有课' : '今天没有排课，享受空闲时光' }}
     </div>
 
     <div class="today-hw" v-if="todayHomework.length">
@@ -196,6 +228,35 @@ function editCourse(course: Course): void {
   font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
   white-space: nowrap;
+}
+
+/* 今日提示条：放假 / 调休 / 有调整 */
+.today-notice {
+  margin-bottom: var(--spacing-lg);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-subtle, var(--color-bg-surface));
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.today-notice.holiday {
+  border-style: dashed;
+  color: var(--color-text-tertiary);
+}
+
+/* 原位置淡显（停课 / 已调走） */
+.today-marker {
+  border-style: dashed;
+  border-color: var(--color-border-strong);
+  box-shadow: none;
+  background: transparent;
+  cursor: default;
+}
+
+.today-marker .faint {
+  opacity: 0.55;
 }
 
 .today-empty {

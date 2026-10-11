@@ -9,6 +9,7 @@ import TimePicker from '@/components/common/TimePicker.vue'
 import DatePicker from '@/components/common/DatePicker.vue'
 import { confirm, toast } from '@/utils/ui'
 import { api, type SessionInfo, type UserInfo } from '@/api/client'
+import { WEEKDAY_LABELS, groupDayRules, rangeLabel } from '@/utils/calendar'
 import type { Period, Semester } from '@/types'
 
 const store = useScheduleStore()
@@ -16,11 +17,12 @@ const route = useRoute()
 const router = useRouter()
 
 // ================= Tab 导航 =================
-type TabKey = 'semester' | 'period' | 'reminder' | 'weather' | 'data' | 'account' | 'users'
+type TabKey = 'semester' | 'period' | 'calendar' | 'reminder' | 'weather' | 'data' | 'account' | 'users'
 
 const TABS: { key: TabKey; label: string; adminOnly?: boolean }[] = [
   { key: 'semester', label: '学期' },
   { key: 'period', label: '节次' },
+  { key: 'calendar', label: '日历' },
   { key: 'reminder', label: '提醒' },
   // 天气为全站共享配置（存管理员名下），仅管理员可修改
   { key: 'weather', label: '天气', adminOnly: true },
@@ -312,6 +314,92 @@ async function removePeriod(index: number): Promise<void> {
     )
   } catch (e) {
     toast(e instanceof Error ? e.message : '删除失败，请重试', 'error')
+  }
+}
+
+// ================= 学期日历（放假 / 调休按周几上课） =================
+// 调休只影响「某一天按谁的课表上课、当天有没有课」；基准课表不动。
+const calFrom = ref('')
+const calTo = ref('')
+const calKind = ref<'holiday' | 'follow'>('holiday')
+const calFollowWeekday = ref(1)
+const calNote = ref('')
+const calBusy = ref(false)
+const calError = ref('')
+
+const calKindOptions: AppSelectOption[] = [
+  { value: 'holiday', label: '放假（当天不上课）' },
+  { value: 'follow', label: '调休上课（按周几课表）' },
+]
+const calWeekdayOptions: AppSelectOption[] = WEEKDAY_LABELS.map((label, i) => ({ value: i + 1, label }))
+
+/** 已录入的规则按区间合并展示 */
+const calendarRanges = computed(() => groupDayRules(store.dayRules))
+
+async function submitCalendarRange(): Promise<void> {
+  calError.value = ''
+  if (!calFrom.value || !calTo.value) {
+    calError.value = '请选择起止日期'
+    return
+  }
+  if (calTo.value < calFrom.value) {
+    calError.value = '结束日期不能早于起始日期'
+    return
+  }
+  calBusy.value = true
+  try {
+    await store.setCalendarRange({
+      from: calFrom.value,
+      to: calTo.value,
+      kind: calKind.value,
+      followWeekday: calKind.value === 'follow' ? calFollowWeekday.value : undefined,
+      note: calNote.value,
+    })
+    toast(
+      calKind.value === 'holiday' ? '已设为放假' : `已设为按${WEEKDAY_LABELS[calFollowWeekday.value - 1]}课表上课`,
+      'success',
+    )
+    calFrom.value = ''
+    calTo.value = ''
+    calNote.value = ''
+  } catch (e) {
+    calError.value = e instanceof Error ? e.message : '保存失败，请重试'
+  } finally {
+    calBusy.value = false
+  }
+}
+
+async function removeCalendarRange(from: string, to: string): Promise<void> {
+  const ok = await confirm({
+    title: `清除 ${rangeLabel({ from, to })} 的日历规则？`,
+    desc: '清除后该区间恢复为正常上课（按真实星期）。',
+    danger: true,
+    confirmText: '清除',
+  })
+  if (!ok) return
+  try {
+    await store.setCalendarRange({ from, to, kind: 'clear' })
+    toast('已清除', 'success')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '清除失败，请重试', 'error')
+  }
+}
+
+async function clearWholeCalendar(): Promise<void> {
+  const sem = store.currentSemester
+  if (!sem) return
+  const ok = await confirm({
+    title: '清空本学期全部日历规则？',
+    desc: '放假与调休设置会被全部清除，课程与调整不受影响。',
+    danger: true,
+    confirmText: '清空',
+  })
+  if (!ok) return
+  try {
+    await store.setCalendarRange({ from: sem.startDate, to: sem.endDate, kind: 'clear' })
+    toast('已清空本学期日历', 'success')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '清空失败，请重试', 'error')
   }
 }
 
@@ -797,6 +885,70 @@ function formatTime(iso: string | null): string {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- 学期日历：放假 / 调休「按周几上课」（只影响某天按谁的课表上课，不改课程数据） -->
+    <div v-show="activeTab === 'calendar'" class="panel reveal">
+      <div class="panel-head">
+        <h3>学期日历 · 放假与调休</h3>
+        <button
+          v-if="store.dayRules.length"
+          class="btn-mini btn-mini--danger"
+          type="button"
+          @click="clearWholeCalendar"
+        >清空本学期</button>
+      </div>
+      <p class="panel-note panel-note--block">
+        放假：该日不上课。调休上课：该日按所选星期的课表上课（如「10月10日按周三课表」）。
+        录入后周课表、今天页、提醒都会按日历走；课程本身的时间不变。
+      </p>
+
+      <div class="cal-form">
+        <label class="edit-field">
+          <span class="edit-field__label">起始日期</span>
+          <DatePicker v-model="calFrom" size="sm" aria-label="起始日期" />
+        </label>
+        <label class="edit-field">
+          <span class="edit-field__label">结束日期</span>
+          <DatePicker v-model="calTo" size="sm" aria-label="结束日期" />
+        </label>
+        <label class="edit-field">
+          <span class="edit-field__label">类型</span>
+          <div class="select-wrap">
+            <AppSelect v-model="calKind" :options="calKindOptions" aria-label="日历类型" />
+          </div>
+        </label>
+        <label v-if="calKind === 'follow'" class="edit-field">
+          <span class="edit-field__label">按哪天的课表</span>
+          <div class="select-wrap">
+            <AppSelect v-model="calFollowWeekday" :options="calWeekdayOptions" aria-label="按哪天的课表" />
+          </div>
+        </label>
+        <label class="edit-field">
+          <span class="edit-field__label">备注（可选）</span>
+          <input v-model="calNote" class="date-input" type="text" placeholder="如：国庆节" maxlength="100" />
+        </label>
+        <button class="btn-mini btn-mini--primary" type="button" :disabled="calBusy" @click="submitCalendarRange">
+          {{ calBusy ? '保存中…' : '添加' }}
+        </button>
+      </div>
+      <p v-if="calError" class="edit-error" role="alert">{{ calError }}</p>
+
+      <div v-if="!calendarRanges.length" class="panel-note panel-note--block">
+        本学期还没有日历规则。学期范围内的日期才可录入。
+      </div>
+      <div v-for="r in calendarRanges" :key="`${r.from}:${r.to}`" class="row">
+        <span class="row-main">
+          <span class="row-title">
+            {{ rangeLabel(r) }}
+            <span class="chip">{{ r.kind === 'holiday' ? '放假' : `按${WEEKDAY_LABELS[(r.followWeekday ?? 1) - 1]}课表` }}</span>
+          </span>
+          <span class="row-meta">
+            {{ r.dates.length }} 天<span v-if="r.note"> · {{ r.note }}</span>
+          </span>
+        </span>
+        <button class="btn-mini btn-mini--danger" type="button" @click="removeCalendarRange(r.from, r.to)">清除</button>
       </div>
     </div>
 
@@ -1288,6 +1440,21 @@ function formatTime(iso: string | null): string {
   flex-wrap: wrap;
   gap: var(--spacing-md);
   margin-top: var(--spacing-sm);
+}
+
+/* 学期日历录入行：与 edit-fields 同一栅格，底部对齐 */
+.cal-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--spacing-md);
+  margin: var(--spacing-sm) 0 var(--spacing-md);
+  padding-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.cal-form .edit-field {
+  min-width: 150px;
 }
 
 .edit-field {

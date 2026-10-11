@@ -4,7 +4,9 @@ import { useScheduleStore } from '@/stores/schedule'
 import CourseBlock from './CourseBlock.vue'
 import { blockKey, computeBlockOverlapGroups, isOverlap } from '@/utils/course'
 import { periodRange } from '@/utils/session'
-import type { CourseBlock as CourseBlockModel, Weekday } from '@/types'
+import { dayRuleLabel, dateWithWeekdayLabel, markerLabel } from '@/utils/calendar'
+import { formatDate } from '@/utils/week'
+import type { CourseBlock as CourseBlockModel, DayMarker, DayRule, ResolvedBlock, Weekday } from '@/types'
 
 const store = useScheduleStore()
 
@@ -100,42 +102,45 @@ function getGrow(key: string): number {
   return growValues.value[key] ?? 1
 }
 
-type ColItem = { block: CourseBlockModel; offset: boolean; conflict: boolean }
+type ColItem = { block: ResolvedBlock; offset: boolean; conflict: boolean }
+
+/**
+ * 每列的解析结果：桌面 7 天走 store.resolvedWeek（含学期日历与单课调整），
+ * 双日视图按传入日期逐日解析。列 = 日期，不再按「星期」索引。
+ */
+const resolvedCols = computed(() => (props.days ? props.days.map((d) => store.resolvedDay(d)) : store.resolvedWeek))
 
 /** 每列课程块（仅标注是否冲突；错位布局已改为 flex 分栏） */
-const columns = computed(() => {
-  const out: ColItem[][] = []
-  for (let wd = 1; wd <= 7; wd++) {
-    const list = store.blocksByWeekday[wd as Weekday]
+const columns = computed<ColItem[][]>(() =>
+  resolvedCols.value.map((day) => {
+    const list = day.blocks
     const groups = computeBlockOverlapGroups(list)
-    out.push(
-      list.map((b) => {
-        const conflicts = groups.get(b) ?? []
-        return { block: b, offset: conflicts.length > 0 && conflicts.some((o) => blockKey(o) > blockKey(b)), conflict: conflicts.length > 0 }
-      }),
-    )
-  }
-  return out
-})
+    return list.map((b) => {
+      const conflicts = groups.get(b) ?? []
+      return {
+        block: b,
+        offset: conflicts.length > 0 && conflicts.some((o) => blockKey(o) > blockKey(b)),
+        conflict: conflicts.length > 0,
+      }
+    })
+  }),
+)
+
+/** 实际渲染的列（列 = 日期） */
+const displayColumns = computed(() => columns.value)
 
 /** 非冲突课程（单独渲染，跨全列） */
 const soloItems = (idx: number): ColItem[] => columns.value[idx].filter((i) => !i.conflict)
 
-/** 双日视图列（移动端）：按传入日期逐日过滤课程块（跨周正确） */
-const mobileColumns = computed<ColItem[][]>(() => {
-  const days = props.days ?? []
-  return days.map((date) => {
-    const list = store.coursesOfDate(date)
-    const groups = computeBlockOverlapGroups(list)
-    return list.map((b) => {
-      const conflicts = groups.get(b) ?? []
-      return { block: b, offset: conflicts.length > 0 && conflicts.some((o) => blockKey(o) > blockKey(b)), conflict: conflicts.length > 0 }
-    })
-  })
-})
+/** 该列的原位置淡显标记（停课 / 已调走） */
+function markersOf(idx: number): DayMarker[] {
+  return resolvedCols.value[idx]?.markers ?? []
+}
 
-/** 实际渲染的列：双日视图用 mobileColumns，桌面用 7 天 columns */
-const displayColumns = computed(() => (props.days ? mobileColumns.value : columns.value))
+/** 该列的日历规则（假期 / 调休按周几上课） */
+function dayRuleOf(idx: number): DayRule | null {
+  return resolvedCols.value[idx]?.rule ?? null
+}
 
 /** 第 idx 列对应的日期（双日视图用传入日期，桌面用周内日期） */
 function dayOf(idx: number): Date {
@@ -213,10 +218,12 @@ onBeforeUnmount(() => {
 // 保持原跨节宽度，允许与已有课程重叠（沿用冲突分栏约定）
 // ============================================================
 const gridEl = ref<HTMLElement | null>(null)
-const draggingBlock = ref<CourseBlockModel | null>(null)
+const draggingBlock = ref<ResolvedBlock | null>(null)
 const dragSource = ref<{ startPeriod: number; endPeriod: number } | null>(null)
+/** 被拖动块所在列的日期（原上课日，落库时写进调整记录） */
+const dragSourceDate = ref<string>('')
 const dragPos = ref<{ x: number; y: number } | null>(null)
-const dragTarget = ref<{ weekday: Weekday; startPeriod: number; endPeriod: number } | null>(null)
+const dragTarget = ref<{ colIndex: number; weekday: Weekday; startPeriod: number; endPeriod: number } | null>(null)
 const suppressClickUntil = ref(0)
 
 /** 目标格在 grid 内的绝对定位框（高亮预览） */
@@ -225,7 +232,7 @@ const targetBox = computed(() => {
   const grid = gridEl.value
   if (!t || !grid) return null
   const dayCols = Array.from(grid.querySelectorAll('.day-col'))
-  const col = dayCols[t.weekday - 1]
+  const col = dayCols[t.colIndex >= 0 ? t.colIndex : t.weekday - 1]
   if (!col) return null
   const gridRect = grid.getBoundingClientRect()
   const colRect = col.getBoundingClientRect()
@@ -248,10 +255,11 @@ const MOVE_THRESHOLD_PX = 8
 const HEADER_H = 44 // day-head 高度（网格首行）
 
 /** 课程卡 pointerdown：启动长按计时，进入潜在拖拽（双日视图禁用拖拽，避免与滑动冲突） */
-function onBlockPointerDown(block: CourseBlockModel, e: PointerEvent): void {
+function onBlockPointerDown(block: CourseBlockModel, e: PointerEvent, sourceDate: Date): void {
   if (props.days) return
   if (!block.periods.length) return
   dragAnchor = { x: e.clientX, y: e.clientY, active: true }
+  dragSourceDate.value = formatDate(sourceDate)
   suppressClickUntil.value = 0
   if (longPressTimer !== null) window.clearTimeout(longPressTimer)
   longPressTimer = window.setTimeout(() => beginDrag(block), LONG_PRESS_MS)
@@ -263,10 +271,11 @@ function onBlockPointerDown(block: CourseBlockModel, e: PointerEvent): void {
 /** 长按达成：进入拖拽模式（原卡半透明占位 + 幽灵卡跟随） */
 function beginDrag(block: CourseBlockModel): void {
   if (!dragAnchor.active) return
-  draggingBlock.value = block
+  draggingBlock.value = block as ResolvedBlock
   dragSource.value = { startPeriod: block.startPeriod, endPeriod: block.endPeriod }
   dragPos.value = { x: dragAnchor.x, y: dragAnchor.y }
   dragTarget.value = {
+    colIndex: -1,
     weekday: block.weekday,
     startPeriod: block.startPeriod,
     endPeriod: block.endPeriod,
@@ -354,20 +363,26 @@ function onSwipePointerCancel(): void {
 /** 学期实际节次数（拖拽落位与行高计算的上限，随用户自定义节次变化） */
 const periodCount = computed(() => (store.periods.length > 0 ? store.periods.length : 12))
 
-/** 指针坐标 → 目标格子（保持跨节宽度，clamp 到 1..periodCount） */
-function findTargetCell(clientX: number, clientY: number): { weekday: Weekday; startPeriod: number; endPeriod: number } | null {
+/**
+ * 指针坐标 → 目标格子（保持跨节宽度，clamp 到 1..periodCount）。
+ * 列索引一并返回：列 = 日期，落库时要把「拖到哪一天」写进调整记录。
+ */
+function findTargetCell(
+  clientX: number,
+  clientY: number,
+): { colIndex: number; weekday: Weekday; startPeriod: number; endPeriod: number } | null {
   const grid = gridEl.value
   if (!grid) return null
   const dayCols = Array.from(grid.querySelectorAll('.day-col'))
-  let weekday: Weekday | null = null
+  let colIndex = -1
   for (let i = 0; i < dayCols.length; i++) {
     const r = dayCols[i].getBoundingClientRect()
     if (clientX >= r.left && clientX < r.right) {
-      weekday = (i + 1) as Weekday
+      colIndex = i
       break
     }
   }
-  if (weekday === null || !dragSource.value) return null
+  if (colIndex < 0 || !dragSource.value) return null
   const gridRect = grid.getBoundingClientRect()
   const relY = clientY - gridRect.top
   const rowH = getRowHeight()
@@ -380,7 +395,7 @@ function findTargetCell(clientX: number, clientY: number): { weekday: Weekday; s
     start = Math.max(1, maxPeriod - span + 1)
     end = maxPeriod
   }
-  return { weekday, startPeriod: start, endPeriod: end }
+  return { colIndex, weekday: weekdayOf(colIndex), startPeriod: start, endPeriod: end }
 }
 
 /** 实测行高（像素），回退 52 */
@@ -405,20 +420,19 @@ function targetPeriods(target: { startPeriod: number; endPeriod: number }): numb
 }
 
 /**
- * 落库：只改动被拖动的那个上课时间块。
- * 该块本周若上课 → 把它本周的格子移到新位置（同组其余周次不动）；
- * 该块本周若不上课（周次里没有本周）→ 在目标位置追加本周格子。
- * 不再像旧实现那样「缩小原行 + 新增一行散课程」，因此课程组始终唯一、不会被拆散。
+ * 落库：不再改写基准课表，而是写一条「调课」调整记录（可撤销）。
+ * - 基础块：原日 = 所在列日期，原时间组 =（星期 + 完整节次），目标 = 落点日期 + 节次
+ * - 已经是「调来 / 补课」的块：改这条调整记录的目标（补课块只改时间，不改来源）
+ * 基准课表（course_slot）只读不动，因此原课表永远保留，撤销即恢复。
  */
 async function applyDrag(
-  block: CourseBlockModel,
-  target: { weekday: Weekday; startPeriod: number; endPeriod: number },
+  block: ResolvedBlock,
+  target: { colIndex: number; weekday: Weekday; startPeriod: number; endPeriod: number },
 ): Promise<void> {
-  const weekNo = store.weekNumber
   const slot = target.endPeriod > target.startPeriod ? `第 ${target.startPeriod}–${target.endPeriod} 节` : `第 ${target.startPeriod} 节`
   let step = '准备调整'
   try {
-    if (!Number.isInteger(target.weekday) || !Number.isInteger(target.startPeriod) || !Number.isInteger(target.endPeriod)) {
+    if (!Number.isInteger(target.startPeriod) || !Number.isInteger(target.endPeriod)) {
       throw new Error('目标节次无效，请重新拖到课表格内')
     }
     const course = store.courses.find((c) => c.id === block.id)
@@ -427,74 +441,59 @@ async function applyDrag(
     const newPeriods = targetPeriods(target)
     if (!newPeriods.length) throw new Error('目标节次无效')
 
-    // 定位被拖动的上课时间组。sessionId 由服务端在每次写入时重建（replaceCourseSessions
-    // 先删再建），若本地 courses 已过期可能与服务端不一致；此时退回按
-    // 「星期 + 完整节次」匹配，避免 source 落空导致「旧块未删 + 新块追加」的静默重复。
-    let source = course.sessions.find((s) => s.id === block.sessionId)
-    if (!source) {
-      const bySlot = course.sessions.filter(
-        (s) => s.weekday === block.weekday && s.periods.join('.') === block.allPeriods.join('.'),
-      )
-      // 仅在该组合唯一时采用回退匹配，避免误改其他时间组
-      if (bySlot.length === 1) source = bySlot[0]
-    }
-    if (!source) {
-      throw new Error('课程数据已变化，请刷新页面后重试')
-    }
+    const targetDate = target.colIndex >= 0 ? formatDate(dayOf(target.colIndex)) : dragSourceDate.value
+    const targetLabel = dateWithWeekdayLabel(targetDate)
 
-    step = weekNo === null ? '更新课程' : '调整本周课程'
-    const sessions = course.sessions.map((s) => {
-      if (weekNo === null) {
-        // 假期/无周号：整块移动（全部周次跟着走）
-        if (s === source) {
-          return { ...s, weekday: target.weekday, periods: newPeriods }
-        }
-        return s
-      }
-      if (s === source) {
-        // 本周上课：移除本周格子；同组其余周次保留在原位置
-        const weeks = s.weeks.filter((w) => w !== weekNo)
-        return { ...s, weeks }
-      }
-      return s
-    })
-    const cleaned = sessions.filter((s) => s.weeks.length > 0)
-
-    if (weekNo !== null) {
-      // 在目标位置追加本周格子
-      const reuse = cleaned.find(
-        (s) => s.weekday === target.weekday && s.periods.join('.') === newPeriods.join('.'),
-      )
-      if (reuse) {
-        reuse.weeks = [...new Set([...reuse.weeks, weekNo])].sort((a, b) => a - b)
-      } else {
-        cleaned.push({
-          weekday: target.weekday,
-          location: block.location ?? '',
+    // 已经由调整而来的块：改这条调整的目标（不再新增）
+    if (block.adjustmentId) {
+      step = '更新调整'
+      if (block.source === 'moved') {
+        await store.updateAdjustment(block.adjustmentId, {
+          kind: 'move',
+          date: block.fromDate ?? dragSourceDate.value,
+          fromWeekday: block.fromWeekday ?? block.weekday,
+          fromPeriods: block.fromPeriods ?? [],
+          toDate: targetDate,
           periods: newPeriods,
-          weeks: [weekNo],
+          location: block.location,
+          note: block.adjustmentNote ?? '',
         })
+        void import('@/utils/ui').then(({ toast }) => toast(`已改为 ${targetLabel} ${slot}`, 'success'))
+      } else {
+        await store.updateAdjustment(block.adjustmentId, {
+          kind: 'extra',
+          date: targetDate,
+          periods: newPeriods,
+          location: block.location,
+          note: block.adjustmentNote ?? '',
+        })
+        void import('@/utils/ui').then(({ toast }) => toast(`补课时间已改为 ${targetLabel} ${slot}`, 'success'))
       }
+      return
     }
 
-    await store.updateCourse(course.id, {
-      type: course.type,
-      name: course.name,
-      teacher: course.teacher,
-      location: course.location,
-      color: course.color,
-      remark: course.remark,
-      sessions: cleaned.map((s) => ({
-        weekday: s.weekday,
-        location: s.location ?? '',
-        periods: s.periods,
-        weeks: s.weeks,
-      })),
+    if (targetDate === dragSourceDate.value) {
+      void import('@/utils/ui').then(({ toast }) => toast('位置没有变化', 'info'))
+      return
+    }
+
+    // 基础块：写一条调课记录（原位置自动淡显「已调至 …」，可在课程详情里撤销）
+    step = '登记调课'
+    await store.addAdjustment({
+      courseId: course.id,
+      date: dragSourceDate.value,
+      kind: 'move',
+      fromWeekday: block.weekday,
+      fromPeriods: block.allPeriods,
+      toDate: targetDate,
+      periods: newPeriods,
+      location: block.location,
+      note: '',
     })
-    const msg = weekNo === null
-      ? `已调整至 ${DAY_LABELS[target.weekday - 1]} ${slot}`
-      : `本周已调整至 ${DAY_LABELS[target.weekday - 1]} ${slot}，其余周不变`
-    void import('@/utils/ui').then(({ toast }) => toast(msg, 'success'))
+    const fromLabel = dateWithWeekdayLabel(dragSourceDate.value)
+    void import('@/utils/ui').then(({ toast }) =>
+      toast(`已调课：${fromLabel} → ${targetLabel} ${slot}（可在课程详情撤销）`, 'success'),
+    )
   } catch (error) {
     const message = error instanceof Error ? error.message : '未知错误'
     console.error('[WeekGrid] 调整课程失败', { step, courseId: block.id, target, error })
@@ -544,6 +543,12 @@ const rowHeight = computed(() => {
         <div class="wd">
           {{ DAY_LABELS[dayOf(idx).getDay() === 0 ? 6 : dayOf(idx).getDay() - 1] }}
           <span v-if="isTodayCol(idx)" class="pill">今天</span>
+          <!-- 学期日历角标：假期 / 调休按周几上课（整天级别，与课程级「调课」角标并存） -->
+          <span
+            v-if="dayRuleOf(idx)"
+            class="pill rule"
+            :class="{ holiday: dayRuleOf(idx)?.kind === 'holiday' }"
+          >{{ dayRuleLabel(dayRuleOf(idx)) }}</span>
         </div>
         <div class="dt num">{{ dayOf(idx).getMonth() + 1 }}/{{ dayOf(idx).getDate() }}</div>
       </div>
@@ -562,6 +567,23 @@ const rowHeight = computed(() => {
         @click="emit('create', { weekday: weekdayOf(idx), period: p.index })"
       ></button>
 
+      <!-- 原位置淡显标记：这一天本有课但停课 / 调走了（不参与冲突检测与统计） -->
+      <button
+        v-for="m in markersOf(idx)"
+        v-show="m.periods.length"
+        :key="'m-' + m.adjustmentId"
+        class="slot-marker"
+        type="button"
+        :style="{
+          gridRow: `${m.periods[0] + 1} / ${m.periods[m.periods.length - 1] + 2}`,
+          gridColumn: '1',
+        }"
+        @click="handleOpen(m.courseId)"
+      >
+        <span class="marker-name">{{ m.name }}</span>
+        <span class="marker-label">{{ markerLabel(m) }}</span>
+      </button>
+
       <!-- 非冲突课程：跨全列 -->
       <CourseBlock
         v-for="item in soloItems(idx)"
@@ -572,7 +594,7 @@ const rowHeight = computed(() => {
         }"
         :course="item.block"
         :dragging="draggingBlock ? blockKey(draggingBlock) === blockKey(item.block) : false"
-        @pointerdown="(e: PointerEvent) => onBlockPointerDown(item.block, e)"
+        @pointerdown="(e: PointerEvent) => onBlockPointerDown(item.block, e, dayOf(idx))"
         @open="handleOpen"
       />
 
@@ -594,7 +616,7 @@ const rowHeight = computed(() => {
           :collapsed="getGrow(blockKey(item.block)) < Math.max(...group.map((c) => getGrow(blockKey(c.block)))) - 0.01"
           :course="item.block"
           :dragging="draggingBlock ? blockKey(draggingBlock) === blockKey(item.block) : false"
-          @pointerdown="(e: PointerEvent) => onBlockPointerDown(item.block, e)"
+          @pointerdown="(e: PointerEvent) => onBlockPointerDown(item.block, e, dayOf(idx))"
           @mouseenter="handleHoverEnter(blockKey(item.block))"
           @open="handleOpen"
         />
@@ -809,6 +831,55 @@ const rowHeight = computed(() => {
   border-radius: var(--radius-full);
   padding: 1px 6px;
   font-weight: var(--font-weight-medium);
+}
+
+/* 学期日历角标（假期 / 调休按周几课表）：中性描边，不抢「今天」的强调色 */
+.pill.rule {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-strong);
+  white-space: nowrap;
+}
+
+.pill.rule.holiday {
+  border-style: dashed;
+  color: var(--color-text-tertiary);
+}
+
+/* 原位置淡显标记：停课 / 已调走的课（虚线 + 低透明度，不参与冲突与统计） */
+.slot-marker {
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  margin: var(--spacing-2xs);
+  padding: var(--spacing-sm);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  min-width: 0;
+  opacity: 0.62;
+  cursor: pointer;
+}
+
+.marker-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-tertiary);
+  text-decoration: line-through;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.marker-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 今天列底色 */

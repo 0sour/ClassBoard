@@ -104,6 +104,35 @@ CREATE TABLE IF NOT EXISTS setting (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- 学期日历：日期级规则（放假 / 调休按周几上课）。
+-- 区间录入时逐日展开存储，列表展示再合并成区间（与「逐项展开存储、读取时派生」一致）。
+CREATE TABLE IF NOT EXISTS semester_day_rule (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  semester_id INTEGER NOT NULL REFERENCES semester(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('holiday', 'follow')),
+  follow_weekday INTEGER,
+  note TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_day_rule_unique ON semester_day_rule (semester_id, date);
+
+-- 单课日期调整：停课 / 调课 / 补课。基准课表（course_slot）不改动，读取时叠加。
+CREATE TABLE IF NOT EXISTS course_adjustment (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER NOT NULL REFERENCES course(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('cancel', 'move', 'extra')),
+  from_weekday INTEGER,
+  from_periods TEXT NOT NULL DEFAULT '[]',
+  to_date TEXT,
+  periods TEXT NOT NULL DEFAULT '[]',
+  location TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_adjust_course_date ON course_adjustment (course_id, date);
+CREATE INDEX IF NOT EXISTS idx_adjust_to_date ON course_adjustment (to_date);
 `)
 
 // ============================================================
@@ -596,6 +625,35 @@ export function toHomework(row) {
     dueAt: row.due_at,
     done: !!row.done,
     remark: row.remark,
+  }
+}
+
+/** 学期日历规则行 → API 对象 */
+export function toDayRule(row) {
+  return {
+    id: row.id,
+    semesterId: row.semester_id,
+    date: row.date,
+    kind: row.kind,
+    followWeekday: row.follow_weekday,
+    note: row.note,
+  }
+}
+
+/** 单课调整行 → API 对象（节次为逐项整数数组） */
+export function toAdjustment(row) {
+  return {
+    id: row.id,
+    courseId: row.course_id,
+    date: row.date,
+    kind: row.kind,
+    fromWeekday: row.from_weekday,
+    fromPeriods: normalizeInts(safeParseInts(row.from_periods)),
+    toDate: row.to_date,
+    periods: normalizeInts(safeParseInts(row.periods)),
+    location: row.location,
+    note: row.note,
+    createdAt: row.created_at,
   }
 }
 

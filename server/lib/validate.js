@@ -196,6 +196,85 @@ export function validateHomework(body) {
   }
 }
 
+export const ADJUSTMENT_KINDS = ['cancel', 'move', 'extra']
+
+/**
+ * 单课日期调整校验。
+ * 结构：{ courseId, date, kind, fromWeekday, fromPeriods[], toDate, periods[], location, note }
+ * - cancel：停课——date 为原上课日，fromWeekday + fromPeriods 定位原时间组
+ * - move  ：调课——原时间组同 cancel 规则，另加 toDate + periods（目标）
+ * - extra ：补课——date 为补课日 + periods（目标）
+ * periods / fromPeriods 一律为逐项展开的整数数组。
+ */
+export function validateAdjustment(body, { maxPeriod = MAX_PERIODS, semester = null } = {}) {
+  const issues = []
+  const inSemester = (d) => !semester || (d >= semester.start_date && d <= semester.end_date)
+
+  const kind = body.kind
+  if (!ADJUSTMENT_KINDS.includes(kind)) {
+    issues.push({ field: 'kind', message: 'kind 须为 cancel / move / extra' })
+  }
+
+  const date = body.date
+  if (!(typeof date === 'string' && isValidDate(date))) {
+    issues.push({ field: 'date', message: '日期格式须为 YYYY-MM-DD' })
+  } else if (!inSemester(date)) {
+    issues.push({ field: 'date', message: '日期须在学期范围内' })
+  }
+
+  let fromWeekday = null
+  let fromPeriods = []
+  if (kind === 'cancel' || kind === 'move') {
+    if (![1, 2, 3, 4, 5, 6, 7].includes(body.fromWeekday)) {
+      issues.push({ field: 'fromWeekday', message: '原时间组星期须为 1-7' })
+    } else {
+      fromWeekday = body.fromWeekday
+    }
+    fromPeriods = normalizeInts(body.fromPeriods)
+    if (!fromPeriods.length || fromPeriods.some((p) => p > maxPeriod)) {
+      issues.push({ field: 'fromPeriods', message: `原时间组节次须为 1-${maxPeriod} 的整数数组且非空` })
+    }
+  }
+
+  let toDate = null
+  if (kind === 'move') {
+    if (!(typeof body.toDate === 'string' && isValidDate(body.toDate))) {
+      issues.push({ field: 'toDate', message: '目标日期格式须为 YYYY-MM-DD' })
+    } else if (!inSemester(body.toDate)) {
+      issues.push({ field: 'toDate', message: '目标日期须在学期范围内' })
+    } else {
+      toDate = body.toDate
+    }
+  }
+
+  let periods = []
+  if (kind === 'move' || kind === 'extra') {
+    periods = normalizeInts(body.periods)
+    if (!periods.length || periods.some((p) => p > maxPeriod)) {
+      issues.push({ field: 'periods', message: `目标节次须为 1-${maxPeriod} 的整数数组且非空` })
+    }
+  }
+
+  if (body.location != null && String(body.location).length > 50) {
+    issues.push({ field: 'location', message: '地点长度须 ≤ 50' })
+  }
+  if (body.note != null && String(body.note).length > 200) {
+    issues.push({ field: 'note', message: '备注长度须 ≤ 200' })
+  }
+
+  if (issues.length) throw badRequest('调整字段校验失败', issues)
+  return {
+    date,
+    kind,
+    fromWeekday,
+    fromPeriods,
+    toDate,
+    periods,
+    location: typeof body.location === 'string' ? body.location : '',
+    note: typeof body.note === 'string' ? body.note : '',
+  }
+}
+
 /** 设置校验（部分字段写） */
 export function validateSettingsPatch(body) {
   const out = {}

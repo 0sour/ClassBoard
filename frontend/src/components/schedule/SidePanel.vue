@@ -25,11 +25,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize))
 // 组合卡：待交作业 / 实践与其他 分段切换（样式同顶栏视图切换 seg）
 const panelTab = ref<'hw' | 'practice'>('hw')
 
-// 今日课程数：按今天真实所在周统计，不随周视图切换变化
-const todayCourseCount = computed(() => {
-  const wd = ((store.today.getDay() + 6) % 7 + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7
-  return store.todayCoursesByWeekday[wd].length
-})
+// 今日课程数：走统一解析（放假 / 调休按周几课表 / 调课与补课），不随周视图切换变化
+const todayCourseCount = computed(() => store.todayResolved.blocks.length)
 
 const courseCount = computed(() => store.visibleCourseBlocks.length)
 const labCount = computed(() => store.visibleCourseBlocks.filter((c) => c.type === 'lab').length)

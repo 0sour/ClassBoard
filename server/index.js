@@ -18,6 +18,8 @@ import { contextRouter, scheduleRouter } from './routes/schedule.js'
 import { semestersRouter } from './routes/semesters.js'
 import { periodsRouter } from './routes/periods.js'
 import { coursesRouter } from './routes/courses.js'
+import { calendarRouter } from './routes/calendar.js'
+import { adjustmentsRouter } from './routes/adjustments.js'
 import { examsRouter } from './routes/exams.js'
 import { homeworkRouter } from './routes/homework.js'
 import { importRouter } from './routes/import.js'
@@ -47,6 +49,8 @@ app.use('/api/schedule', requireSession, scheduleRouter)
 app.use('/api/semesters', requireSession, semestersRouter)
 app.use('/api/periods', requireSession, periodsRouter)
 app.use('/api/courses', requireSession, coursesRouter)
+app.use('/api/calendar', requireSession, calendarRouter)
+app.use('/api/adjustments', requireSession, adjustmentsRouter)
 app.use('/api/exams', requireSession, examsRouter)
 app.use('/api/homework', requireSession, homeworkRouter)
 app.use('/api/import', requireSession, importRouter)

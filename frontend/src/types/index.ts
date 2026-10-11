@@ -109,6 +109,90 @@ export interface Homework {
   remark: string
 }
 
+/**
+ * 学期日历规则（日期级）：
+ * - holiday：该日放假（当天不上课）
+ * - follow ：该日按「周几的课表」上课（调休补班），followWeekday 为 1..7
+ * 存储按日期逐日展开，展示时合并成区间。
+ */
+export interface DayRule {
+  id: number
+  semesterId: number
+  date: string // YYYY-MM-DD
+  kind: 'holiday' | 'follow'
+  followWeekday: Weekday | null
+  note: string
+}
+
+/** 单课调整类型：停课 / 调课 / 补课 */
+export type AdjustmentKind = 'cancel' | 'move' | 'extra'
+
+/**
+ * 单课日期调整（基准课表之上的日期覆盖层，不改动 course_slot）。
+ * - cancel：date 当天该时间组停课
+ * - move  ：date 当天该时间组的课改到 toDate 的 periods
+ * - extra ：date（补课日）额外上一次 periods
+ * fromWeekday/fromPeriods 定位原时间组（extra 不使用）。
+ */
+export interface CourseAdjustment {
+  id: number
+  courseId: number
+  date: string
+  kind: AdjustmentKind
+  fromWeekday: Weekday | null
+  fromPeriods: number[]
+  toDate: string | null
+  periods: number[]
+  location: string
+  note: string
+  createdAt: string
+}
+
+/** 课程块的来源：基准课表 / 由其他日期调来 / 补课 */
+export type BlockSource = 'base' | 'moved' | 'extra'
+
+/**
+ * 解析后的课程块：在 CourseBlock 之上附加「来源」信息，
+ * 供所有显示面（周网格 / 日卡 / 今天页 / 铃铛 / 侧栏 / 提醒）统一标记「这门课是调过来的」。
+ */
+export interface ResolvedBlock extends CourseBlock {
+  source: BlockSource
+  /** 调课来源：原日期与原时间组（source = 'moved'） */
+  fromDate?: string
+  fromWeekday?: Weekday | null
+  fromPeriods?: number[]
+  /** 关联的调整记录（可撤销） */
+  adjustmentId?: number
+  /** 调整备注 */
+  adjustmentNote?: string
+}
+
+/** 原位置标记：被停课 / 被调走的课，在原来的那天留一个淡显标记 */
+export interface DayMarker {
+  courseId: number
+  name: string
+  color: string
+  weekday: Weekday
+  periods: number[]
+  kind: 'cancel' | 'move'
+  /** 调课目标（kind = 'move'） */
+  toDate: string | null
+  toPeriods: number[]
+  note: string
+  adjustmentId: number
+}
+
+/** 某一天解析结果：实际发生的课程块 + 原位置标记 + 该日日历规则 */
+export interface ResolvedDay {
+  date: string
+  weekNumber: number | null
+  /** 当天实际上课采用的星期（假期为 null） */
+  effectiveWeekday: Weekday | null
+  rule: DayRule | null
+  blocks: ResolvedBlock[]
+  markers: DayMarker[]
+}
+
 /** 课程色板 */
 export const COURSE_COLOR_NAMES = [
   'course-1',

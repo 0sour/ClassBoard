@@ -1,7 +1,7 @@
 // ============================================================
 // ClassBoard · REST API 客户端（与 server 契约一一对应）
 // ============================================================
-import type { Course, Exam, Homework, Period, Semester } from '@/types'
+import type { Course, CourseAdjustment, DayRule, Exam, Homework, Period, Semester } from '@/types'
 import type { ImportRow } from '@/utils/pdf'
 
 const BASE = '/api'
@@ -124,6 +124,22 @@ export interface CoursePayload {
   }[]
 }
 
+/** 单课调整请求体（节次为逐项数组） */
+export interface AdjustmentPayload {
+  courseId: number
+  date: string
+  kind: 'cancel' | 'move' | 'extra'
+  /** cancel/move：定位原时间组 */
+  fromWeekday?: number | null
+  fromPeriods?: number[]
+  /** move：目标日期 */
+  toDate?: string | null
+  /** move/extra：目标节次 */
+  periods?: number[]
+  location?: string
+  note?: string
+}
+
 export const api = {
   getContext: () => request<ContextResponse>('/context'),
 
@@ -166,6 +182,27 @@ export const api = {
 
   deleteCourse: (id: number) =>
     request<void>(`/courses/${id}`, { method: 'DELETE' }),
+
+  // ---- 学期日历（放假 / 调休按周几上课）----
+  listDayRules: (semesterId?: number) =>
+    request<DayRule[]>(`/calendar${semesterId ? `?semesterId=${semesterId}` : ''}`),
+
+  /** 区间设置日历规则：kind='clear' 清除该区间；返回该学期全部规则 */
+  setCalendarRange: (body: { semesterId: number; from: string; to: string; kind: 'holiday' | 'follow' | 'clear'; followWeekday?: number; note?: string }) =>
+    request<DayRule[]>('/calendar', { method: 'PUT', body: JSON.stringify(body) }),
+
+  // ---- 单课调整（停课 / 调课 / 补课）----
+  listAdjustments: (semesterId?: number) =>
+    request<CourseAdjustment[]>(`/adjustments${semesterId ? `?semesterId=${semesterId}` : ''}`),
+
+  createAdjustment: (body: AdjustmentPayload) =>
+    request<CourseAdjustment>('/adjustments', { method: 'POST', body: JSON.stringify(body) }),
+
+  updateAdjustment: (id: number, body: Omit<AdjustmentPayload, 'courseId'>) =>
+    request<CourseAdjustment>(`/adjustments/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+  deleteAdjustment: (id: number) =>
+    request<void>(`/adjustments/${id}`, { method: 'DELETE' }),
 
   // ---- 考试 ----
   listExams: (semesterId?: number) =>

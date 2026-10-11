@@ -7,15 +7,15 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import {
   api,
-  type ScheduleCourseBlock,
   type ScheduleResponse,
   type SettingsPayload,
   type UserInfo,
   type WeatherData,
 } from '@/api/client'
-import type { Course, CourseBlock, Exam, Homework, Period, Semester, Weekday } from '@/types'
+import type { Course, CourseAdjustment, CourseBlock, DayRule, Exam, Homework, Period, ResolvedDay, Semester, Weekday } from '@/types'
+import type { AdjustmentPayload } from '@/api/client'
 import { pickCourseColor } from '@/utils/course'
-import { courseBlocks, normalizeServerBlock, runsOf, toBlocks } from '@/utils/session'
+import { resolveDay, resolveDays, ruleMapOf, type ResolveContext } from '@/utils/calendar'
 import type { ImportRow } from '@/utils/pdf'
 import {
   calcWeekNumber,
@@ -27,32 +27,6 @@ import {
   toMonday,
   weekDates,
 } from '@/utils/week'
-
-/** 服务端课程块 → 前端 CourseBlock */
-function serverBlockToBlock(raw: ScheduleCourseBlock): CourseBlock {
-  // 服务端的 startPeriod/endPeriod 基于「本周节次」，跨节课程在部分周会缩水；
-  // 网格定位与冲突检测统一用完整节次（allPeriods），保证块位置不随切周跳变。
-  const allPeriods = raw.allPeriods?.length ? raw.allPeriods : raw.periods
-  return normalizeServerBlock({
-    id: raw.id,
-    sessionId: raw.sessionId,
-    semesterId: raw.semesterId,
-    type: raw.type,
-    name: raw.name,
-    teacher: raw.teacher,
-    location: raw.location,
-    color: raw.color,
-    remark: raw.remark,
-    weekday: raw.weekday as Weekday,
-    periods: raw.periods,
-    startPeriod: allPeriods.length ? allPeriods[0] : raw.startPeriod,
-    endPeriod: allPeriods.length ? allPeriods[allPeriods.length - 1] : raw.endPeriod,
-    runs: runsOf(raw.periods),
-    allPeriods,
-    weeks: [],
-    active: true,
-  })
-}
 
 /** 课程写入载荷（元数据 + 上课时间组） */
 export interface CourseWritePayload {
@@ -75,6 +49,10 @@ export const useScheduleStore = defineStore('schedule', () => {
   // 事项状态（考试 / 作业，当前学期全量）
   const exams = ref<Exam[]>([])
   const homework = ref<Homework[]>([])
+
+  // 学期日历（放假 / 调休按周几上课）与单课调整（停课 / 调课 / 补课）
+  const dayRules = ref<DayRule[]>([])
+  const adjustments = ref<CourseAdjustment[]>([])
 
   // 周视图状态
   const weekOffset = ref(0) // 0=当前周，-1=上一周
@@ -174,44 +152,41 @@ export const useScheduleStore = defineStore('schedule', () => {
     return `${formatMonthDay(mon)}–${formatMonthDay(sun)}`
   })
 
+  /** 日历规则按日期索引 */
+  const rulesByDate = computed(() => ruleMapOf(dayRules.value))
+
+  /** 解析上下文：课程 / 日历规则 / 单课调整（唯一解析入口 resolveDay 的输入） */
+  const resolveCtx = computed<ResolveContext>(() => ({
+    semester: currentSemester.value,
+    courses: courses.value.filter((c) => c.semesterId === currentSemesterId.value),
+    rules: rulesByDate.value,
+    adjustments: adjustments.value,
+    ignoreWeeks: !showOddEvenFilter.value,
+  }))
+
+  /** 解析任意一天（手机滑动日卡 / 今天页 / 提醒） */
+  function resolvedDayOf(date: Date): ResolvedDay {
+    return resolveDay(date, resolveCtx.value)
+  }
+
+  /** 展示周 7 天的解析结果（桌面周网格按日期列渲染） */
+  const resolvedWeek = computed<ResolvedDay[]>(() => resolveDays(weekDays.value, resolveCtx.value))
+
   /**
-   * 展示周的课程块：remote 模式用服务端按周聚合的结果；
-   * 本地模式由课程组按周号派生（周次数组包含即出现）。
+   * 展示周的课程块（含单课调整结果）。
+   * remote 模式与本地模式同源：由课程时间组派生后叠加日历与调整，
+   * 保证桌面网格、手机日卡、今天页看到的是同一份数据。
    */
-  const visibleCourseBlocks = computed<CourseBlock[]>(() => {
-    if (remote.value && weekContext.value) {
-      return weekContext.value.courses.map(serverBlockToBlock)
-    }
-    const wn = weekNumber.value
-    if (wn === null) return []
-    if (!showOddEvenFilter.value) {
-      // 开关关闭：显示全部课程（忽略周次过滤）
-      return courses.value
-        .filter((c) => c.semesterId === currentSemesterId.value)
-        .flatMap((c) => courseBlocks(c))
-    }
-    return courses.value
-      .filter((c) => c.semesterId === currentSemesterId.value)
-      .flatMap((c) => toBlocks(c, wn).filter((b) => b.active))
-  })
+  const visibleCourseBlocks = computed<CourseBlock[]>(() => resolvedWeek.value.flatMap((d) => d.blocks))
 
-  /** 按星期分组（渲染单位：课程块） */
-  const blocksByWeekday = computed<Record<Weekday, CourseBlock[]>>(() => {
-    const map = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [] } as Record<Weekday, CourseBlock[]>
-    for (const b of visibleCourseBlocks.value) map[b.weekday].push(b)
-    return map
-  })
-
-
-  /** 任意日期的课程块（双日视图用）：按该日所在周独立过滤 */
+  /** 任意日期的课程块（手机滑动日卡 / 双日视图用）：走同一套解析（含调休与单课调整） */
   function coursesOfDate(date: Date): CourseBlock[] {
-    const wd = getWeekday(date)
-    const info = weekInfoOf(date)
-    if (info.weekNumber === null || info.weekNumber === 0) return []
-    return courses.value
-      .filter((c) => c.semesterId === currentSemesterId.value)
-      .flatMap((c) => toBlocks(c, info.weekNumber))
-      .filter((b) => b.active && b.weekday === wd)
+    return resolvedDayOf(date).blocks
+  }
+
+  /** 任意日期的解析结果（需要标记 / 规则信息时用） */
+  function resolvedDay(date: Date): ResolvedDay {
+    return resolvedDayOf(date)
   }
 
   /** 今天真实日期所在周的周号 */
@@ -220,23 +195,11 @@ export const useScheduleStore = defineStore('schedule', () => {
     return currentSemester.value ? calcWeekNumber(toMonday(today.value), currentSemester.value) : null
   })
 
-  /** 今天所在周的可见课程块 */
-  const todayCourseBlocks = computed<CourseBlock[]>(() => {
-    if (remote.value && todayContext.value) return todayContext.value.courses.map(serverBlockToBlock)
-    const wn = todayWeekNumber.value
-    if (wn === null) return []
-    return courses.value
-      .filter((c) => c.semesterId === currentSemesterId.value)
-      .flatMap((c) => toBlocks(c, wn).filter((b) => b.active))
-  })
+  /** 今天的解析结果（今天页 / 铃铛 / 侧栏 / 提醒共用） */
+  const todayResolved = computed<ResolvedDay>(() => resolvedDayOf(today.value))
 
-
-  /** 今天所在周按星期分组 */
-  const todayCoursesByWeekday = computed<Record<Weekday, CourseBlock[]>>(() => {
-    const map = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [] } as Record<Weekday, CourseBlock[]>
-    for (const c of todayCourseBlocks.value) map[c.weekday].push(c)
-    return map
-  })
+  /** 今天实际要上的课（含调来 / 补课，已按当天日历规则解析） */
+  const todayCourseBlocks = computed<CourseBlock[]>(() => todayResolved.value.blocks)
 
   /** 拉取今天所在周的聚合数据 */
   async function refreshToday(): Promise<void> {
@@ -277,6 +240,7 @@ export const useScheduleStore = defineStore('schedule', () => {
       settings.value = ctx.settings
       remote.value = true
       await loadCourses()
+      await loadCalendar()
       await refreshSchedule()
       await refreshToday()
       await loadMatters()
@@ -348,6 +312,22 @@ export const useScheduleStore = defineStore('schedule', () => {
     }
   }
 
+  /** 拉取当前学期日历规则与单课调整（与课程同源，解析层的输入） */
+  async function loadCalendar(): Promise<void> {
+    if (!remote.value) return
+    const semId = currentSemesterId.value ?? undefined
+    try {
+      const [rules, list] = await Promise.all([
+        api.listDayRules(semId),
+        api.listAdjustments(semId),
+      ])
+      dayRules.value = rules
+      adjustments.value = list
+    } catch {
+      // 拉取失败保留旧数据
+    }
+  }
+
   async function afterAccessVerified(): Promise<void> {
     accessRequired.value = false
     await bootstrap()
@@ -403,6 +383,7 @@ export const useScheduleStore = defineStore('schedule', () => {
       const ctx = await api.getContext()
       periods.value = ctx.periods
       await loadCourses()
+      await loadCalendar()
       await refreshSchedule()
       await refreshToday()
       await loadMatters()
@@ -438,6 +419,7 @@ export const useScheduleStore = defineStore('schedule', () => {
     }
     // 无论是否删的是当前学期，都要重拉课程与周数据（修复残留旧课程）
     await loadCourses()
+    await loadCalendar()
     await refreshSchedule()
     await refreshToday()
     await loadMatters()
@@ -517,6 +499,7 @@ export const useScheduleStore = defineStore('schedule', () => {
     })
     const res = await api.importConfirm({ mode, semesterId: targetId, rows: colored, keepLabs })
     await loadCourses()
+    await loadCalendar()
     await refreshSchedule()
     await refreshToday()
     return { count: res.count, removed: res.removed ?? 0, keptLabs: res.keptLabs ?? 0 }
@@ -540,15 +523,52 @@ export const useScheduleStore = defineStore('schedule', () => {
     return updated
   }
 
-  /** 删除课程（关联考试/作业的 courseId 由服务端置空保留） */
+  /** 删除课程（关联考试/作业的 courseId 由服务端置空保留；其单课调整级联清理） */
   async function deleteCourse(id: number): Promise<void> {
     if (remote.value) {
       await api.deleteCourse(id)
       await loadMatters()
     }
     courses.value = courses.value.filter((c) => c.id !== id)
+    adjustments.value = adjustments.value.filter((a) => a.courseId !== id)
     await refreshSchedule()
     await refreshToday()
+  }
+
+  // ---- 学期日历（放假 / 调休按周几上课）----
+
+  /** 区间设置日历规则（kind='clear' 清除）；服务端返回整表，直接替换 */
+  async function setCalendarRange(payload: {
+    from: string
+    to: string
+    kind: 'holiday' | 'follow' | 'clear'
+    followWeekday?: number
+    note?: string
+  }): Promise<void> {
+    if (!currentSemesterId.value) throw new Error('未设置当前学期')
+    dayRules.value = await api.setCalendarRange({ semesterId: currentSemesterId.value, ...payload })
+  }
+
+  // ---- 单课调整（停课 / 调课 / 补课）----
+
+  async function addAdjustment(payload: AdjustmentPayload): Promise<CourseAdjustment> {
+    const created = await api.createAdjustment(payload)
+    adjustments.value = [...adjustments.value, created]
+    return created
+  }
+
+  async function updateAdjustment(id: number, payload: Omit<AdjustmentPayload, 'courseId'>): Promise<CourseAdjustment> {
+    const updated = await api.updateAdjustment(id, payload)
+    const idx = adjustments.value.findIndex((a) => a.id === id)
+    if (idx >= 0) adjustments.value[idx] = updated
+    else adjustments.value = [...adjustments.value, updated]
+    return updated
+  }
+
+  /** 撤销调整（单条，或按「课程 + 原日期」整日撤销——拖拽改回原位置时用） */
+  async function deleteAdjustment(id: number): Promise<void> {
+    await api.deleteAdjustment(id)
+    adjustments.value = adjustments.value.filter((a) => a.id !== id)
   }
 
   // ---- 考试 ----
@@ -678,11 +698,20 @@ export const useScheduleStore = defineStore('schedule', () => {
     isOdd,
     weekTitle,
     visibleCourseBlocks,
-    blocksByWeekday,
+    resolvedWeek,
+    resolvedDay,
     coursesOfDate,
     todayWeekNumber,
     todayCourseBlocks,
-    todayCoursesByWeekday,
+    todayResolved,
+    dayRules,
+    adjustments,
+    rulesByDate,
+    loadCalendar,
+    setCalendarRange,
+    addAdjustment,
+    updateAdjustment,
+    deleteAdjustment,
     refreshToday,
     tickDate,
     refreshSchedule,

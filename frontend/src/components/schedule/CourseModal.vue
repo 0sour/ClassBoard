@@ -3,7 +3,10 @@ import { computed, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import { confirm, toast } from '@/utils/ui'
 import { periodsLabel, weeksLabel } from '@/utils/session'
-import type { Course } from '@/types'
+import { WEEKDAY_LABELS, adjustmentLabel, weekdayOfDateStr } from '@/utils/calendar'
+import AppSelect, { type AppSelectOption } from '@/components/common/AppSelect.vue'
+import DatePicker from '@/components/common/DatePicker.vue'
+import type { Course, CourseAdjustment } from '@/types'
 
 const props = defineProps<{ courseId: number | null }>()
 
@@ -17,8 +20,8 @@ const course = computed<Course | null>(() =>
   props.courseId === null ? null : store.courses.find((c) => c.id === props.courseId) ?? null,
 )
 
-/** 考试/作业 Tab（课程详情聚合该课程的记录） */
-const tab = ref<'exam' | 'homework'>('exam')
+/** 关联记录 Tab（课程详情聚合该课程的考试/作业/调整） */
+const tab = ref<'exam' | 'homework' | 'adjust'>('exam')
 
 const examsOf = computed(() =>
   props.courseId === null ? [] : store.exams.filter((e) => e.courseId === props.courseId),
@@ -26,6 +29,15 @@ const examsOf = computed(() =>
 
 const homeworkOf = computed(() =>
   props.courseId === null ? [] : store.homework.filter((h) => h.courseId === props.courseId),
+)
+
+/** 该课程的调整记录（停课 / 调课 / 补课），可单条撤销 */
+const adjustmentsOf = computed<CourseAdjustment[]>(() =>
+  props.courseId === null
+    ? []
+    : store.adjustments
+        .filter((a) => a.courseId === props.courseId)
+        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id)),
 )
 
 const style = computed(() => ({
@@ -56,6 +68,163 @@ const weekSummary = computed(() => {
   for (const s of c.sessions) for (const w of s.weeks) set.add(w)
   return weeksLabel([...set])
 })
+
+// ============================================================
+// 调整时间：停课 / 调课 / 补课（写「日期覆盖层」，不改基准课表）
+// ============================================================
+const adjOpen = ref(false)
+const adjBusy = ref(false)
+const adjError = ref('')
+const adjKind = ref<'cancel' | 'move' | 'extra'>('cancel')
+const adjSessionIdx = ref(0)
+const adjDate = ref('')
+const adjToDate = ref('')
+const adjStart = ref(1)
+const adjEnd = ref(2)
+const adjLocation = ref('')
+const adjNote = ref('')
+
+const adjKindOptions: AppSelectOption[] = [
+  { value: 'cancel', label: '停课（这一次不上）' },
+  { value: 'move', label: '调课（改到其他时间）' },
+  { value: 'extra', label: '补课（额外上一次）' },
+]
+
+const sessionOptions = computed<AppSelectOption[]>(() =>
+  (course.value?.sessions ?? []).map((s, i) => ({
+    value: i,
+    label: `周${'一二三四五六日'[s.weekday - 1]} ${periodsLabel(s.periods)}${s.location ? ` · ${s.location}` : ''}`,
+  })),
+)
+
+const periodOptions = computed<AppSelectOption[]>(() =>
+  store.periods.map((p) => ({ value: p.index, label: `第 ${p.index} 节` })),
+)
+
+/** 选中时间组的星期（用于校验「原日期」是否对得上） */
+const adjSessionWeekday = computed(() => course.value?.sessions[adjSessionIdx.value]?.weekday ?? null)
+
+/** 从今天起，最近一次落在该星期的日期（表单默认值：多半就是这一次课） */
+function nextDateOfWeekday(weekday: number): string {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  const current = ((d.getDay() + 6) % 7) + 1
+  d.setDate(d.getDate() + ((weekday - current + 7) % 7))
+  return formatDateOf(d)
+}
+
+function openAdjust(kind: 'cancel' | 'move' | 'extra'): void {
+  adjKind.value = kind
+  adjError.value = ''
+  adjOpen.value = true
+  adjSessionIdx.value = 0
+  adjStart.value = course.value?.sessions[0]?.periods[0] ?? 1
+  adjEnd.value = course.value?.sessions[0]?.periods.slice(-1)[0] ?? Math.min(2, store.periods.length)
+  adjLocation.value = ''
+  adjNote.value = ''
+  const wd = course.value?.sessions[0]?.weekday
+  // 默认取「最近一次该星期的日期」：避免默认今天是别的星期、与所选时间组对不上
+  adjDate.value = wd ? nextDateOfWeekday(wd) : formatDateOf(new Date())
+  adjToDate.value = adjDate.value
+}
+
+function formatDateOf(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/** 切换时间组时：目标节次预填为该组节次范围，原日期若与新星期不符则顺延到最近一次 */
+function onSessionChange(): void {
+  const s = course.value?.sessions[adjSessionIdx.value]
+  if (!s) return
+  adjStart.value = s.periods[0]
+  adjEnd.value = s.periods[s.periods.length - 1]
+  if (adjDate.value && weekdayOfDateStr(adjDate.value) !== s.weekday) {
+    const sameAsSource = adjToDate.value === adjDate.value
+    adjDate.value = nextDateOfWeekday(s.weekday)
+    if (sameAsSource) adjToDate.value = adjDate.value
+  }
+}
+
+async function submitAdjust(): Promise<void> {
+  const c = course.value
+  if (!c) return
+  adjError.value = ''
+  if (!adjDate.value) {
+    adjError.value = adjKind.value === 'extra' ? '请选择补课日期' : '请选择原上课日期'
+    return
+  }
+  if (adjKind.value === 'cancel' || adjKind.value === 'move') {
+    if (adjSessionWeekday.value === null) {
+      adjError.value = '请选择要调整的上课时间'
+      return
+    }
+    if (weekdayOfDateStr(adjDate.value) !== adjSessionWeekday.value) {
+      adjError.value = `所选日期是${WEEKDAY_LABELS[weekdayOfDateStr(adjDate.value) - 1]}，与所选时间组（${WEEKDAY_LABELS[adjSessionWeekday.value - 1]}）不一致`
+      return
+    }
+  }
+  if (adjKind.value === 'move' && !adjToDate.value) {
+    adjError.value = '请选择调课后的日期'
+    return
+  }
+  if (adjKind.value !== 'cancel') {
+    if (!(adjStart.value <= adjEnd.value)) {
+      adjError.value = '节次范围有误'
+      return
+    }
+    if (adjEnd.value > store.periods.length) {
+      adjError.value = '节次超出本学期节次范围'
+      return
+    }
+  }
+
+  adjBusy.value = true
+  try {
+    const s = course.value?.sessions[adjSessionIdx.value]
+    await store.addAdjustment({
+      courseId: c.id,
+      date: adjDate.value,
+      kind: adjKind.value,
+      fromWeekday: adjKind.value === 'extra' ? null : (s?.weekday ?? null),
+      fromPeriods: adjKind.value === 'extra' ? [] : (s?.periods ?? []),
+      toDate: adjKind.value === 'move' ? adjToDate.value : null,
+      periods:
+        adjKind.value === 'cancel'
+          ? []
+          : Array.from({ length: adjEnd.value - adjStart.value + 1 }, (_, i) => adjStart.value + i),
+      location: adjKind.value === 'extra' ? adjLocation.value : (s?.location ?? ''),
+      note: adjNote.value,
+    })
+    toast(adjKind.value === 'cancel' ? '已登记停课' : adjKind.value === 'move' ? '已登记调课' : '已登记补课', 'success')
+    adjOpen.value = false
+    tab.value = 'adjust'
+  } catch (e) {
+    adjError.value = e instanceof Error ? e.message : '保存失败，请重试'
+  } finally {
+    adjBusy.value = false
+  }
+}
+
+/** 撤销一条调整（回到基准课表） */
+function undoAdjust(a: CourseAdjustment): void {
+  void confirm({
+    title: '撤销这条调整？',
+    desc: `${adjustmentLabel(a)}——撤销后该课恢复为基准课表的上课时间。`,
+    danger: true,
+    confirmText: '撤销',
+  }).then(async (ok) => {
+    if (!ok) return
+    try {
+      await store.deleteAdjustment(a.id)
+      toast('已撤销调整', 'success')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '撤销失败，请重试', 'error')
+    }
+  })
+}
 
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape') emit('close')
@@ -180,6 +349,14 @@ function onDelete(): void {
               :aria-selected="tab === 'homework'"
               @click="tab = 'homework'"
             >作业<span v-if="homeworkOf.length" class="rel-count">{{ homeworkOf.length }}</span></button>
+            <button
+              class="rel-tab"
+              :class="{ active: tab === 'adjust' }"
+              type="button"
+              role="tab"
+              :aria-selected="tab === 'adjust'"
+              @click="tab = 'adjust'"
+            >调整<span v-if="adjustmentsOf.length" class="rel-count">{{ adjustmentsOf.length }}</span></button>
           </div>
 
           <div class="rel-body">
@@ -192,7 +369,7 @@ function onDelete(): void {
               </div>
               <div v-else class="rel-empty">暂无关联考试</div>
             </template>
-            <template v-else>
+            <template v-else-if="tab === 'homework'">
               <div v-if="homeworkOf.length">
                 <div v-for="h in homeworkOf" :key="h.id" class="rel-item">
                   <span class="rel-name">{{ h.name }}</span>
@@ -201,13 +378,86 @@ function onDelete(): void {
               </div>
               <div v-else class="rel-empty">暂无关联作业</div>
             </template>
+            <!-- 调整记录：停课 / 调课 / 补课（可撤销） -->
+            <template v-else>
+              <div v-if="adjustmentsOf.length">
+                <div v-for="a in adjustmentsOf" :key="a.id" class="rel-item rel-item--row">
+                  <span class="rel-main">
+                    <span class="rel-name">{{ adjustmentLabel(a) }}</span>
+                    <span v-if="a.note" class="rel-meta">{{ a.note }}</span>
+                  </span>
+                  <button class="btn-mini" type="button" @click="undoAdjust(a)">撤销</button>
+                </div>
+              </div>
+              <div v-else class="rel-empty">暂无调整记录（停课 / 调课 / 补课）</div>
+            </template>
+          </div>
+
+          <!-- 调整表单（内联展开） -->
+          <div v-if="adjOpen" class="adj-form">
+            <div class="adj-fields">
+              <label class="adj-field">
+                <span class="adj-label">类型</span>
+                <div class="adj-select">
+                  <AppSelect v-model="adjKind" :options="adjKindOptions" aria-label="调整类型" />
+                </div>
+              </label>
+              <label v-if="adjKind !== 'extra'" class="adj-field">
+                <span class="adj-label">原上课时间</span>
+                <div class="adj-select">
+                  <AppSelect v-model="adjSessionIdx" :options="sessionOptions" aria-label="原上课时间" @change="onSessionChange" />
+                </div>
+              </label>
+              <label class="adj-field">
+                <span class="adj-label">{{ adjKind === 'extra' ? '补课日期' : '原上课日期' }}</span>
+                <DatePicker v-model="adjDate" size="sm" aria-label="原上课日期" />
+              </label>
+              <label v-if="adjKind === 'move'" class="adj-field">
+                <span class="adj-label">调到哪一天</span>
+                <DatePicker v-model="adjToDate" size="sm" aria-label="调课后的日期" />
+              </label>
+              <template v-if="adjKind !== 'cancel'">
+                <label class="adj-field">
+                  <span class="adj-label">节次</span>
+                  <span class="adj-range">
+                    <div class="adj-select adj-select--sm">
+                      <AppSelect v-model="adjStart" :options="periodOptions" aria-label="起始节次" />
+                    </div>
+                    <span class="adj-dash">–</span>
+                    <div class="adj-select adj-select--sm">
+                      <AppSelect v-model="adjEnd" :options="periodOptions" aria-label="结束节次" />
+                    </div>
+                  </span>
+                </label>
+                <label v-if="adjKind === 'extra'" class="adj-field">
+                  <span class="adj-label">地点（可选）</span>
+                  <input v-model="adjLocation" class="adj-input" type="text" maxlength="50" placeholder="如：实验楼 302" />
+                </label>
+              </template>
+              <label class="adj-field adj-field--wide">
+                <span class="adj-label">备注（可选）</span>
+                <input v-model="adjNote" class="adj-input" type="text" maxlength="200" placeholder="如：老师出差" />
+              </label>
+            </div>
+            <p v-if="adjError" class="adj-error" role="alert">{{ adjError }}</p>
+            <div class="adj-actions">
+              <button class="btn-mini" type="button" :disabled="adjBusy" @click="adjOpen = false">取消</button>
+              <button class="btn-mini btn-mini--primary" type="button" :disabled="adjBusy" @click="submitAdjust">
+                {{ adjBusy ? '保存中…' : '确定' }}
+              </button>
+            </div>
           </div>
 
           <div class="modal-foot">
             <button class="btn-ghost" type="button" :disabled="deleting" @click="onDelete">
               {{ deleting ? '正在删除…' : '删除课程' }}
             </button>
-            <button class="btn-primary" type="button" @click="emit('edit', course)">编辑</button>
+            <div class="foot-right">
+              <button v-if="hasFixedTime" class="btn-mini" type="button" @click="openAdjust('cancel')">停课</button>
+              <button v-if="hasFixedTime" class="btn-mini" type="button" @click="openAdjust('move')">调课</button>
+              <button class="btn-mini" type="button" @click="openAdjust('extra')">补课</button>
+              <button class="btn-primary" type="button" @click="emit('edit', course)">编辑</button>
+            </div>
           </div>
         </div>
       </div>
@@ -394,6 +644,115 @@ function onDelete(): void {
 
 .rel-item:first-of-type {
   border-top: none;
+}
+
+.rel-item--row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+}
+
+.rel-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* 调整表单：内联展开，位于关联记录与底部按钮之间 */
+.adj-form {
+  padding: var(--spacing-md) var(--spacing-xl);
+  border-top: 1px solid var(--color-border-default);
+  background: var(--color-bg-subtle, var(--color-bg-surface));
+}
+
+.adj-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--spacing-sm) var(--spacing-md);
+}
+
+.adj-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 132px;
+}
+
+.adj-field--wide {
+  flex: 1;
+}
+
+.adj-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.adj-select {
+  min-width: 132px;
+}
+
+.adj-select--sm {
+  min-width: 84px;
+}
+
+.adj-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.adj-dash {
+  color: var(--color-text-tertiary);
+}
+
+.adj-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.adj-error {
+  margin-top: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-feedback-danger, #dc2626);
+}
+
+.adj-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-md);
+}
+
+.foot-right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+/* 底部小按钮（与设置页 btn-mini 视觉一致） */
+.btn-mini {
+  padding: 6px 12px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.btn-mini:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.btn-mini--primary {
+  border-color: var(--color-brand);
+  color: var(--color-brand);
 }
 
 .rel-name {
