@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import { confirm, toast } from '@/utils/ui'
 import { periodsLabel, weeksLabel } from '@/utils/session'
@@ -73,6 +73,7 @@ const weekSummary = computed(() => {
 // 调整时间：停课 / 调课 / 补课（写「日期覆盖层」，不改基准课表）
 // ============================================================
 const adjOpen = ref(false)
+const adjFormEl = ref<HTMLElement | null>(null)
 const adjBusy = ref(false)
 const adjError = ref('')
 const adjKind = ref<'cancel' | 'move' | 'extra'>('cancel')
@@ -117,6 +118,8 @@ function openAdjust(kind: 'cancel' | 'move' | 'extra'): void {
   adjKind.value = kind
   adjError.value = ''
   adjOpen.value = true
+  // 展开后滚到表单可见位置（否则表单在滚动区下方，看起来「打不开」）
+  void nextTick(() => adjFormEl.value?.scrollIntoView({ block: 'start', behavior: 'smooth' }))
   adjSessionIdx.value = 0
   adjStart.value = course.value?.sessions[0]?.periods[0] ?? 1
   adjEnd.value = course.value?.sessions[0]?.periods.slice(-1)[0] ?? Math.min(2, store.periods.length)
@@ -284,180 +287,186 @@ function onDelete(): void {
             </button>
           </div>
 
-          <div class="modal-body">
-            <div class="m-row">
-              <span class="k">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
-                教师
-              </span>
-              <span class="v">{{ course.teacher || '—' }}</span>
-            </div>
-            <div class="m-row">
-              <span class="k">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></svg>
-                地点
-              </span>
-              <span class="v">{{ course.location || '—' }}</span>
-            </div>
-
-            <!-- 上课时间：无固定时间 / 每个时间段一行 -->
-            <div class="m-row">
-              <span class="k">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" /></svg>
-                时间
-              </span>
-              <span class="v" v-if="!hasFixedTime">无固定时间</span>
-              <span class="v slot-lines" v-else>
-                <span v-for="(s, i) in sessionLines" :key="i" class="slot-line">
-                  {{ s.weekday }} · {{ s.periods }}<template v-if="s.location"> · {{ s.location }}</template>
+          <div class="modal-scroll">
+            <div class="modal-body">
+              <div class="m-row">
+                <span class="k">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+                  教师
                 </span>
-              </span>
-            </div>
-
-            <div class="m-row" v-if="hasFixedTime">
-              <span class="k">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2 4 4-4 4" /><path d="M3 11v-1a4 4 0 0 1 4-4h14" /><path d="m7 22-4-4 4-4" /><path d="M21 13v1a4 4 0 0 1-4 4H3" /></svg>
-                周次
-              </span>
-              <span class="v">{{ weekSummary }}</span>
-            </div>
-
-            <div class="m-row" v-if="course.remark">
-              <span class="k">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /></svg>
-                备注
-              </span>
-              <span class="v note">{{ course.remark }}</span>
-            </div>
-          </div>
-
-          <!-- 考试/作业 Tab（聚合该课程的记录） -->
-          <div class="rel-tabs" role="tablist" aria-label="关联记录">
-            <button
-              class="rel-tab"
-              :class="{ active: tab === 'exam' }"
-              type="button"
-              role="tab"
-              :aria-selected="tab === 'exam'"
-              @click="tab = 'exam'"
-            >考试<span v-if="examsOf.length" class="rel-count">{{ examsOf.length }}</span></button>
-            <button
-              class="rel-tab"
-              :class="{ active: tab === 'homework' }"
-              type="button"
-              role="tab"
-              :aria-selected="tab === 'homework'"
-              @click="tab = 'homework'"
-            >作业<span v-if="homeworkOf.length" class="rel-count">{{ homeworkOf.length }}</span></button>
-            <button
-              class="rel-tab"
-              :class="{ active: tab === 'adjust' }"
-              type="button"
-              role="tab"
-              :aria-selected="tab === 'adjust'"
-              @click="tab = 'adjust'"
-            >调整<span v-if="adjustmentsOf.length" class="rel-count">{{ adjustmentsOf.length }}</span></button>
-          </div>
-
-          <div class="rel-body">
-            <template v-if="tab === 'exam'">
-              <div v-if="examsOf.length">
-                <div v-for="e in examsOf" :key="e.id" class="rel-item">
-                  <span class="rel-name">{{ e.name }}</span>
-                  <span class="rel-meta num">{{ e.datetime.replace('T', ' ') }}<template v-if="e.location"> · {{ e.location }}</template></span>
-                </div>
+                <span class="v">{{ course.teacher || '—' }}</span>
               </div>
-              <div v-else class="rel-empty">暂无关联考试</div>
-            </template>
-            <template v-else-if="tab === 'homework'">
-              <div v-if="homeworkOf.length">
-                <div v-for="h in homeworkOf" :key="h.id" class="rel-item">
-                  <span class="rel-name">{{ h.name }}</span>
-                  <span class="rel-meta num">{{ h.dueAt.slice(0, 16).replace('T', ' ') }} 截止{{ h.done ? ' · 已完成' : '' }}</span>
-                </div>
+              <div class="m-row">
+                <span class="k">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></svg>
+                  地点
+                </span>
+                <span class="v">{{ course.location || '—' }}</span>
               </div>
-              <div v-else class="rel-empty">暂无关联作业</div>
-            </template>
-            <!-- 调整记录：停课 / 调课 / 补课（可撤销） -->
-            <template v-else>
-              <div v-if="adjustmentsOf.length">
-                <div v-for="a in adjustmentsOf" :key="a.id" class="rel-item rel-item--row">
-                  <span class="rel-main">
-                    <span class="rel-name">{{ adjustmentLabel(a) }}</span>
-                    <span v-if="a.note" class="rel-meta">{{ a.note }}</span>
+
+              <!-- 上课时间：无固定时间 / 每个时间段一行 -->
+              <div class="m-row">
+                <span class="k">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" /></svg>
+                  时间
+                </span>
+                <span class="v" v-if="!hasFixedTime">无固定时间</span>
+                <span class="v slot-lines" v-else>
+                  <span v-for="(s, i) in sessionLines" :key="i" class="slot-line">
+                    {{ s.weekday }} · {{ s.periods }}<template v-if="s.location"> · {{ s.location }}</template>
                   </span>
-                  <button class="btn-mini" type="button" @click="undoAdjust(a)">撤销</button>
-                </div>
+                </span>
               </div>
-              <div v-else class="rel-empty">暂无调整记录（停课 / 调课 / 补课）</div>
-            </template>
-          </div>
 
-          <!-- 调整表单（内联展开） -->
-          <div v-if="adjOpen" class="adj-form">
-            <div class="adj-fields">
-              <label class="adj-field">
-                <span class="adj-label">类型</span>
-                <div class="adj-select">
-                  <AppSelect v-model="adjKind" :options="adjKindOptions" aria-label="调整类型" />
+              <div class="m-row" v-if="hasFixedTime">
+                <span class="k">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2 4 4-4 4" /><path d="M3 11v-1a4 4 0 0 1 4-4h14" /><path d="m7 22-4-4 4-4" /><path d="M21 13v1a4 4 0 0 1-4 4H3" /></svg>
+                  周次
+                </span>
+                <span class="v">{{ weekSummary }}</span>
+              </div>
+
+              <div class="m-row" v-if="course.remark">
+                <span class="k">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /></svg>
+                  备注
+                </span>
+                <span class="v note">{{ course.remark }}</span>
+              </div>
+            </div>
+
+            <!-- 考试/作业 Tab（聚合该课程的记录） -->
+            <div class="rel-tabs" role="tablist" aria-label="关联记录">
+              <button
+                class="rel-tab"
+                :class="{ active: tab === 'exam' }"
+                type="button"
+                role="tab"
+                :aria-selected="tab === 'exam'"
+                @click="tab = 'exam'"
+              >考试<span v-if="examsOf.length" class="rel-count">{{ examsOf.length }}</span></button>
+              <button
+                class="rel-tab"
+                :class="{ active: tab === 'homework' }"
+                type="button"
+                role="tab"
+                :aria-selected="tab === 'homework'"
+                @click="tab = 'homework'"
+              >作业<span v-if="homeworkOf.length" class="rel-count">{{ homeworkOf.length }}</span></button>
+              <button
+                class="rel-tab"
+                :class="{ active: tab === 'adjust' }"
+                type="button"
+                role="tab"
+                :aria-selected="tab === 'adjust'"
+                @click="tab = 'adjust'"
+              >调整<span v-if="adjustmentsOf.length" class="rel-count">{{ adjustmentsOf.length }}</span></button>
+            </div>
+
+            <div class="rel-body">
+              <template v-if="tab === 'exam'">
+                <div v-if="examsOf.length">
+                  <div v-for="e in examsOf" :key="e.id" class="rel-item">
+                    <span class="rel-name">{{ e.name }}</span>
+                    <span class="rel-meta num">{{ e.datetime.replace('T', ' ') }}<template v-if="e.location"> · {{ e.location }}</template></span>
+                  </div>
                 </div>
-              </label>
-              <label v-if="adjKind !== 'extra'" class="adj-field">
-                <span class="adj-label">原上课时间</span>
-                <div class="adj-select">
-                  <AppSelect v-model="adjSessionIdx" :options="sessionOptions" aria-label="原上课时间" @change="onSessionChange" />
+                <div v-else class="rel-empty">暂无关联考试</div>
+              </template>
+              <template v-else-if="tab === 'homework'">
+                <div v-if="homeworkOf.length">
+                  <div v-for="h in homeworkOf" :key="h.id" class="rel-item">
+                    <span class="rel-name">{{ h.name }}</span>
+                    <span class="rel-meta num">{{ h.dueAt.slice(0, 16).replace('T', ' ') }} 截止{{ h.done ? ' · 已完成' : '' }}</span>
+                  </div>
                 </div>
-              </label>
-              <label class="adj-field">
-                <span class="adj-label">{{ adjKind === 'extra' ? '补课日期' : '原上课日期' }}</span>
-                <DatePicker v-model="adjDate" size="sm" aria-label="原上课日期" />
-              </label>
-              <label v-if="adjKind === 'move'" class="adj-field">
-                <span class="adj-label">调到哪一天</span>
-                <DatePicker v-model="adjToDate" size="sm" aria-label="调课后的日期" />
-              </label>
-              <template v-if="adjKind !== 'cancel'">
-                <label class="adj-field">
-                  <span class="adj-label">节次</span>
-                  <span class="adj-range">
-                    <div class="adj-select adj-select--sm">
-                      <AppSelect v-model="adjStart" :options="periodOptions" aria-label="起始节次" />
+                <div v-else class="rel-empty">暂无关联作业</div>
+              </template>
+              <!-- 调整：登记（停课 / 调课 / 补课）与记录撤销 -->
+              <template v-else>
+                <!-- 表单：与详情同构的键值行，展开时替代工具行 -->
+                <div v-if="adjOpen" ref="adjFormEl" class="adj-form">
+                  <div class="adj-row">
+                    <span class="adj-k">类型</span>
+                    <div class="adj-c">
+                      <AppSelect v-model="adjKind" :options="adjKindOptions" aria-label="调整类型" />
                     </div>
-                    <span class="adj-dash">–</span>
-                    <div class="adj-select adj-select--sm">
+                  </div>
+                  <div v-if="adjKind !== 'extra'" class="adj-row">
+                    <span class="adj-k">原时间</span>
+                    <div class="adj-c">
+                      <AppSelect v-model="adjSessionIdx" :options="sessionOptions" aria-label="原上课时间" @change="onSessionChange" />
+                    </div>
+                  </div>
+                  <div class="adj-row">
+                    <span class="adj-k">{{ adjKind === 'extra' ? '补课日' : '原日期' }}</span>
+                    <div class="adj-c">
+                      <DatePicker v-model="adjDate" size="sm" aria-label="原上课日期" />
+                    </div>
+                  </div>
+                  <div v-if="adjKind === 'move'" class="adj-row">
+                    <span class="adj-k">调到</span>
+                    <div class="adj-c">
+                      <DatePicker v-model="adjToDate" size="sm" aria-label="调课后的日期" />
+                    </div>
+                  </div>
+                  <div v-if="adjKind !== 'cancel'" class="adj-row adj-row--range">
+                    <span class="adj-k">节次</span>
+                    <div class="adj-c adj-c--range">
+                      <AppSelect v-model="adjStart" :options="periodOptions" aria-label="起始节次" />
+                      <span class="adj-dash">–</span>
                       <AppSelect v-model="adjEnd" :options="periodOptions" aria-label="结束节次" />
                     </div>
-                  </span>
-                </label>
-                <label v-if="adjKind === 'extra'" class="adj-field">
-                  <span class="adj-label">地点（可选）</span>
-                  <input v-model="adjLocation" class="adj-input" type="text" maxlength="50" placeholder="如：实验楼 302" />
-                </label>
+                  </div>
+                  <div v-if="adjKind === 'extra'" class="adj-row">
+                    <span class="adj-k">地点</span>
+                    <div class="adj-c">
+                      <input v-model="adjLocation" class="adj-input" type="text" maxlength="50" placeholder="可选，如：实验楼 302" />
+                    </div>
+                  </div>
+                  <div class="adj-row">
+                    <span class="adj-k">备注</span>
+                    <div class="adj-c">
+                      <input v-model="adjNote" class="adj-input" type="text" maxlength="200" placeholder="可选，如：老师出差" />
+                    </div>
+                  </div>
+                  <p v-if="adjError" class="adj-error" role="alert">{{ adjError }}</p>
+                  <div class="adj-actions">
+                    <button class="btn-mini" type="button" :disabled="adjBusy" @click="adjOpen = false">取消</button>
+                    <button class="btn-mini btn-mini--primary" type="button" :disabled="adjBusy" @click="submitAdjust">
+                      {{ adjBusy ? '保存中…' : '确定' }}
+                    </button>
+                  </div>
+                </div>
+
+                <template v-else>
+                  <div class="adj-tools">
+                    <span class="adj-tools__label">登记调整</span>
+                    <button v-if="hasFixedTime" class="btn-mini" type="button" @click="openAdjust('cancel')">停课</button>
+                    <button v-if="hasFixedTime" class="btn-mini" type="button" @click="openAdjust('move')">调课</button>
+                    <button class="btn-mini" type="button" @click="openAdjust('extra')">补课</button>
+                  </div>
+                  <div v-if="adjustmentsOf.length">
+                    <div v-for="a in adjustmentsOf" :key="a.id" class="rel-item rel-item--row">
+                      <span class="rel-main">
+                        <span class="rel-name">{{ adjustmentLabel(a) }}</span>
+                        <span v-if="a.note" class="rel-meta">{{ a.note }}</span>
+                      </span>
+                      <button class="btn-mini" type="button" @click="undoAdjust(a)">撤销</button>
+                    </div>
+                  </div>
+                  <div v-else class="rel-empty">暂无调整记录（停课 / 调课 / 补课）</div>
+                </template>
               </template>
-              <label class="adj-field adj-field--wide">
-                <span class="adj-label">备注（可选）</span>
-                <input v-model="adjNote" class="adj-input" type="text" maxlength="200" placeholder="如：老师出差" />
-              </label>
             </div>
-            <p v-if="adjError" class="adj-error" role="alert">{{ adjError }}</p>
-            <div class="adj-actions">
-              <button class="btn-mini" type="button" :disabled="adjBusy" @click="adjOpen = false">取消</button>
-              <button class="btn-mini btn-mini--primary" type="button" :disabled="adjBusy" @click="submitAdjust">
-                {{ adjBusy ? '保存中…' : '确定' }}
-              </button>
-            </div>
+
           </div>
 
           <div class="modal-foot">
             <button class="btn-ghost" type="button" :disabled="deleting" @click="onDelete">
               {{ deleting ? '正在删除…' : '删除课程' }}
             </button>
-            <div class="foot-right">
-              <button v-if="hasFixedTime" class="btn-mini" type="button" @click="openAdjust('cancel')">停课</button>
-              <button v-if="hasFixedTime" class="btn-mini" type="button" @click="openAdjust('move')">调课</button>
-              <button class="btn-mini" type="button" @click="openAdjust('extra')">补课</button>
-              <button class="btn-primary" type="button" @click="emit('edit', course)">编辑</button>
-            </div>
+            <button class="btn-primary" type="button" @click="emit('edit', course)">编辑</button>
           </div>
         </div>
       </div>
@@ -540,12 +549,21 @@ function onDelete(): void {
   background: var(--color-bg-hover);
 }
 
+/* 中间整体滚动区：头部与底部固定，详情/Tab/表单一起滚，表单不会再被挤出可视区 */
+.modal-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* 对话框宽度固定，纵向滚动条之外不应再出现横向滚动条 */
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
 .modal-body {
   padding: var(--spacing-lg) var(--spacing-xl);
   display: flex;
   flex-direction: column;
   gap: var(--spacing-md);
-  overflow-y: auto;
 }
 
 .m-row {
@@ -595,6 +613,11 @@ function onDelete(): void {
   gap: 2px;
   padding: 0 var(--spacing-xl);
   border-bottom: 1px solid var(--color-border-default);
+  /* 滚动时吸顶，随时可切换 Tab */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-bg-surface);
 }
 
 .rel-tab {
@@ -630,7 +653,6 @@ function onDelete(): void {
 
 .rel-body {
   padding: var(--spacing-md) var(--spacing-xl);
-  overflow-y: auto;
   min-height: 88px;
 }
 
@@ -660,51 +682,75 @@ function onDelete(): void {
   min-width: 0;
 }
 
-/* 调整表单：内联展开，位于关联记录与底部按钮之间 */
+/* 调整工具行：登记入口（停课 / 调课 / 补课） */
+.adj-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  padding-bottom: var(--spacing-md);
+  margin-bottom: var(--spacing-xs);
+  border-bottom: 1px dashed var(--color-border-default);
+}
+
+.adj-tools__label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  margin-right: 2px;
+}
+
+/* 调整表单：与详情同构的键值行（左标签 60px + 右控件，控件占满余宽） */
 .adj-form {
-  padding: var(--spacing-md) var(--spacing-xl);
-  border-top: 1px solid var(--color-border-default);
+  scroll-margin-top: 44px;
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
   background: var(--color-bg-subtle, var(--color-bg-surface));
 }
 
-.adj-fields {
+.adj-row {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--spacing-sm) var(--spacing-md);
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-2xs) 0;
 }
 
-.adj-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 132px;
-}
-
-.adj-field--wide {
-  flex: 1;
-}
-
-.adj-label {
-  font-size: var(--font-size-xs);
+.adj-k {
+  flex: none;
+  width: 60px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
 }
 
-.adj-select {
-  min-width: 132px;
+.adj-c {
+  flex: 1;
+  min-width: 0;
 }
 
-.adj-select--sm {
-  min-width: 84px;
-}
-
-.adj-range {
-  display: inline-flex;
+.adj-c--range {
+  display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--spacing-xs);
+}
+
+/* 子组件（AppSelect / DatePicker）铺满所在行 */
+.adj-c :deep(.select),
+.adj-c :deep(.dp),
+.adj-c :deep(.select__trigger),
+.adj-c :deep(.dp-trigger) {
+  width: 100%;
+  min-width: 0;
+}
+
+/* 节次区间：两个下拉等分余宽，窄屏可收缩（文本省略），不撑出横向滚动条 */
+.adj-c--range :deep(.select),
+.adj-c--range :deep(.dp) {
+  flex: 1 1 0;
 }
 
 .adj-dash {
+  flex: none;
   color: var(--color-text-tertiary);
 }
 
@@ -719,7 +765,7 @@ function onDelete(): void {
 }
 
 .adj-error {
-  margin-top: var(--spacing-sm);
+  margin-top: var(--spacing-xs);
   font-size: var(--font-size-sm);
   color: var(--color-feedback-danger, #dc2626);
 }
@@ -728,7 +774,7 @@ function onDelete(): void {
   display: flex;
   justify-content: flex-end;
   gap: var(--spacing-sm);
-  margin-top: var(--spacing-md);
+  margin-top: var(--spacing-sm);
 }
 
 .foot-right {
@@ -739,6 +785,8 @@ function onDelete(): void {
 
 /* 底部小按钮（与设置页 btn-mini 视觉一致） */
 .btn-mini {
+  flex: none;
+  white-space: nowrap;
   padding: 6px 12px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-md);
@@ -820,5 +868,35 @@ function onDelete(): void {
 .modal-enter-from,
 .modal-leave-to {
   opacity: 0;
+}
+
+/* 窄屏（手机）：收窄左右留白换取内容宽度；节次区间行独占一行，两个下拉才放得下 */
+@media (max-width: 480px) {
+  .modal-mask {
+    padding: var(--spacing-sm);
+  }
+
+  .modal-body,
+  .rel-body {
+    padding-left: var(--spacing-lg);
+    padding-right: var(--spacing-lg);
+  }
+
+  .rel-tabs {
+    padding: 0 var(--spacing-lg);
+  }
+
+  .modal-foot {
+    padding: var(--spacing-md) var(--spacing-lg) var(--spacing-lg);
+  }
+
+  .adj-row--range {
+    flex-wrap: wrap;
+  }
+
+  .adj-row--range .adj-k {
+    width: 100%;
+    padding-bottom: 2px;
+  }
 }
 </style>
