@@ -1101,10 +1101,10 @@ test('迁移：旧模型课程行 → 组 + sessions，实验课不丢、关联�
   rmSync(migDir, { recursive: true, force: true })
 })
 // ============================================================
-// 学期日历（放假 / 调休按周几上课）
+// 学期日历（放假 / 整日移课）
 // ============================================================
 
-test('学期日历：区间逐日展开、覆盖更新、清除与越界拒绝', async () => {
+test('学期日历：放假区间逐日展开、整日移课、清除与越界拒绝', async () => {
   const sem = await createSemester()
   const semId = sem.body.id
 
@@ -1115,33 +1115,37 @@ test('学期日历：区间逐日展开、覆盖更新、清除与越界拒绝',
   assert.equal(r1.body[0].kind, 'holiday')
   assert.equal(r1.body[0].note, '国庆节')
 
-  // 调休：10/10（周六）按周三课表上课
-  const r2 = await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-10', to: '2026-10-10', kind: 'follow', followWeekday: 3 })
+  // 整日移课：把 9/29（周二）的课移到 10/10（周六）——不假设课表每周重复
+  const r2 = await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-09-29', to: '2026-10-10', kind: 'shift', note: '国庆调休' })
+  assert.equal(r2.status, 200)
   assert.equal(r2.body.length, 4)
-  const follow = r2.body.find((x) => x.date === '2026-10-10')
-  assert.equal(follow.kind, 'follow')
-  assert.equal(follow.followWeekday, 3)
+  const shift = r2.body.find((x) => x.kind === 'shift')
+  assert.equal(shift.date, '2026-09-29')
+  assert.equal(shift.toDate, '2026-10-10')
+  assert.equal(shift.note, '国庆调休')
 
-  // 覆盖：把 10/2 单独改成「按周五课表」
-  const r3 = await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-02', to: '2026-10-02', kind: 'follow', followWeekday: 5 })
-  const oct2 = r3.body.find((x) => x.date === '2026-10-02')
-  assert.equal(oct2.kind, 'follow')
-  assert.equal(oct2.followWeekday, 5)
-  assert.equal(r3.body.length, 4, '覆盖不应新增行')
+  // 同一源日再录一次 = 覆盖（不新增行）
+  const r3 = await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-09-29', to: '2026-10-09', kind: 'shift' })
+  assert.equal(r3.body.length, 4, '移课覆盖不应新增行')
+  assert.equal(r3.body.find((x) => x.kind === 'shift').toDate, '2026-10-09')
 
-  // 清除区间（10/1–10/3）：区间内规则（含被覆盖过的 10/2）整体删除，只剩 10/10
+  // 清除区间：只清区间内的日期，移课行不受影响
   const r4 = await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-01', to: '2026-10-03', kind: 'clear' })
-  assert.deepEqual(r4.body.map((x) => x.date), ['2026-10-10'])
+  assert.deepEqual(r4.body.map((x) => `${x.kind}:${x.date}`), ['shift:2026-09-29'])
 
   // 读取一致
   const list = await authApi('GET', `/api/calendar?semesterId=${semId}`)
   assert.equal(list.body.length, 1)
 
-  // 学期范围外 / 非法星期 → 400 且不改动数据
+  // 非法：学期范围外 / 移课源=目标 / 非法 kind / 缺字段 → 400 且不改动数据
   const bad1 = await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-08-01', to: '2026-08-02', kind: 'holiday' })
   assert.equal(bad1.status, 400)
-  const bad2 = await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-05', to: '2026-10-05', kind: 'follow', followWeekday: 9 })
-  assert.equal(bad2.status, 400)
+  const bad2 = await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-05', to: '2027-03-01', kind: 'shift' })
+  assert.equal(bad2.status, 400, '移到哪天超学期范围')
+  const bad3 = await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-05', to: '2026-10-05', kind: 'shift' })
+  assert.equal(bad3.status, 400, '源日与目标日不能相同')
+  const bad4 = await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-05', to: '2026-10-05', kind: 'follow' })
+  assert.equal(bad4.status, 400, '旧的「按周几课表」已不再是合法类型')
   const after = await authApi('GET', `/api/calendar?semesterId=${semId}`)
   assert.equal(after.body.length, 1, '校验失败不应写入')
 })
@@ -1273,7 +1277,7 @@ test('备份 v5：日历与调整随备份导出并还原（含计数）', async
   const created = await authApi('POST', '/api/courses', courseBody(semId, { weekday: 4, periods: [5, 6], weeks: [6, 7, 8] }))
   const courseId = created.body.id
   await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-01', to: '2026-10-02', kind: 'holiday', note: '国庆' })
-  await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-10-10', to: '2026-10-10', kind: 'follow', followWeekday: 3 })
+  await authApi('PUT', '/api/calendar', { semesterId: semId, from: '2026-09-29', to: '2026-10-10', kind: 'shift', note: '调休' })
   await authApi('POST', '/api/adjustments', { courseId, date: '2026-10-15', kind: 'cancel', fromWeekday: 4, fromPeriods: [5, 6], note: '出差' })
   await authApi('POST', '/api/adjustments', { courseId, date: '2026-10-22', kind: 'move', fromWeekday: 4, fromPeriods: [5, 6], toDate: '2026-10-24', periods: [3, 4] })
 
@@ -1282,8 +1286,9 @@ test('备份 v5：日历与调整随备份导出并还原（含计数）', async
   assert.equal(payload.version, 5)
   assert.equal(payload.calendar.length, 3)
   assert.equal(payload.adjustments.length, 2)
-  const follow = payload.calendar.find((r) => r.date === '2026-10-10')
-  assert.equal(follow.followWeekday, 3)
+  const shift = payload.calendar.find((r) => r.kind === 'shift')
+  assert.equal(shift.date, '2026-09-29')
+  assert.equal(shift.toDate, '2026-10-10')
   assert.equal(payload.adjustments.find((a) => a.kind === 'move').toDate, '2026-10-24')
 
   // 清空全部业务数据后还原
@@ -1298,7 +1303,7 @@ test('备份 v5：日历与调整随备份导出并还原（含计数）', async
 
   const rules = await authApi('GET', `/api/calendar?semesterId=${semId}`)
   assert.equal(rules.body.length, 3)
-  assert.equal(rules.body.find((r) => r.date === '2026-10-10').followWeekday, 3)
+  assert.equal(rules.body.find((r) => r.kind === 'shift').toDate, '2026-10-10')
   const adjs = await authApi('GET', `/api/adjustments?semesterId=${semId}`)
   assert.equal(adjs.body.length, 2)
   assert.equal(adjs.body.find((a) => a.kind === 'move').toDate, '2026-10-24')
@@ -1335,7 +1340,7 @@ test('恢复：调整引用了不存在的课程 → 整批拒绝', async () => 
     periods: [],
     courses: [{ id: 90, semesterId: 9, type: 'course', name: '课', sessions: [{ weekday: 1, periods: [1], weeks: [1] }] }],
     exams: [], homework: [], settings: {}, templates: [],
-    calendar: [{ semesterId: 9, date: '2026-10-01', kind: 'holiday', followWeekday: null, note: '' }],
+    calendar: [{ semesterId: 9, date: '2026-10-01', kind: 'holiday', toDate: null, note: '' }],
     adjustments: [{ courseId: 999, date: '2026-10-15', kind: 'cancel', fromWeekday: 4, fromPeriods: [5], toDate: null, periods: [] }],
   }
   const form = new FormData()
@@ -1345,4 +1350,49 @@ test('恢复：调整引用了不存在的课程 → 整批拒绝', async () => 
   assert.equal((await res.json()).code, 'BAD_FILE')
   const sems = await authApi('GET', '/api/semesters')
   assert.equal(sems.body.length, 1, '原有数据未被清空')
+})
+
+test('迁移：学期日历由「按周几课表」转为「整日移课」', async () => {
+  const { execFileSync } = await import('node:child_process')
+  const migDir = mkdtempSync(join(tmpdir(), 'classboard-calendar-mig-'))
+  const legacy = new Database(join(migDir, 'classboard.db'))
+  legacy.exec(`
+    CREATE TABLE semester (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL, week_start_day INTEGER NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE semester_day_rule (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      semester_id INTEGER NOT NULL REFERENCES semester(id) ON DELETE CASCADE,
+      date TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('holiday', 'follow')),
+      follow_weekday INTEGER,
+      note TEXT NOT NULL DEFAULT ''
+    );
+    CREATE UNIQUE INDEX idx_day_rule_unique ON semester_day_rule (semester_id, date);
+    INSERT INTO semester (id, name, start_date, end_date, week_start_day, updated_at)
+      VALUES (1, '旧学期', '2026-09-07', '2026-12-27', 1, '2026-09-01T00:00:00Z');
+    INSERT INTO semester_day_rule (semester_id, date, kind, follow_weekday, note)
+      VALUES (1, '2026-10-01', 'holiday', NULL, '国庆');
+    INSERT INTO semester_day_rule (semester_id, date, kind, follow_weekday, note)
+      VALUES (1, '2026-10-10', 'follow', 4, '补班');
+  `)
+  legacy.close()
+
+  const script = `
+    const { db } = await import('./lib/db.js')
+    const rules = db.prepare('SELECT date, kind, to_date, note FROM semester_day_rule ORDER BY date').all()
+    console.log(JSON.stringify({ rules }))
+  `
+  const res = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+    env: { ...process.env, CLASSBOARD_DATA_DIR: migDir },
+    encoding: 'utf8',
+  })
+  const out = JSON.parse(res.trim().split(String.fromCharCode(10)).pop())
+  assert.deepEqual(out.rules, [
+    { date: '2026-10-01', kind: 'holiday', to_date: null, note: '国庆' },
+    // 旧规则「10/10 按周四课表」→ 新规则「把该周周四（10/8）的课移到 10/10」
+    { date: '2026-10-08', kind: 'shift', to_date: '2026-10-10', note: '补班' },
+  ])
+  rmSync(migDir, { recursive: true, force: true })
 })

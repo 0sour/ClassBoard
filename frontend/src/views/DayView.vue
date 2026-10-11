@@ -6,7 +6,7 @@ import CourseModal from '@/components/schedule/CourseModal.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
 import AdjustBadge from '@/components/schedule/AdjustBadge.vue'
 import { periodsLabel } from '@/utils/session'
-import { dayRuleLabel, markerLabel } from '@/utils/calendar'
+import { markerLabel, monthDayLabel } from '@/utils/calendar'
 import type { Course } from '@/types'
 
 const store = useScheduleStore()
@@ -35,17 +35,17 @@ const todayResolved = computed(() => store.todayResolved)
 const todayBlocks = computed(() => todayResolved.value.blocks)
 const todayMarkers = computed(() => todayResolved.value.markers)
 
-/** 今日提示：放假 / 按周几课表 / 有几门课是调整过来的 */
+/** 今日提示：放假 / 调休（课已移走或补某天的课）/ 有几门课是调整过来的 */
 const todayNotice = computed(() => {
   const r = todayResolved.value
-  if (r.rule?.kind === 'holiday') return { text: dayRuleLabel(r.rule), kind: 'holiday' as const }
+  if (r.rule?.kind === 'holiday') return { text: r.dayLabel, kind: 'holiday' as const }
   const adjusted = r.blocks.filter((b) => b.source !== 'base').length
   const parts: string[] = []
-  if (r.rule?.kind === 'follow') parts.push(dayRuleLabel(r.rule))
-  if (adjusted) parts.push(`今日 ${adjusted} 门课为调课/补课`)
+  if (r.dayLabel) parts.push(r.rule?.kind === 'shift' ? `${r.dayLabel}：今日的课已移至 ${r.rule.toDate ? monthDayLabel(r.rule.toDate) : ''}` : r.dayLabel)
+  if (adjusted) parts.push(`今日 ${adjusted} 门课为调课/补课/调休`)
   if (r.markers.length) parts.push(`${r.markers.length} 门课停课或调走`)
   if (!parts.length) return null
-  return { text: parts.join(' · '), kind: r.rule?.kind === 'follow' ? ('follow' as const) : ('adjust' as const) }
+  return { text: parts.join(' · '), kind: r.rule?.kind === 'shift' || r.shiftSources.length ? ('follow' as const) : ('adjust' as const) }
 })
 
 const todayHomework = computed(() => {

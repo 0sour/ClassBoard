@@ -187,8 +187,8 @@ export const api = {
   listDayRules: (semesterId?: number) =>
     request<DayRule[]>(`/calendar${semesterId ? `?semesterId=${semesterId}` : ''}`),
 
-  /** 区间设置日历规则：kind='clear' 清除该区间；返回该学期全部规则 */
-  setCalendarRange: (body: { semesterId: number; from: string; to: string; kind: 'holiday' | 'follow' | 'clear'; followWeekday?: number; note?: string }) =>
+  /** 区间/整日移课设置日历规则：kind='clear' 清除该区间；返回该学期全部规则 */
+  setCalendarRange: (body: { semesterId: number; from: string; to: string; kind: 'holiday' | 'shift' | 'clear'; note?: string }) =>
     request<DayRule[]>('/calendar', { method: 'PUT', body: JSON.stringify(body) }),
 
   // ---- 单课调整（停课 / 调课 / 补课）----

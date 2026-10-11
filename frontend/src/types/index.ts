@@ -111,16 +111,17 @@ export interface Homework {
 
 /**
  * 学期日历规则（日期级）：
- * - holiday：该日放假（当天不上课）
- * - follow ：该日按「周几的课表」上课（调休补班），followWeekday 为 1..7
- * 存储按日期逐日展开，展示时合并成区间。
+ * - holiday：该日放假（当天不上课），支持区间录入（逐日一行）
+ * - shift  ：整日移课——把 `date` 这一天的课移到 `toDate`
+ *            （源日显示调休、目标日显示源日当天的课；不要求课表每周重复）
  */
 export interface DayRule {
   id: number
   semesterId: number
   date: string // YYYY-MM-DD
-  kind: 'holiday' | 'follow'
-  followWeekday: Weekday | null
+  kind: 'holiday' | 'shift'
+  /** kind='shift'：移到哪一天 */
+  toDate: string | null
   note: string
 }
 
@@ -148,8 +149,8 @@ export interface CourseAdjustment {
   createdAt: string
 }
 
-/** 课程块的来源：基准课表 / 由其他日期调来 / 补课 */
-export type BlockSource = 'base' | 'moved' | 'extra'
+/** 课程块的来源：基准课表 / 由其他日期调来（单课调课）/ 补课 / 整日调休移来 */
+export type BlockSource = 'base' | 'moved' | 'extra' | 'shifted'
 
 /**
  * 解析后的课程块：在 CourseBlock 之上附加「来源」信息，
@@ -157,38 +158,46 @@ export type BlockSource = 'base' | 'moved' | 'extra'
  */
 export interface ResolvedBlock extends CourseBlock {
   source: BlockSource
-  /** 调课来源：原日期与原时间组（source = 'moved'） */
+  /** 调课 / 调休来源：原日期与原时间组 */
   fromDate?: string
   fromWeekday?: Weekday | null
   fromPeriods?: number[]
-  /** 关联的调整记录（可撤销） */
+  /** 关联的单课调整记录（可撤销） */
   adjustmentId?: number
   /** 调整备注 */
   adjustmentNote?: string
 }
 
-/** 原位置标记：被停课 / 被调走的课，在原来的那天留一个淡显标记 */
+/** 原位置标记：被停课 / 被调走 / 整日调休移走的课，在原来的那天留一个淡显标记 */
 export interface DayMarker {
   courseId: number
   name: string
   color: string
   weekday: Weekday
   periods: number[]
-  kind: 'cancel' | 'move'
-  /** 调课目标（kind = 'move'） */
+  kind: 'cancel' | 'move' | 'shift'
+  /** 调课 / 调休目标日期 */
   toDate: string | null
   toPeriods: number[]
   note: string
+  /** 单课调整记录 id（调休为 0，用 ruleId 撤销） */
   adjustmentId: number
+  /** 整日调休：对应的日历规则 id */
+  ruleId?: number
 }
 
 /** 某一天解析结果：实际发生的课程块 + 原位置标记 + 该日日历规则 */
 export interface ResolvedDay {
   date: string
   weekNumber: number | null
-  /** 当天实际上课采用的星期（假期为 null） */
+  /** 当天实际上课采用的星期（放假 / 调休移走为 null） */
   effectiveWeekday: Weekday | null
+  /** 该日自己的日历规则 */
   rule: DayRule | null
+  /** 该日作为调休目标时，被移来的源日规则列表 */
+  shiftSources: DayRule[]
+  /** 日头角标文案：'假期' | '调休' | '补 9月29日' | ''（由解析层统一生成，各显示面直接用） */
+  dayLabel: string
   blocks: ResolvedBlock[]
   markers: DayMarker[]
 }

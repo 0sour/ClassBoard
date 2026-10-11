@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { CourseBlock, ResolvedBlock } from '@/types'
+import { sourceBadge } from '@/utils/calendar'
 import AdjustBadge from './AdjustBadge.vue'
 
 const props = defineProps<{
@@ -22,8 +23,9 @@ const style = computed(() => ({
   '--ctext': `var(--${props.course.color}-text)`,
 }))
 
-/** 调整来源（调课 / 补课）：任何显示课程块的地方都要能看出「这门课是调过来的」 */
-const adjusted = computed(() => props.course.source === 'moved' || props.course.source === 'extra')
+/** 调整来源（调课 / 补课 / 调休移来）：任何显示课程块的地方都要能看出「这门课是调过来的」 */
+const badge = computed(() => sourceBadge(props.course.source))
+const adjusted = computed(() => badge.value !== '')
 </script>
 
 <template>

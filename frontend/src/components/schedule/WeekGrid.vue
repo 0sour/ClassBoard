@@ -4,9 +4,9 @@ import { useScheduleStore } from '@/stores/schedule'
 import CourseBlock from './CourseBlock.vue'
 import { blockKey, computeBlockOverlapGroups, isOverlap } from '@/utils/course'
 import { periodRange } from '@/utils/session'
-import { dayRuleLabel, dateWithWeekdayLabel, markerLabel } from '@/utils/calendar'
+import { dateWithWeekdayLabel, markerLabel } from '@/utils/calendar'
 import { formatDate } from '@/utils/week'
-import type { CourseBlock as CourseBlockModel, DayMarker, DayRule, ResolvedBlock, Weekday } from '@/types'
+import type { CourseBlock as CourseBlockModel, DayMarker, ResolvedBlock, ResolvedDay, Weekday } from '@/types'
 
 const store = useScheduleStore()
 
@@ -137,9 +137,9 @@ function markersOf(idx: number): DayMarker[] {
   return resolvedCols.value[idx]?.markers ?? []
 }
 
-/** 该列的日历规则（假期 / 调休按周几上课） */
-function dayRuleOf(idx: number): DayRule | null {
-  return resolvedCols.value[idx]?.rule ?? null
+/** 该列的日历规则（放假 / 调休；调休目标日的文案由 dayLabel 给出） */
+function dayRuleOf(idx: number): ResolvedDay | null {
+  return resolvedCols.value[idx] ?? null
 }
 
 /** 第 idx 列对应的日期（双日视图用传入日期，桌面用周内日期） */
@@ -543,12 +543,12 @@ const rowHeight = computed(() => {
         <div class="wd">
           {{ DAY_LABELS[dayOf(idx).getDay() === 0 ? 6 : dayOf(idx).getDay() - 1] }}
           <span v-if="isTodayCol(idx)" class="pill">今天</span>
-          <!-- 学期日历角标：假期 / 调休按周几上课（整天级别，与课程级「调课」角标并存） -->
+          <!-- 学期日历角标：假期 / 调休 / 补 X 月 X 日（整天级别，与课程级「调课」角标并存） -->
           <span
-            v-if="dayRuleOf(idx)"
+            v-if="dayRuleOf(idx)?.dayLabel"
             class="pill rule"
-            :class="{ holiday: dayRuleOf(idx)?.kind === 'holiday' }"
-          >{{ dayRuleLabel(dayRuleOf(idx)) }}</span>
+            :class="{ holiday: dayRuleOf(idx)?.rule?.kind === 'holiday' }"
+          >{{ dayRuleOf(idx)?.dayLabel }}</span>
         </div>
         <div class="dt num">{{ dayOf(idx).getMonth() + 1 }}/{{ dayOf(idx).getDate() }}</div>
       </div>

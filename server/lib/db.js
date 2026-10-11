@@ -11,9 +11,12 @@ import { fileURLToPath } from 'node:url'
 import { createSnapshotSync } from './snapshot.js'
 import {
   expandWeeks,
+  fmtDate,
   normalizeInts,
+  parseLocalDate,
   periodRange,
   semesterWeekCount,
+  weekStartOf,
   MAX_PERIODS,
   MAX_WEEKS,
 } from './weekspan.js'
@@ -105,14 +108,16 @@ CREATE TABLE IF NOT EXISTS setting (
   value TEXT NOT NULL
 );
 
--- 学期日历：日期级规则（放假 / 调休按周几上课）。
--- 区间录入时逐日展开存储，列表展示再合并成区间（与「逐项展开存储、读取时派生」一致）。
+-- 学期日历：日期级规则。
+--   holiday = 该日放假（不上课）
+--   shift   = 整日移课：把 date 这一天的课移到 to_date（源日显示调休、目标日显示源日当天的课）
+-- 放假支持区间录入（逐日展开存储）；移课是「某日 → 某日」的一对一关系。
 CREATE TABLE IF NOT EXISTS semester_day_rule (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   semester_id INTEGER NOT NULL REFERENCES semester(id) ON DELETE CASCADE,
   date TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('holiday', 'follow')),
-  follow_weekday INTEGER,
+  kind TEXT NOT NULL CHECK (kind IN ('holiday', 'shift')),
+  to_date TEXT,
   note TEXT NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_day_rule_unique ON semester_day_rule (semester_id, date);
@@ -413,6 +418,64 @@ function migrateCourseModel() {
   }
 }
 
+// ============================================================
+// 学期日历迁移：调休由「按周几课表」改为「整日移课（某日 → 某日）」
+// 旧表：kind IN ('holiday','follow') + follow_weekday，无 to_date
+// 新表：kind IN ('holiday','shift')  + to_date
+// 幂等：仅当表存在且缺 to_date 列时重建；旧 follow 行无损转换为 shift
+// （源日 = 该周内 follow_weekday 对应的那一天，目标日 = 原来的 date），
+// 学期信息缺失时退化为 holiday，避免静默丢数据。
+// ============================================================
+{
+  const ruleCols = db.prepare("SELECT name FROM pragma_table_info('semester_day_rule')").all().map((r) => r.name)
+  if (ruleCols.length && !ruleCols.includes('to_date')) {
+    const legacyRows = db.prepare('SELECT * FROM semester_day_rule').all()
+    db.pragma('foreign_keys = OFF')
+    const run = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE semester_day_rule_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          semester_id INTEGER NOT NULL REFERENCES semester(id) ON DELETE CASCADE,
+          date TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('holiday', 'shift')),
+          to_date TEXT,
+          note TEXT NOT NULL DEFAULT ''
+        );
+      `)
+      const ins = db.prepare(
+        'INSERT INTO semester_day_rule_new (id, semester_id, date, kind, to_date, note) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      const getSem = db.prepare('SELECT * FROM semester WHERE id = ?')
+      let converted = 0
+      for (const r of legacyRows) {
+        if (r.kind === 'follow' && r.follow_weekday) {
+          const sem = getSem.get(r.semester_id)
+          if (sem) {
+            // 旧规则：date 当天按「该周 follow_weekday」上课 → 新规则：把那一天（源日）的课移到 date
+            const weekStart = weekStartOf(parseLocalDate(r.date), sem.week_start_day)
+            const source = new Date(weekStart)
+            source.setDate(weekStart.getDate() + ((((r.follow_weekday - sem.week_start_day) % 7) + 7) % 7))
+            ins.run(r.id, r.semester_id, fmtDate(source), 'shift', r.date, r.note)
+            converted++
+            continue
+          }
+        }
+        ins.run(r.id, r.semester_id, r.date, 'holiday', null, r.note)
+      }
+      db.exec('DROP TABLE semester_day_rule; ALTER TABLE semester_day_rule_new RENAME TO semester_day_rule;')
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_day_rule_unique ON semester_day_rule (semester_id, date)')
+      console.log(
+        `[migrate] 学期日历改为「整日移课」：${legacyRows.length} 条规则（其中 ${converted} 条旧「按周几课表」已转换为移课）`,
+      )
+    })
+    try {
+      run()
+    } finally {
+      db.pragma('foreign_keys = ON')
+    }
+  }
+}
+
 function safeParseInts(json) {
   try {
     const v = JSON.parse(json)
@@ -628,14 +691,14 @@ export function toHomework(row) {
   }
 }
 
-/** 学期日历规则行 → API 对象 */
+/** 学期日历规则行 → API 对象（holiday=放假；shift=把该日的课移到 toDate） */
 export function toDayRule(row) {
   return {
     id: row.id,
     semesterId: row.semester_id,
     date: row.date,
     kind: row.kind,
-    followWeekday: row.follow_weekday,
+    toDate: row.to_date,
     note: row.note,
   }
 }

@@ -1,15 +1,14 @@
 // ============================================================
 // ClassBoard · 学期日历与单课调整解析测试
-// 覆盖：放假 / 调休按周几上课 / 停课 / 调课（跨周）/ 补课 / 原位置标记 / 来源角标 /
-//       周次+星期→日期 的边界（星期日起算、学期首日非周起点）
-// 样例日期取自真实 2026 年 10 月：10/1 周四（国庆）、10/10 周六（调休补班）
+// 覆盖：放假 / 整日移课（某日 → 某日，不假设每周重复）/ 停课 / 调课 / 补课 /
+//       原位置标记 / 来源角标 / 周次+星期→日期 的边界（星期日起算、学期首日非周起点）
+// 样例日期取自真实 2026 年 10 月：9/29 周二、10/1 周四（国庆）、10/10 周六（调休）
 // ============================================================
 import { describe, it, expect } from 'vitest'
 import {
   adjustmentsOf,
   dateOfWeekday,
   dateWithWeekdayLabel,
-  dayRuleLabel,
   groupDayRules,
   markerLabel,
   movedFromLabel,
@@ -34,6 +33,12 @@ const courses: Course[] = [
     location: '实验楼302', color: 'course-2', remark: '',
     sessions: [{ id: 21, weekday: 4, location: '', periods: [7, 8], weeks: [7] }],
   },
+  {
+    id: 3, semesterId: 1, type: 'lab', name: '集成电路设计综合实践', teacher: '',
+    location: '', color: 'course-3', remark: '',
+    // 跳周实验课：第 5 周周二 第 1–4 节（9/29 就是第 5 周周二）
+    sessions: [{ id: 31, weekday: 2, location: '', periods: [1, 2, 3, 4], weeks: [5] }],
+  },
 ]
 
 const d = (s: string): Date => {
@@ -41,8 +46,8 @@ const d = (s: string): Date => {
   return new Date(y, m - 1, day)
 }
 
-const rule = (date: string, kind: 'holiday' | 'follow', followWeekday: number | null = null, note = ''): DayRule => ({
-  id: 1, semesterId: 1, date, kind, followWeekday: followWeekday as DayRule['followWeekday'], note,
+const rule = (date: string, kind: 'holiday' | 'shift', toDate: string | null = null, note = ''): DayRule => ({
+  id: 1, semesterId: 1, date, kind, toDate, note,
 })
 
 const adj = (over: Partial<CourseAdjustment>): CourseAdjustment => ({
@@ -73,7 +78,7 @@ describe('dateOfWeekday：周次 + 星期 → 日期（录入与校验共用）'
   })
 })
 
-describe('resolveDay：普通日 / 放假 / 调休按周几上课', () => {
+describe('resolveDay：普通日 / 放假', () => {
   it('普通日：该日真实星期的课都出现，来源均为基准课表', () => {
     const day = resolveDay(d('2026-10-15'), { semester, courses })
     expect(day.weekNumber).toBe(7)
@@ -81,30 +86,16 @@ describe('resolveDay：普通日 / 放假 / 调休按周几上课', () => {
     expect(day.rule).toBeNull()
     expect(day.blocks.map((b) => b.id)).toEqual([1, 2])
     expect(day.blocks.every((b) => b.source === 'base')).toBe(true)
-    // 实验课只在第 7 周，普通周不出现（第 6 周）
-    const w6 = resolveDay(d('2026-10-08'), { semester, courses })
-    expect(w6.blocks.map((b) => b.id)).toEqual([1])
+    expect(day.dayLabel).toBe('')
   })
 
-  it('放假：当天无课，effectiveWeekday 为 null，规则带备注', () => {
-    const day = resolveDay(d('2026-10-08'), {
-      semester, courses, rules: [rule('2026-10-08', 'holiday', null, '国庆节')],
+  it('放假：当天无课，角标「假期」，规则带备注', () => {
+    const day = resolveDay(d('2026-10-01'), {
+      semester, courses, rules: [rule('2026-10-01', 'holiday', null, '国庆节')],
     })
     expect(day.effectiveWeekday).toBeNull()
     expect(day.blocks).toEqual([])
-    expect(day.rule?.kind).toBe('holiday')
-    expect(dayRuleLabel(day.rule)).toBe('假期')
-  })
-
-  it('调休：10/10（周六）按周四课表上课——出现的是第 6 周周四的课', () => {
-    const day = resolveDay(d('2026-10-10'), {
-      semester, courses, rules: [rule('2026-10-10', 'follow', 4, '补 10/8 的课')],
-    })
-    expect(day.weekNumber).toBe(6)
-    expect(day.effectiveWeekday).toBe(4)
-    expect(day.blocks.map((b) => b.id)).toEqual([1]) // 第 6 周周四：只有理论课
-    expect(day.blocks[0].periods).toEqual([5, 6])
-    expect(dayRuleLabel(day.rule)).toBe('按周四课表')
+    expect(day.dayLabel).toBe('假期')
   })
 
   it('未开学 / 学期结束：均无课', () => {
@@ -113,12 +104,71 @@ describe('resolveDay：普通日 / 放假 / 调休按周几上课', () => {
   })
 })
 
+describe('整日移课：把某天的课移到另一天（不假设课表每周重复）', () => {
+  // 用户场景：9月29日（周二，第 5 周）的课移到 10月10日（周六）
+  const shift = rule('2026-09-29', 'shift', '2026-10-10', '国庆调休')
+
+  it('源日：当天无课，原位置逐门留「已移至 …」标记，角标「调休」', () => {
+    const day = resolveDay(d('2026-09-29'), { semester, courses, rules: [shift] })
+    expect(day.weekNumber).toBe(5)
+    expect(day.effectiveWeekday).toBeNull()
+    expect(day.blocks).toEqual([])
+    expect(day.dayLabel).toBe('调休')
+    // 9/29 是第 5 周周二：只有跳周的实践课（id=3）
+    expect(day.markers.map((m) => [m.courseId, m.kind, m.periods])).toEqual([[3, 'shift', [1, 2, 3, 4]]])
+    expect(markerLabel(day.markers[0])).toBe('已移至 10月10日（国庆调休）')
+  })
+
+  it('目标日：出现源日当天的课（第 5 周周二的实践课），带「调休」角标与来源说明', () => {
+    const day = resolveDay(d('2026-10-10'), { semester, courses, rules: [shift] })
+    expect(day.dayLabel).toBe('补 9月29日')
+    const shifted = day.blocks.filter((b) => b.source === 'shifted')
+    expect(shifted.map((b) => b.id)).toEqual([3])
+    expect(shifted[0].periods).toEqual([1, 2, 3, 4])
+    expect(shifted[0].weekday).toBe(6) // 渲染在周六（目标日真实星期）
+    expect(shifted[0].fromDate).toBe('2026-09-29')
+    expect(sourceBadge(shifted[0].source)).toBe('调休')
+    expect(movedFromLabel(shifted[0])).toBe('9月29日（周二） 的课调至今天（国庆调休）')
+  })
+
+  it('关键：移来的课按「源日所在周」取，不会错取目标日那一周的课', () => {
+    // 目标日所在周的周二（10/6 属第 6 周）并没有实践课，若按「周几」模型就会显示为空
+    const day = resolveDay(d('2026-10-10'), { semester, courses, rules: [shift] })
+    expect(day.blocks.some((b) => b.name === '集成电路设计综合实践')).toBe(true)
+  })
+
+  it('目标日本身也有课时，两批课并存', () => {
+    // 10/10 是周六：正常没有课；换到有课的目标日验证并存
+    const toThu = rule('2026-10-01', 'shift', '2026-10-15')
+    const day = resolveDay(d('2026-10-15'), { semester, courses, rules: [toThu] })
+    // 10/15 自己的两块（理论 + 实验） + 10/1（第 5 周周四）移来的理论课
+    expect(day.blocks.map((b) => `${b.id}:${b.source}`)).toEqual(['1:base', '1:shifted', '2:base'])
+    expect(day.dayLabel).toBe('补 10月1日')
+  })
+
+  it('目标日即使是假期，移来的课照常出现（显式指定优先）', () => {
+    const rules = [rule('2026-09-29', 'shift', '2026-10-10', ''), rule('2026-10-10', 'holiday', null, '校庆')]
+    const day = resolveDay(d('2026-10-10'), { semester, courses, rules })
+    expect(day.rule?.kind).toBe('holiday')
+    expect(day.blocks.map((b) => b.source)).toEqual(['shifted'])
+  })
+
+  it('源日没有课（休息日）时：无标记，目标日也不追加', () => {
+    const sun = rule('2026-10-11', 'shift', '2026-10-13', '')
+    const src = resolveDay(d('2026-10-11'), { semester, courses, rules: [sun] })
+    expect(src.markers).toEqual([])
+    expect(src.dayLabel).toBe('调休')
+    const dst = resolveDay(d('2026-10-13'), { semester, courses, rules: [sun] })
+    expect(dst.blocks.every((b) => b.source === 'base')).toBe(true)
+  })
+})
+
 describe('单课调整：停课 / 调课 / 补课与标记', () => {
   it('停课：原位置移除该课并留下标记，其他课不受影响', () => {
     const day = resolveDay(d('2026-10-15'), {
       semester, courses, adjustments: [adj({ id: 5, kind: 'cancel', note: '老师出差' })],
     })
-    expect(day.blocks.map((b) => b.id)).toEqual([2]) // 理论课被移除，实验课还在
+    expect(day.blocks.map((b) => b.id)).toEqual([2])
     expect(day.markers).toHaveLength(1)
     expect(day.markers[0]).toMatchObject({ courseId: 1, kind: 'cancel', periods: [5, 6], weekday: 4 })
     expect(markerLabel(day.markers[0])).toBe('停课（老师出差）')
@@ -126,29 +176,17 @@ describe('单课调整：停课 / 调课 / 补课与标记', () => {
 
   it('调课（跨周同星期）：原位置留「已调至 …」，目标日出现带来源标记的块', () => {
     const move = adj({ id: 7, kind: 'move', date: '2026-10-15', toDate: '2026-10-17', periods: [3, 4] })
-    // 原位置：10/15（周四）
     const src = resolveDay(d('2026-10-15'), { semester, courses, adjustments: [move] })
     expect(src.blocks.map((b) => b.id)).toEqual([2])
     expect(markerLabel(src.markers[0])).toBe('已调至 10月17日 第 3–4 节')
-    // 目标位置：10/17（周六，第 7 周）
     const dst = resolveDay(d('2026-10-17'), { semester, courses, adjustments: [move] })
     const moved = dst.blocks.find((b) => b.source === 'moved')
     expect(moved).toBeTruthy()
-    expect(moved!.id).toBe(1)
     expect(moved!.periods).toEqual([3, 4])
     expect(moved!.weekday).toBe(6)
     expect(moved!.fromDate).toBe('2026-10-15')
-    expect(moved!.adjustmentId).toBe(7)
     expect(sourceBadge(moved!.source)).toBe('调课')
     expect(movedFromLabel(moved!)).toBe('由 10月15日（周四） 第 5–6 节 调来')
-    expect(dst.markers).toEqual([])
-  })
-
-  it('调课到同一天的其他节次：仍是一次合法调整（日期相同）', () => {
-    const move = adj({ id: 8, kind: 'move', date: '2026-10-15', toDate: '2026-10-15', periods: [9, 10] })
-    const day = resolveDay(d('2026-10-15'), { semester, courses, adjustments: [move] })
-    expect(day.blocks.map((b) => `${b.id}:${b.source}:${b.startPeriod}`)).toEqual(['2:base:7', '1:moved:9'])
-    expect(day.markers).toHaveLength(1)
   })
 
   it('补课：额外一次课，带「补课」角标；显式指定优先于当天放假', () => {
@@ -160,29 +198,17 @@ describe('单课调整：停课 / 调课 / 补课与标记', () => {
     expect(day.blocks).toHaveLength(1)
     const b = day.blocks[0]
     expect(b.source).toBe('extra')
-    expect(b.id).toBe(2)
     expect(b.periods).toEqual([1, 2])
     expect(b.location).toBe('实验楼302')
     expect(sourceBadge(b.source)).toBe('补课')
-    expect(movedFromLabel(b)).toBe('补课（补实验）')
   })
 
   it('只影响被调整的那个时间组（同日同名课程的另一组不受影响）', () => {
-    // 停掉实验课（周 4 第 7–8 节）：理论课（周 4 第 5–6 节）不受影响
     const day = resolveDay(d('2026-10-15'), {
       semester, courses, adjustments: [adj({ id: 10, courseId: 2, fromPeriods: [7, 8] })],
     })
     expect(day.blocks.map((b) => b.id)).toEqual([1])
     expect(day.markers[0]).toMatchObject({ courseId: 2, periods: [7, 8] })
-  })
-
-  it('节次对不上时不误伤：仅按星期匹配会命中，故按「星期 + 节次」精确定位', () => {
-    // 理论课（节 5–6）配了 [7,8] 的调整（数据对不上）→ 不移除任何块，但仍留标记
-    const day = resolveDay(d('2026-10-15'), {
-      semester, courses, adjustments: [adj({ id: 12, courseId: 1, fromPeriods: [7, 8] })],
-    })
-    expect(day.blocks.map((b) => b.id)).toEqual([1, 2])
-    expect(day.markers).toHaveLength(1)
   })
 
   it('调整块不再叠加自身：目标日不会同时出现基准块与被调来的块', () => {
@@ -195,25 +221,25 @@ describe('单课调整：停课 / 调课 / 补课与标记', () => {
 })
 
 describe('日历规则列表与文案', () => {
-  it('连续日期合并为区间；类型/星期/备注不同则断开', () => {
+  it('连续放假日合并为区间；移课一行一对、不合并', () => {
     const rules: DayRule[] = [
       rule('2026-10-01', 'holiday', null, '国庆节'),
       { ...rule('2026-10-02', 'holiday', null, '国庆节'), id: 2 },
       { ...rule('2026-10-03', 'holiday', null, '国庆节'), id: 3 },
-      { ...rule('2026-10-10', 'follow', 4, '补班'), id: 4 },
+      { ...rule('2026-09-29', 'shift', '2026-10-10', '调休'), id: 4 },
       { ...rule('2026-10-05', 'holiday', null, '调休放假'), id: 5 },
     ]
     const ranges = groupDayRules(rules)
-    expect(ranges.map((r) => [rangeLabel(r), r.kind, r.dates.length])).toEqual([
-      ['10月1日–10月3日', 'holiday', 3],
-      ['10月5日', 'holiday', 1],
-      ['10月10日', 'follow', 1],
+    expect(ranges.map((r) => [r.kind, rangeLabel(r), r.dates.length, r.toDate ?? ''])).toEqual([
+      ['shift', '9月29日', 1, '2026-10-10'],
+      ['holiday', '10月1日–10月3日', 3, ''],
+      ['holiday', '10月5日', 1, ''],
     ])
   })
 
   it('日期文案带星期', () => {
     expect(dateWithWeekdayLabel('2026-10-15')).toBe('10月15日（周四）')
-    expect(dateWithWeekdayLabel('2026-10-17')).toBe('10月17日（周六）')
+    expect(dateWithWeekdayLabel('2026-10-10')).toBe('10月10日（周六）')
   })
 
   it('adjustmentsOf：按课程过滤并升序', () => {

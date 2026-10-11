@@ -537,12 +537,11 @@ export const useScheduleStore = defineStore('schedule', () => {
 
   // ---- 学期日历（放假 / 调休按周几上课）----
 
-  /** 区间设置日历规则（kind='clear' 清除）；服务端返回整表，直接替换 */
+  /** 区间设置日历规则（kind='clear' 清除；kind='shift' 时 from→to 为整日移课）；服务端返回整表，直接替换 */
   async function setCalendarRange(payload: {
     from: string
     to: string
-    kind: 'holiday' | 'follow' | 'clear'
-    followWeekday?: number
+    kind: 'holiday' | 'shift' | 'clear'
     note?: string
   }): Promise<void> {
     if (!currentSemesterId.value) throw new Error('未设置当前学期')

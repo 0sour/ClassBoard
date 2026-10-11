@@ -47,12 +47,12 @@ function vSem(s) { if (!s) return false; return vNum(s.id, 1) && vStr(s.name, 50
 function vPeriod(p) { if (!p) return false; return vNum(p.id, 1) && vNum(p.semesterId, 1) && vNum(p.index, 1, 30) && vTime(p.startTime) && vTime(p.endTime) }
 function vExam(e) { if (!e) return false; return vNum(e.id, 1) && vNum(e.semesterId, 1) && vStr(e.name, 50) && vDate(e.datetime) && (e.courseId === null || vNum(e.courseId, 1)) }
 function vHw(h) { if (!h) return false; return vNum(h.id, 1) && vNum(h.semesterId, 1) && vStr(h.name, 50) && vDate(h.dueAt) && (h.courseId === null || vNum(h.courseId, 1)) && (typeof h.done === 'boolean' || typeof h.done === 'number') }
-/** 学期日历规则：放假 / 调休按周几上课 */
+/** 学期日历规则：放假（holiday）/ 整日移课（shift，带 toDate） */
 function vDayRule(r) {
   if (!r) return false
   if (!vNum(r.semesterId, 1) || !vDate(r.date)) return false
-  if (!['holiday', 'follow'].includes(r.kind)) return false
-  if (r.kind === 'follow' && !vWeekday(r.followWeekday)) return false
+  if (!['holiday', 'shift'].includes(r.kind)) return false
+  if (r.kind === 'shift' && !(typeof r.toDate === 'string' && vDate(r.toDate))) return false
   return r.note === undefined || r.note === null || typeof r.note === 'string'
 }
 /** 单课调整：停课 / 调课 / 补课（fromPeriods / periods 为逐项整数数组） */
@@ -291,13 +291,13 @@ backupRouter.post(
         insHw.run(h.id, h.semesterId, uid, h.courseId ?? null, h.name, h.dueAt, h.done ? 1 : 0, h.remark ?? '')
       }
 
-      // 学期日历：随学期级联清理（旧数据已删），这里按备份重建（逐日一行）
+      // 学期日历：放假（逐日一行）/ 整日移课（某日 → 某日）；随学期级联清理（旧数据已删），这里按备份重建
       const insRule = db.prepare(
-        `INSERT OR REPLACE INTO semester_day_rule (semester_id, date, kind, follow_weekday, note)
+        `INSERT OR REPLACE INTO semester_day_rule (semester_id, date, kind, to_date, note)
          VALUES (?, ?, ?, ?, ?)`,
       )
       for (const r of ruleRows) {
-        insRule.run(r.semesterId, r.date, r.kind, r.kind === 'follow' ? r.followWeekday : null, r.note ?? '')
+        insRule.run(r.semesterId, r.date, r.kind, r.kind === 'shift' ? r.toDate : null, r.note ?? '')
       }
 
       // 单课调整：随课程级联清理（旧数据已删），按备份重建；

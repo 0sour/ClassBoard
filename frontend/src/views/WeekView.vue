@@ -14,7 +14,7 @@ import { exportElementAsPng } from '@/utils/exportPng'
 import { parseDate, toMonday } from '@/utils/week'
 import { toast } from '@/utils/ui'
 import { periodsLabel } from '@/utils/session'
-import { dayRuleLabel, markerLabel } from '@/utils/calendar'
+import { markerLabel, monthDayLabel } from '@/utils/calendar'
 import type { Course, Weekday } from '@/types'
 
 const store = useScheduleStore()
@@ -107,14 +107,15 @@ const dayResolved = computed(() => store.resolvedDay(activeDay.value))
 const dayBlocks = computed(() => dayResolved.value.blocks)
 const dayMarkers = computed(() => dayResolved.value.markers)
 
-/** 单日提示：假期 / 按周几课表 / 有几门课是调整过来的 */
+/** 单日提示：放假 / 调休（课已移走或补某天的课）/ 有几门课是调整过来的 */
 const dayNotice = computed(() => {
   const r = dayResolved.value
   const parts: string[] = []
-  if (r.rule?.kind === 'holiday') parts.push(dayRuleLabel(r.rule))
-  else if (r.rule?.kind === 'follow') parts.push(dayRuleLabel(r.rule))
+  if (r.rule?.kind === 'holiday') parts.push('假期')
+  else if (r.rule?.kind === 'shift') parts.push(`调休：今日的课已移至 ${r.rule.toDate ? monthDayLabel(r.rule.toDate) : ''}`)
+  else if (r.shiftSources.length) parts.push(r.dayLabel)
   const adjusted = r.blocks.filter((b) => b.source !== 'base').length
-  if (adjusted) parts.push(`${adjusted} 门课为调课/补课`)
+  if (adjusted) parts.push(`${adjusted} 门课为调课/补课/调休`)
   if (r.markers.length) parts.push(`${r.markers.length} 门课停课或调走`)
   return parts.join(' · ')
 })

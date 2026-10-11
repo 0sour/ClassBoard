@@ -9,7 +9,7 @@ import TimePicker from '@/components/common/TimePicker.vue'
 import DatePicker from '@/components/common/DatePicker.vue'
 import { confirm, toast } from '@/utils/ui'
 import { api, type SessionInfo, type UserInfo } from '@/api/client'
-import { WEEKDAY_LABELS, groupDayRules, rangeLabel } from '@/utils/calendar'
+import { dateWithWeekdayLabel, groupDayRules, monthDayLabel, rangeLabel, weekdayLabel, weekdayOfDateStr } from '@/utils/calendar'
 import type { Period, Semester } from '@/types'
 
 const store = useScheduleStore()
@@ -317,33 +317,36 @@ async function removePeriod(index: number): Promise<void> {
   }
 }
 
-// ================= 学期日历（放假 / 调休按周几上课） =================
-// 调休只影响「某一天按谁的课表上课、当天有没有课」；基准课表不动。
+// ================= 学期日历（放假 / 整日移课） =================
+// 放假：该日不上课；移课：把某一天的课整批移到另一天（源日显示调休、目标日显示源日当天的课）。
+// 移课不假设课表每周重复，故按「某日 → 某日」录入，而非「按周几课表」。
 const calFrom = ref('')
 const calTo = ref('')
-const calKind = ref<'holiday' | 'follow'>('holiday')
-const calFollowWeekday = ref(1)
+const calKind = ref<'holiday' | 'shift'>('holiday')
 const calNote = ref('')
 const calBusy = ref(false)
 const calError = ref('')
 
 const calKindOptions: AppSelectOption[] = [
-  { value: 'holiday', label: '放假（当天不上课）' },
-  { value: 'follow', label: '调休上课（按周几课表）' },
+  { value: 'holiday', label: '放假（该日不上课）' },
+  { value: 'shift', label: '调休（把某天的课移到另一天）' },
 ]
-const calWeekdayOptions: AppSelectOption[] = WEEKDAY_LABELS.map((label, i) => ({ value: i + 1, label }))
 
-/** 已录入的规则按区间合并展示 */
+/** 已录入的规则：放假按区间合并，移课一行一对 */
 const calendarRanges = computed(() => groupDayRules(store.dayRules))
 
 async function submitCalendarRange(): Promise<void> {
   calError.value = ''
   if (!calFrom.value || !calTo.value) {
-    calError.value = '请选择起止日期'
+    calError.value = calKind.value === 'shift' ? '请选择原上课日与移到哪天' : '请选择起止日期'
     return
   }
-  if (calTo.value < calFrom.value) {
+  if (calKind.value === 'holiday' && calTo.value < calFrom.value) {
     calError.value = '结束日期不能早于起始日期'
+    return
+  }
+  if (calKind.value === 'shift' && calFrom.value === calTo.value) {
+    calError.value = '「移到哪天」不能与原上课日相同'
     return
   }
   calBusy.value = true
@@ -352,11 +355,12 @@ async function submitCalendarRange(): Promise<void> {
       from: calFrom.value,
       to: calTo.value,
       kind: calKind.value,
-      followWeekday: calKind.value === 'follow' ? calFollowWeekday.value : undefined,
       note: calNote.value,
     })
     toast(
-      calKind.value === 'holiday' ? '已设为放假' : `已设为按${WEEKDAY_LABELS[calFollowWeekday.value - 1]}课表上课`,
+      calKind.value === 'holiday'
+        ? '已设为放假'
+        : `已把 ${dateWithWeekdayLabel(calFrom.value)} 的课移到 ${dateWithWeekdayLabel(calTo.value)}`,
       'success',
     )
     calFrom.value = ''
@@ -367,6 +371,11 @@ async function submitCalendarRange(): Promise<void> {
   } finally {
     calBusy.value = false
   }
+}
+
+/** 日期 → 「周X」（列表文案用） */
+function weekdayLabelOf(dateStr: string | null): string {
+  return dateStr ? weekdayLabel(weekdayOfDateStr(dateStr)) : ''
 }
 
 async function removeCalendarRange(from: string, to: string): Promise<void> {
@@ -900,29 +909,23 @@ function formatTime(iso: string | null): string {
         >清空本学期</button>
       </div>
       <p class="panel-note panel-note--block">
-        放假：该日不上课。调休上课：该日按所选星期的课表上课（如「10月10日按周三课表」）。
-        录入后周课表、今天页、提醒都会按日历走；课程本身的时间不变。
+        放假：该日不上课，可按区间录入。调休：把某一天的课整批移到另一天（如把 9月29日 的课移到 10月10日）——
+        源日显示为调休、目标日显示源日当天的课；不假设课表每周重复，实验课等跳周课程也会原样搬走。
       </p>
 
       <div class="cal-form">
         <label class="edit-field">
-          <span class="edit-field__label">起始日期</span>
+          <span class="edit-field__label">{{ calKind === 'shift' ? '原上课日' : '起始日期' }}</span>
           <DatePicker v-model="calFrom" size="sm" aria-label="起始日期" />
         </label>
         <label class="edit-field">
-          <span class="edit-field__label">结束日期</span>
+          <span class="edit-field__label">{{ calKind === 'shift' ? '移到哪天' : '结束日期' }}</span>
           <DatePicker v-model="calTo" size="sm" aria-label="结束日期" />
         </label>
         <label class="edit-field">
           <span class="edit-field__label">类型</span>
           <div class="select-wrap">
             <AppSelect v-model="calKind" :options="calKindOptions" aria-label="日历类型" />
-          </div>
-        </label>
-        <label v-if="calKind === 'follow'" class="edit-field">
-          <span class="edit-field__label">按哪天的课表</span>
-          <div class="select-wrap">
-            <AppSelect v-model="calFollowWeekday" :options="calWeekdayOptions" aria-label="按哪天的课表" />
           </div>
         </label>
         <label class="edit-field">
@@ -938,14 +941,19 @@ function formatTime(iso: string | null): string {
       <div v-if="!calendarRanges.length" class="panel-note panel-note--block">
         本学期还没有日历规则。学期范围内的日期才可录入。
       </div>
-      <div v-for="r in calendarRanges" :key="`${r.from}:${r.to}`" class="row">
+      <div v-for="r in calendarRanges" :key="`${r.kind}:${r.from}:${r.toDate ?? ''}`" class="row">
         <span class="row-main">
           <span class="row-title">
-            {{ rangeLabel(r) }}
-            <span class="chip">{{ r.kind === 'holiday' ? '放假' : `按${WEEKDAY_LABELS[(r.followWeekday ?? 1) - 1]}课表` }}</span>
+            <template v-if="r.kind === 'holiday'">
+              {{ rangeLabel(r) }}
+              <span class="chip">放假</span>
+            </template>
+            <template v-else>
+              {{ monthDayLabel(r.from) }} <span class="chip">调休</span> → {{ r.toDate ? monthDayLabel(r.toDate) : '' }}
+            </template>
           </span>
           <span class="row-meta">
-            {{ r.dates.length }} 天<span v-if="r.note"> · {{ r.note }}</span>
+            {{ r.kind === 'holiday' ? `${r.dates.length} 天` : `移课${r.toDate ? `（${weekdayLabelOf(r.from)} → ${weekdayLabelOf(r.toDate)}）` : ''}` }}<span v-if="r.note"> · {{ r.note }}</span>
           </span>
         </span>
         <button class="btn-mini btn-mini--danger" type="button" @click="removeCalendarRange(r.from, r.to)">清除</button>

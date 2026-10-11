@@ -66,26 +66,27 @@ export function ruleMapOf(rules: DayRule[] | undefined | null): Map<string, DayR
   return map
 }
 
-/** 当天上课采用的星期：假期 → null；调休「按周几上课」→ 该星期；否则 → 真实星期 */
-export function effectiveWeekdayOf(rule: DayRule | null | undefined, date: Date): Weekday | null {
-  if (rule?.kind === 'holiday') return null
-  if (rule?.kind === 'follow') return (rule.followWeekday ?? getWeekday(date)) as Weekday
-  return getWeekday(date)
+/** 当天是否有课（放假、调休移走均为 false） */
+export function hasClassesToday(day: Pick<ResolvedDay, 'rule' | 'effectiveWeekday'>): boolean {
+  return day.effectiveWeekday !== null
 }
 
-/** 日头角标文案：'假期' / '按周三课表' */
-export function dayRuleLabel(rule: DayRule | null | undefined): string {
-  if (!rule) return ''
-  if (rule.kind === 'holiday') return '假期'
-  return `按${weekdayLabel(rule.followWeekday)}课表`
+/** 日头角标文案：'假期' / '调休'（该日的课已移走）/ '补 9月29日'（该日是某日的调休目标） */
+export function dayRuleLabel(rule: DayRule | null | undefined, shiftSources: DayRule[] = []): string {
+  if (rule?.kind === 'holiday') return '假期'
+  if (rule?.kind === 'shift') return '调休'
+  if (shiftSources.length) {
+    return shiftSources.length === 1 ? `补 ${monthDayLabel(shiftSources[0].date)}` : `补 ${shiftSources.length} 天课`
+  }
+  return ''
 }
 
-/** 按「连续日期 + 同规则 + 同备注」合并为区间（设置页列表展示用） */
+/** 按「连续日期 + 同类型 + 同备注」合并为区间（设置页列表展示用；移课是「某日→某日」，不合并） */
 export interface DayRuleRange {
   from: string
   to: string
-  kind: 'holiday' | 'follow'
-  followWeekday: Weekday | null
+  kind: 'holiday' | 'shift'
+  toDate: string | null
   note: string
   dates: string[]
 }
@@ -96,12 +97,12 @@ export function groupDayRules(rules: DayRule[]): DayRuleRange[] {
   for (const r of sorted) {
     const last = out[out.length - 1]
     let contiguous = false
-    if (last) {
+    if (last && last.kind === 'holiday' && r.kind === 'holiday') {
       const next = parseDate(last.to)
       next.setDate(next.getDate() + 1)
       contiguous = formatDate(next) === r.date
     }
-    if (last && contiguous && last.kind === r.kind && last.followWeekday === r.followWeekday && last.note === r.note) {
+    if (last && contiguous && last.note === r.note) {
       last.to = r.date
       last.dates.push(r.date)
     } else {
@@ -109,7 +110,7 @@ export function groupDayRules(rules: DayRule[]): DayRuleRange[] {
         from: r.date,
         to: r.date,
         kind: r.kind,
-        followWeekday: r.followWeekday,
+        toDate: r.toDate,
         note: r.note,
         dates: [r.date],
       })
@@ -136,9 +137,13 @@ export function adjustmentLabel(a: CourseAdjustment): string {
   return `调课：${from} → ${to}`
 }
 
-/** 原位置淡显标记文案：'已调至 10月17日 第 3–4 节' / '停课' */
+/** 原位置淡显标记文案：'已调至 10月17日 第 3–4 节' / '已移至 10月10日' / '停课' */
 export function markerLabel(m: Pick<DayMarker, 'kind' | 'toDate' | 'toPeriods' | 'note'>): string {
   if (m.kind === 'cancel') return m.note ? `停课（${m.note}）` : '停课'
+  if (m.kind === 'shift') {
+    const base = m.toDate ? `已移至 ${monthDayLabel(m.toDate)}` : '已调休'
+    return m.note ? `${base}（${m.note}）` : base
+  }
   const parts = [m.toDate ? monthDayLabel(m.toDate) : '', periodsLabel(m.toPeriods ?? [])].filter(Boolean)
   const base = parts.length ? `已调至 ${parts.join(' ')}` : '已调课'
   return m.note ? `${base}（${m.note}）` : base
@@ -148,14 +153,19 @@ export function markerLabel(m: Pick<DayMarker, 'kind' | 'toDate' | 'toPeriods' |
 export function sourceBadge(source: string | undefined): string {
   if (source === 'moved') return '调课'
   if (source === 'extra') return '补课'
+  if (source === 'shifted') return '调休'
   return ''
 }
 
-/** 调来块的完整说明：'由 10月15日（周四） 第 5–6 节 调来' */
+/** 调来块的完整说明：'由 10月15日（周四） 第 5–6 节 调来' / '9月29日（周二） 的课调至今天' */
 export function movedFromLabel(
   b: Pick<ResolvedBlock, 'fromDate' | 'fromPeriods' | 'adjustmentNote'> & { source?: ResolvedBlock['source'] },
 ): string {
   if (b.source === 'extra') return b.adjustmentNote ? `补课（${b.adjustmentNote}）` : '补课'
+  if (b.source === 'shifted') {
+    const base = b.fromDate ? `${dateWithWeekdayLabel(b.fromDate)} 的课调至今天` : '调休移来的课'
+    return b.adjustmentNote ? `${base}（${b.adjustmentNote}）` : base
+  }
   if (b.source !== 'moved' || !b.fromDate) return ''
   const from = `${dateWithWeekdayLabel(b.fromDate)}${b.fromPeriods?.length ? ` ${periodsLabel(b.fromPeriods)}` : ''}`
   return b.adjustmentNote ? `由 ${from} 调来（${b.adjustmentNote}）` : `由 ${from} 调来`
@@ -225,35 +235,81 @@ function adjustedBlock(course: Course, a: CourseAdjustment, date: Date, location
 }
 
 /**
+ * 基准课表上「某一天」应有的课（不看日历规则）：该日所在周 + 该日真实星期。
+ * 调休移课要把源日这一整天的课原样搬走，故按源日的「周号 + 星期」取。
+ */
+function baseBlocksOf(date: Date, ctx: ResolveContext): ResolvedBlock[] {
+  const weekNumber = ctx.semester ? calcWeekNumber(date, ctx.semester) : null
+  if (weekNumber === null || weekNumber === 0) return []
+  const weekday = getWeekday(date)
+  const out: ResolvedBlock[] = []
+  for (const c of ctx.courses) {
+    const list = ctx.ignoreWeeks ? courseBlocks(c) : toBlocks(c, weekNumber)
+    for (const b of list) {
+      if (b.weekday !== weekday) continue
+      if (!ctx.ignoreWeeks && !b.active) continue
+      out.push({ ...b, source: 'base' })
+    }
+  }
+  return out
+}
+
+/**
  * 解析某一天实际发生的课程。
- * 1) 日历规则决定「当天按周的哪一天上课」；假期则无基础课
- * 2) 基础课来自各课程时间组（weekday 命中且 weeks 含该日周号）
+ * 1) 日历规则：放假 → 当天无课；调休移课 → 源日无课（课被搬走）、目标日显示源日当天的课
+ * 2) 基础课来自各课程时间组（weekday 命中且 weeks 含该日周号）——**不假设课表每周重复**
  * 3) 叠加单课调整：原位置的 cancel/move 移除并留标记；目标日的 move / 当日的 extra 追加带来源标记的块
- * 显式指定的调课/补课目标日不受「该日放假」影响（用户手动指定优先）。
+ * 显式指定的调课/补课/调休目标日不受「该日放假」影响（用户手动指定优先）。
  */
 export function resolveDay(date: Date, ctx: ResolveContext): ResolvedDay {
   const dateStr = formatDate(date)
-  const rule = rulesMapOf(ctx.rules).get(dateStr) ?? null
-  const weekNumber = ctx.semester ? calcWeekNumber(date, ctx.semester) : null
-  const inTerm = weekNumber !== null && weekNumber !== 0
-  const effectiveWeekday = effectiveWeekdayOf(rule, date)
+  const rules = rulesMapOf(ctx.rules)
+  const rule = rules.get(dateStr) ?? null
+  /** 该日作为调休目标：有哪些源日的课被移到了这一天 */
+  const shiftSources = [...rules.values()].filter((r) => r.kind === 'shift' && r.toDate === dateStr)
 
   const courseById = new Map(ctx.courses.map((c) => [c.id, c]))
 
+  // 本日自己的课：放假与「课被移走」两种情况都为空
   let blocks: ResolvedBlock[] = []
-  if (inTerm && effectiveWeekday !== null) {
-    const wd = effectiveWeekday
-    for (const c of ctx.courses) {
-      const list = ctx.ignoreWeeks ? courseBlocks(c) : toBlocks(c, weekNumber)
-      for (const b of list) {
-        if (b.weekday !== wd) continue
-        if (!ctx.ignoreWeeks && !b.active) continue
-        blocks.push({ ...b, source: 'base' })
-      }
+  const movedAway = rule?.kind === 'shift'
+  const ownBlocks = rule?.kind === 'holiday' ? [] : baseBlocksOf(date, ctx)
+  if (!movedAway) blocks = ownBlocks
+
+  const markers: DayMarker[] = []
+
+  // 整日调休：源日原位置留淡显标记，目标日把源日当天的课整批搬来
+  if (movedAway && rule) {
+    for (const b of ownBlocks) {
+      markers.push({
+        courseId: b.id,
+        name: b.name,
+        color: b.color,
+        weekday: b.weekday,
+        periods: normalizeInts(b.allPeriods),
+        kind: 'shift',
+        toDate: rule.toDate,
+        toPeriods: [],
+        note: rule.note,
+        adjustmentId: 0,
+        ruleId: rule.id,
+      })
+    }
+  }
+  for (const src of shiftSources) {
+    for (const b of baseBlocksOf(parseDate(src.date), ctx)) {
+      blocks.push({
+        ...b,
+        // 板块渲染列 = 目标日的真实星期
+        weekday: getWeekday(date),
+        source: 'shifted',
+        fromDate: src.date,
+        adjustmentNote: src.note,
+      })
     }
   }
 
-  const markers: DayMarker[] = []
+  // 单课调整（停课 / 调课 / 补课）
   for (const a of ctx.adjustments ?? []) {
     const course = courseById.get(a.courseId)
     if (!course) continue
@@ -271,7 +327,7 @@ export function resolveDay(date: Date, ctx: ResolveContext): ResolvedDay {
         courseId: course.id,
         name: course.name,
         color: course.color,
-        weekday: (a.fromWeekday ?? matched[0]?.weekday ?? effectiveWeekday ?? getWeekday(date)) as Weekday,
+        weekday: (a.fromWeekday ?? matched[0]?.weekday ?? getWeekday(date)) as Weekday,
         periods: normalizeInts(a.fromPeriods).length
           ? normalizeInts(a.fromPeriods)
           : normalizeInts(matched[0]?.allPeriods ?? sourceSession?.periods ?? []),
@@ -297,7 +353,16 @@ export function resolveDay(date: Date, ctx: ResolveContext): ResolvedDay {
 
   blocks.sort((x, y) => x.startPeriod - y.startPeriod || x.endPeriod - y.endPeriod || x.id - y.id)
 
-  return { date: dateStr, weekNumber, effectiveWeekday, rule, blocks, markers }
+  return {
+    date: dateStr,
+    weekNumber: ctx.semester ? calcWeekNumber(date, ctx.semester) : null,
+    effectiveWeekday: movedAway || rule?.kind === 'holiday' ? null : getWeekday(date),
+    rule,
+    shiftSources,
+    dayLabel: dayRuleLabel(rule, shiftSources),
+    blocks,
+    markers,
+  }
 }
 
 /** 解析多天（周网格 7 列 / 手机日卡），规则表只归一化一次 */
