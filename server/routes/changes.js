@@ -42,7 +42,12 @@ function rowToChange(row) {
 /** 这条记录改完的样子，和现在的实体对得上吗？（对得上 = 那一下还生效，撤销会盖掉它） */
 function stillInEffect(row) {
   const after = parseJson(row.after)
-  if (after == null) return true // 删除类记录：实体现在不存在才算生效，交给下面的比对
+  if (after == null) {
+    // 删除类记录：实体现在确实没了，才算「那一下还生效」。
+    // （删除已被撤销、实体又回来了 → 这条删除不再生效，不该挡住更早那条的撤销）
+    if (row.entity === 'calendar') return true
+    return entitySnapshot(row.entity, row.entity_id) == null
+  }
   const now = row.entity === 'calendar' ? null : entitySnapshot(row.entity, row.entity_id)
   return subsetEqual(now, after)
 }

@@ -7,6 +7,7 @@ import { classFromRequest, memberCourse, memberSemester } from '../lib/classes.j
 import { recordChange, entitySnapshot } from '../lib/changes.js'
 import { badRequest, notFound, wrap } from '../lib/errors.js'
 import { validateExam } from '../lib/validate.js'
+import { attachmentsOf } from '../lib/attachments.js'
 
 export const examsRouter = Router()
 
@@ -24,7 +25,7 @@ examsRouter.get(
     const sem = memberSemester(semesterId, req.user.id)
     if (!sem) throw notFound('学期不存在')
     const rows = db.prepare('SELECT * FROM exam WHERE semester_id = ? ORDER BY datetime DESC').all(semesterId)
-    res.json(rows.map(toExam))
+    res.json(rows.map((r) => ({ ...toExam(r), attachments: attachmentsOf('exam', r.id) })))
   }),
 )
 
@@ -53,7 +54,7 @@ examsRouter.post(
       entityId: id,
       after: entitySnapshot('exam', id),
     })
-    res.status(201).json(toExam(db.prepare('SELECT * FROM exam WHERE id = ?').get(id)))
+    res.status(201).json({ ...toExam(db.prepare('SELECT * FROM exam WHERE id = ?').get(id)), attachments: [] })
   }),
 )
 
@@ -81,7 +82,7 @@ examsRouter.put(
       before,
       after: entitySnapshot('exam', id),
     })
-    res.json(toExam(db.prepare('SELECT * FROM exam WHERE id = ?').get(id)))
+    res.json({ ...toExam(db.prepare('SELECT * FROM exam WHERE id = ?').get(id)), attachments: attachmentsOf('exam', id) })
   }),
 )
 

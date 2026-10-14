@@ -2,7 +2,7 @@
 // ClassBoard · 课程工具单测：颜色轮询、冲突检测（以课程块为单位）
 // ============================================================
 import { describe, it, expect } from 'vitest'
-import { blockKey, computeBlockOverlapGroups, isOverlap, pickCourseColor, sortBlocks } from '@/utils/course'
+import { blockKey, computeBlockOverlapGroups, courseOptionLabel, isOverlap, pickCourseColor, sortBlocks } from '@/utils/course'
 import { courseBlocks } from '@/utils/session'
 import type { Course, CourseBlock, Weekday } from '@/types'
 
@@ -145,5 +145,21 @@ describe('blockKey / sortBlocks', () => {
     const b = blockOf({ id: 2, name: 'B' }, 1, [7])
     const c = blockOf({ id: 3, name: 'C' }, 1, [2])
     expect(sortBlocks([a, b, c]).map((x) => x.id)).toEqual([3, 2, 1])
+  })
+})
+
+describe('courseOptionLabel（课程下拉选项文案）', () => {
+  it('理论课用课名原样', () => {
+    expect(courseOptionLabel(makeCourse({ id: 1, name: '数字信号处理' }))).toBe('数字信号处理')
+  })
+
+  it('实验课加「（实验）」后缀，与同名理论课区分', () => {
+    const lab = makeCourse({ id: 2, name: '数字信号处理', type: 'lab' })
+    expect(courseOptionLabel(lab)).toBe('数字信号处理（实验）')
+  })
+
+  it('课名里已含「实验」二字的不重复加后缀', () => {
+    const lab = makeCourse({ id: 3, name: '数据结构实验', type: 'lab' })
+    expect(courseOptionLabel(lab)).toBe('数据结构实验')
   })
 })

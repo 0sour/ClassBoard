@@ -21,6 +21,7 @@ import {
   toSemester,
 } from '../lib/db.js'
 import { AppError, badFile, tooLarge, wrap } from '../lib/errors.js'
+import { attachmentsOfMatters, hasBlob, insertAttachment, loadBlob, safeName, saveBlob, sha256Of } from '../lib/attachments.js'
 import { isMaskedApiKey, readSettings } from '../lib/settings.js'
 import { requireActive } from '../lib/access.js'
 import { createSnapshot } from '../lib/snapshot.js'
@@ -36,6 +37,9 @@ export const BACKUP_VERSION = 6
 
 /** 引入日历与单课调整的版本（更早的备份缺少这两个数据集） */
 const CALENDAR_VERSION = 5
+
+/** 备份文件上限：附件内容以 base64 内嵌（体积 ×1.34），比单个附件上限放宽若干倍 */
+const RESTORE_MAX_SIZE = 128 * 1024 * 1024
 
 const COURSE_TYPES = ['course', 'lab']
 function vStr(v, mx) { return typeof v === 'string' && v.trim().length > 0 && (mx ? v.length <= mx : true) }
@@ -74,6 +78,18 @@ function vAdjustment(a) {
 function vNotice(n) {
   if (!n) return false
   return vDate(n.date) && vStr(n.title, 100) && (n.body === undefined || typeof n.body === 'string')
+}
+/** 附件（v6 起可选）：sha256 + 名称必填，examId / homeworkId 二选一 */
+function vSha(v) { return typeof v === 'string' && /^[0-9a-f]{64}$/.test(v) }
+function vAttachment(a) {
+  if (!a) return false
+  if (!vSha(a.sha256) || !vStr(a.name, 120)) return false
+  const hasExam = a.examId !== undefined && a.examId !== null && vNum(a.examId, 1)
+  const hasHw = a.homeworkId !== undefined && a.homeworkId !== null && vNum(a.homeworkId, 1)
+  if (hasExam === hasHw) return false
+  if (a.mime !== undefined && a.mime !== null && typeof a.mime !== 'string') return false
+  if (a.size !== undefined && a.size !== null && (!Number.isInteger(a.size) || a.size < 0)) return false
+  return true
 }
 
 /** 新结构课程行校验：元数据 + sessions（节次/周次逐项数组） */
@@ -179,6 +195,22 @@ function buildExportPayload(classIds, uid) {
   const courseRows = semIds.length
     ? inSems(`SELECT * FROM course WHERE semester_id IN (${semIds.map(() => '?').join(',')}) ORDER BY id ASC`)
     : []
+  const examRows = semIds.length
+    ? inSems(`SELECT * FROM exam WHERE semester_id IN (${semIds.map(() => '?').join(',')}) ORDER BY id ASC`).map(toExam)
+    : []
+  const hwRows = semIds.length
+    ? inSems(`SELECT * FROM homework WHERE semester_id IN (${semIds.map(() => '?').join(',')}) ORDER BY id ASC`).map(toHomework)
+    : []
+  // 附件：只带元数据 + 用到的内容（base64 内嵌），导入时按 sha256 入池
+  const attachmentRows = attachmentsOfMatters(
+    examRows.map((e) => e.id),
+    hwRows.map((h) => h.id),
+  )
+  const blobs = {}
+  for (const sha of new Set(attachmentRows.map((a) => a.sha256))) {
+    const data = loadBlob(sha)
+    if (data) blobs[sha] = Buffer.from(data).toString('base64')
+  }
   return {
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
@@ -192,12 +224,10 @@ function buildExportPayload(classIds, uid) {
         ).map(toPeriod)
       : [],
     courses: toCoursesWithSessions(courseRows),
-    exams: semIds.length
-      ? inSems(`SELECT * FROM exam WHERE semester_id IN (${semIds.map(() => '?').join(',')}) ORDER BY id ASC`).map(toExam)
-      : [],
-    homework: semIds.length
-      ? inSems(`SELECT * FROM homework WHERE semester_id IN (${semIds.map(() => '?').join(',')}) ORDER BY id ASC`).map(toHomework)
-      : [],
+    exams: examRows,
+    homework: hwRows,
+    attachments: attachmentRows,
+    blobs,
     calendar: semIds.length
       ? inSems(
           `SELECT * FROM semester_day_rule WHERE semester_id IN (${semIds.map(() => '?').join(',')})
@@ -245,7 +275,7 @@ backupRouter.get(
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 },
+  limits: { fileSize: RESTORE_MAX_SIZE },
 })
 
 /**
@@ -260,7 +290,7 @@ backupRouter.post(
   wrap(async (req, res) => {
     const file = req.file
     if (!file) throw badFile('缺少上传文件')
-    if (file.size > 20 * 1024 * 1024) throw tooLarge()
+    if (file.size > RESTORE_MAX_SIZE) throw tooLarge()
     let data
     try {
       data = JSON.parse(file.buffer.toString('utf8'))
@@ -385,6 +415,10 @@ backupRouter.post(
     for (const a of adjRows) if (!vAdjustment(a)) problems.push(`调整记录无效：${JSON.stringify(a).slice(0, 80)}`)
     const noticeRows = Array.isArray(data.notices) ? data.notices : []
     for (const n of noticeRows) if (!vNotice(n)) problems.push(`通知数据无效：${JSON.stringify(n).slice(0, 80)}`)
+    // 附件（v6 起可选）：元数据 + 内容必须配套；引用要落在备份集合内，内容要与 sha256 对得上
+    const attachmentRows = Array.isArray(data.attachments) ? data.attachments : []
+    const blobMap = data.blobs && typeof data.blobs === 'object' && !Array.isArray(data.blobs) ? data.blobs : {}
+    for (const a of attachmentRows) if (!vAttachment(a)) problems.push(`附件数据无效：${JSON.stringify(a).slice(0, 80)}`)
     if (problems.length) {
       throw badFile(`备份文件存在 ${problems.length} 条无法识别的数据，已中止恢复（未改动任何数据）`, problems.slice(0, 20))
     }
@@ -404,6 +438,28 @@ backupRouter.post(
     const badAdjust = adjRows.filter((a) => !courseIdSet.has(a.courseId))
     if (badAdjust.length) {
       throw badFile(`备份文件不完整：${badAdjust.length} 条调整记录引用了不存在的课程，已中止恢复`)
+    }
+    // 附件：引用要落在备份的考试 / 作业里；内容要么已在本机 blob 池，要么在备份里且与 sha256 对得上
+    const examIdSet = new Set((data.exams ?? []).map((e) => e.id))
+    const hwIdSet = new Set((data.homework ?? []).map((h) => h.id))
+    const badAtt = attachmentRows.filter((a) =>
+      a.examId !== undefined && a.examId !== null ? !examIdSet.has(a.examId) : !hwIdSet.has(a.homeworkId),
+    )
+    if (badAtt.length) {
+      throw badFile(`备份文件不完整：${badAtt.length} 个附件引用了不存在的考试 / 作业，已中止恢复`)
+    }
+    const pendingBlobs = new Map() // sha256 → Buffer（恢复时先写进 blob 池）
+    for (const sha of new Set(attachmentRows.map((a) => a.sha256))) {
+      if (hasBlob(sha)) continue
+      const b64 = blobMap[sha]
+      if (typeof b64 !== 'string') {
+        throw badFile(`备份文件不完整：附件内容缺失（${sha.slice(0, 8)}…），已中止恢复`)
+      }
+      const buf = Buffer.from(b64, 'base64')
+      if (sha256Of(buf) !== sha) {
+        throw badFile(`备份文件已损坏：附件内容与校验值不符（${sha.slice(0, 8)}…），已中止恢复`)
+      }
+      pendingBlobs.set(sha, buf)
     }
     // 每个学期的课表数据都要有归属（分组后不能漏）
     const groupedSemIds = new Set(targets.flatMap((t) => t.group.semIds))
@@ -437,6 +493,11 @@ backupRouter.post(
       const gHw = (data.homework ?? []).filter((h) => gSemIds.has(h.semesterId))
       const gRules = ruleRows.filter((r) => gSemIds.has(r.semesterId))
       const gAdj = adjRows.filter((a) => gCourseIds.has(a.courseId))
+      const gExamIds = new Set(gExams.map((e) => e.id))
+      const gHwIds = new Set(gHw.map((h) => h.id))
+      const gAtt = attachmentRows.filter((a) =>
+        a.examId !== undefined && a.examId !== null ? gExamIds.has(a.examId) : gHwIds.has(a.homeworkId),
+      )
       const gNotices = noticeRows.filter(
         (n) => n.semesterId === undefined || n.classId === undefined || gSemIds.has(n.semesterId) || n.classId === cls.id,
       )
@@ -450,6 +511,7 @@ backupRouter.post(
         courseIds: gCourseIds,
         exams: gExams,
         homework: gHw,
+        attachments: gAtt,
         rules: gRules,
         adjustments: gAdj,
         notices: gNotices,
@@ -458,6 +520,8 @@ backupRouter.post(
     }
 
     const restore = db.transaction(() => {
+      // 附件内容先入池（元数据行写入时才能接上）；saveBlob 会重算哈希，此处只做落库
+      for (const buf of pendingBlobs.values()) saveBlob(buf)
       for (const t of targets) insertGroup(t.class, t.group)
       writeUserSettings(uid, data.settings ?? {})
     })
@@ -494,6 +558,7 @@ backupRouter.post(
         courses: courseRows.length,
         exams: (data.exams ?? []).length,
         homework: (data.homework ?? []).length,
+        attachments: attachmentRows.length,
         calendar: ruleRows.length,
         adjustments: adjRows.length,
         notices: noticeRows.length,
@@ -559,8 +624,9 @@ function writeGroupInto(cls, group, g) {
   const insExam = db.prepare(
     'INSERT INTO exam (id, semester_id, course_id, name, datetime, location, remark) VALUES (?, ?, ?, ?, ?, ?, ?)',
   )
+  const examMap = new Map()
   for (const e of g.exams) {
-    insExam.run(
+    const info = insExam.run(
       g.remap ? null : e.id,
       semMap.get(e.semesterId),
       e.courseId != null ? (courseMap.get(e.courseId) ?? null) : null,
@@ -569,12 +635,14 @@ function writeGroupInto(cls, group, g) {
       e.location ?? '',
       e.remark ?? '',
     )
+    examMap.set(e.id, g.remap ? Number(info.lastInsertRowid) : e.id)
   }
   const insHw = db.prepare(
     'INSERT INTO homework (id, semester_id, course_id, name, due_at, remark) VALUES (?, ?, ?, ?, ?, ?)',
   )
+  const hwMap = new Map()
   for (const h of g.homework) {
-    insHw.run(
+    const info = insHw.run(
       g.remap ? null : h.id,
       semMap.get(h.semesterId),
       h.courseId != null ? (courseMap.get(h.courseId) ?? null) : null,
@@ -582,6 +650,23 @@ function writeGroupInto(cls, group, g) {
       h.dueAt,
       h.remark ?? '',
     )
+    hwMap.set(h.id, g.remap ? Number(info.lastInsertRowid) : h.id)
+  }
+  // 附件：元数据按重编后的考试 / 作业 id 落库（内容在校验阶段已入 blob 池；上传者置空）
+  for (const a of g.attachments ?? []) {
+    if (!hasBlob(a.sha256)) continue
+    const examId = a.examId !== undefined && a.examId !== null ? examMap.get(a.examId) : null
+    const hwId = a.homeworkId !== undefined && a.homeworkId !== null ? hwMap.get(a.homeworkId) : null
+    if (examId == null && hwId == null) continue
+    insertAttachment({
+      examId: examId ?? null,
+      homeworkId: hwId ?? null,
+      name: safeName(a.name),
+      mime: typeof a.mime === 'string' ? a.mime : '',
+      size: Number.isInteger(a.size) ? a.size : 0,
+      sha256: a.sha256,
+      createdAt: a.createdAt ?? null,
+    })
   }
 
   // 学期日历：放假（逐日一行）/ 整日移课（某日 → 某日）

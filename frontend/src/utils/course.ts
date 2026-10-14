@@ -20,9 +20,17 @@ export function pickCourseColor(
   return { color, autoCount: autoCount + 1 }
 }
 
+/**
+ * 课程下拉选项文案：实验课加「（实验）」后缀，避免与同名理论课混在列表里分不清
+ * （教务导入的实验课常与理论课同名）。课名里已含「实验」二字的不再加后缀。
+ */
+export function courseOptionLabel(c: Pick<Course, 'name' | 'type'>): string {
+  if (c.type === 'lab' && !c.name.includes('实验')) return `${c.name}（实验）`
+  return c.name
+}
+
 /** 两个课程块是否时间重叠（同列 + 完整节次集合相交）。
- * 用完整节次（allPeriods）而非当周节次：保证冲突分组稳定、不随周次跳变。 */
-export function isOverlap(a: CourseBlock, b: CourseBlock): boolean {
+ * 用完整节次（allPeriods）而非当周节次：保证冲突分组稳定、不随周次跳变。 */export function isOverlap(a: CourseBlock, b: CourseBlock): boolean {
   if (a.weekday !== b.weekday) return false
   const pa = a.allPeriods?.length ? a.allPeriods : a.periods
   const pb = b.allPeriods?.length ? b.allPeriods : b.periods

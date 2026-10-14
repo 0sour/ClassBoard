@@ -50,6 +50,11 @@ export function errorHandler(err, req, res, next) {
   if (err && err.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
     return res.status(400).json({ code: 'VALIDATION_ERROR', message: '关联数据不存在' })
   }
+  // multer 上传错误（未在路由内自行转换时兜底）
+  if (err && err.name === 'MulterError') {
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ code: 'FILE_TOO_LARGE', message: '上传内容超过大小限制' })
+    return res.status(400).json({ code: 'VALIDATION_ERROR', message: '上传内容无法识别：' + err.message })
+  }
   console.error('[error]', err)
   res.status(500).json({ code: 'INTERNAL_ERROR', message: '服务器内部错误' })
 }

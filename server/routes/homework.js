@@ -9,6 +9,7 @@ import { classFromRequest, memberCourse, memberSemester } from '../lib/classes.j
 import { recordChange, entitySnapshot } from '../lib/changes.js'
 import { badRequest, notFound, wrap } from '../lib/errors.js'
 import { validateHomework } from '../lib/validate.js'
+import { attachmentsOf } from '../lib/attachments.js'
 
 export const homeworkRouter = Router()
 
@@ -35,7 +36,7 @@ homeworkRouter.get(
       throw badRequest('scope 取值无效')
     }
     sql += ' ORDER BY due_at ASC, id ASC'
-    res.json(db.prepare(sql).all(...params).map(toHomework))
+    res.json(db.prepare(sql).all(...params).map((r) => ({ ...toHomework(r), attachments: attachmentsOf('homework', r.id) })))
   }),
 )
 
@@ -64,7 +65,7 @@ homeworkRouter.post(
       entityId: id,
       after: entitySnapshot('homework', id),
     })
-    res.status(201).json(toHomework(db.prepare('SELECT * FROM homework WHERE id = ?').get(id)))
+    res.status(201).json({ ...toHomework(db.prepare('SELECT * FROM homework WHERE id = ?').get(id)), attachments: [] })
   }),
 )
 
@@ -92,7 +93,7 @@ homeworkRouter.put(
       before,
       after: entitySnapshot('homework', id),
     })
-    res.json(toHomework(db.prepare('SELECT * FROM homework WHERE id = ?').get(id)))
+    res.json({ ...toHomework(db.prepare('SELECT * FROM homework WHERE id = ?').get(id)), attachments: attachmentsOf('homework', id) })
   }),
 )
 

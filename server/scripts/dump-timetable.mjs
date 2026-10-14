@@ -59,6 +59,33 @@ for (const cls of classes) {
     .all(cls.id)
     .map((n) => ({ id: n.id, date: n.date, title: n.title, body: n.body, courseId: n.course_id, pinned: !!n.pinned }))
 
+  // 附件（作业 / 考试的图片与文件）：挂在各自的条目里；没有附件的库 digest 与从前一致（键省略）
+  const attByExam = new Map()
+  const attByHw = new Map()
+  if (exams.length || homework.length) {
+    const ors = []
+    const params = []
+    if (exams.length) {
+      ors.push(`exam_id IN (${exams.map(() => '?').join(',')})`)
+      params.push(...exams.map((e) => e.id))
+    }
+    if (homework.length) {
+      ors.push(`homework_id IN (${homework.map(() => '?').join(',')})`)
+      params.push(...homework.map((h) => h.id))
+    }
+    for (const a of db.prepare(`SELECT * FROM attachment WHERE ${ors.join(' OR ')} ORDER BY id ASC`).all(...params)) {
+      const byMatter = a.exam_id != null ? attByExam : attByHw
+      const key = a.exam_id ?? a.homework_id
+      if (!byMatter.has(key)) byMatter.set(key, [])
+      byMatter.get(key).push({ name: a.name, mime: a.mime, size: a.size, sha256: a.sha256 })
+    }
+  }
+  const withAtt = (obj, byMatter, id) => {
+    const list = byMatter.get(id)
+    return list?.length ? { ...obj, attachments: list } : obj
+  }
+  const attCount = [...attByExam.values(), ...attByHw.values()].reduce((n, l) => n + l.length, 0)
+
   /**
    * 内容快照：不含数据库自增 id 之外的任何环境信息；课程/上课时间/格子用
    * 名称 + 星期 + 节次 + 周次这类稳定字段表达，便于跨库比对。
@@ -93,8 +120,12 @@ for (const cls of classes) {
       location: a.location,
       note: a.note,
     })),
-    exams: exams.map((e) => ({ semesterId: e.semesterId, name: e.name, datetime: e.datetime, location: e.location, remark: e.remark })),
-    homework: homework.map((h) => ({ semesterId: h.semesterId, name: h.name, dueAt: h.dueAt, done: !!h.done, remark: h.remark })),
+    exams: exams.map((e) =>
+      withAtt({ semesterId: e.semesterId, name: e.name, datetime: e.datetime, location: e.location, remark: e.remark }, attByExam, e.id),
+    ),
+    homework: homework.map((h) =>
+      withAtt({ semesterId: h.semesterId, name: h.name, dueAt: h.dueAt, done: !!h.done, remark: h.remark }, attByHw, h.id),
+    ),
     notices: notices.map((n) => ({ date: n.date, title: n.title, body: n.body, courseId: n.courseId, pinned: n.pinned })),
   }
 
@@ -110,6 +141,7 @@ for (const cls of classes) {
       adjustments: adjustments.length,
       exams: exams.length,
       homework: homework.length,
+      attachments: attCount,
     },
     digest: digestOf(content),
     content,

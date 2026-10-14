@@ -29,14 +29,12 @@ const { hashPassword } = await import('../lib/access.js')
 
 // ---- 安全闸门：目标库必须没有任何班级 ----
 const existing = db.prepare('SELECT COUNT(*) AS c FROM class').get().c
-const existingUsers = db.prepare('SELECT COUNT(*) AS c FROM user').get().c
 if (existing > 0) {
   console.error(`[中止] ${resolve(dataDir)} 里已有 ${existing} 个班级——拒绝写入（这是保护真实数据的闸门）`)
   process.exit(1)
 }
 
 const now = new Date().toISOString()
-const week = (list) => list
 
 const seed = db.transaction(() => {
   // ---- 账号：demo / demo123456（管理员，便于演示全部功能）----

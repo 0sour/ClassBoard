@@ -3,6 +3,7 @@
 // 归属：班级 → 多个学期 → 课表；公开面（/public/*）无需登录且只读
 // ============================================================
 import type {
+  Attachment,
   ChangeList,
   Course,
   CourseAdjustment,
@@ -129,27 +130,38 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   })
-  if (!res.ok) {
-    let message = `请求失败（${res.status}）`
-    let code = ''
-    let payload: unknown = null
-    try {
-      const body = await res.json()
-      payload = body
-      if (body?.message) message = body.message
-      if (body?.code) code = body.code
-      if (body?.details?.length) message = `${message}：${body.details[0].message}`
-    } catch {
-      // 忽略非 JSON 响应
-    }
-    const err = new Error(message) as Error & { code?: string; status?: number; payload?: unknown }
-    err.code = code
-    err.status = res.status
-    err.payload = payload
-    throw err
-  }
+  if (!res.ok) await throwFrom(res)
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
+}
+
+/** multipart 提交（上传附件）：交给浏览器自己带 boundary，不要设 Content-Type */
+async function requestForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(BASE + path, { method: 'POST', body: form })
+  if (!res.ok) await throwFrom(res)
+  if (res.status === 204) return undefined as T
+  return res.json() as Promise<T>
+}
+
+/** 统一错误信封 → Error（消息取服务端 message，附带 code / status） */
+async function throwFrom(res: Response): Promise<never> {
+  let message = `请求失败（${res.status}）`
+  let code = ''
+  let payload: unknown = null
+  try {
+    const body = await res.json()
+    payload = body
+    if (body?.message) message = body.message
+    if (body?.code) code = body.code
+    if (body?.details?.length) message = `${message}：${body.details[0].message}`
+  } catch {
+    // 忽略非 JSON 响应
+  }
+  const err = new Error(message) as Error & { code?: string; status?: number; payload?: unknown }
+  err.code = code
+  err.status = res.status
+  err.payload = payload
+  throw err
 }
 
 /** 课程创建/更新请求体：元数据 + 上课时间组（节次/周次逐项数组） */
@@ -304,6 +316,11 @@ export const api = {
     request<Homework>(`/homework/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   deleteHomework: (id: number) => request<void>(`/homework/${id}`, { method: 'DELETE' }),
+
+  // ---- 作业 / 考试的图片与附件（内容按 sha256 池化；可见性跟随所在对象）----
+  uploadAttachment: (form: FormData) => requestForm<Attachment>('/attachments', form),
+
+  deleteAttachment: (id: number) => request<void>(`/attachments/${id}`, { method: 'DELETE' }),
 
   // ---- 班级通知（负责人手写；学生端在公开接口读同一份）----
   listNotices: (opts: { classId: number }) => request<Notice[]>(`/notices${query({ classId: opts.classId })}`),
@@ -482,6 +499,14 @@ export const api = {
   /** 考试公示（无需登录；前端按 datetime 分「未考 / 已结束」） */
   listPublicExams: (id: number, semesterId?: number) =>
     request<Exam[]>(`/public/classes/${id}/exams${query({ semesterId })}`),
+}
+
+/**
+ * 附件内容地址（公开接口，按所在对象可见性开放：后台与公开页共用同一份链接）。
+ * 图片用于 <img> 内联显示；文件用于 <a download> 下载。
+ */
+export function attachmentUrl(id: number): string {
+  return `${BASE}/public/attachments/${id}`
 }
 
 export interface UserInfo {

@@ -9,7 +9,8 @@ import AppSelect, { type AppSelectOption } from '@/components/common/AppSelect.v
 import DatePicker from '@/components/common/DatePicker.vue'
 import AdjustDetail from '@/components/schedule/AdjustDetail.vue'
 import ChangeHistoryModal from '@/components/changes/ChangeHistoryModal.vue'
-import type { Course, CourseAdjustment, ResolvedBlock } from '@/types'
+import MatterDetail from '@/components/matters/MatterDetail.vue'
+import type { Course, CourseAdjustment, Exam, Homework, ResolvedBlock } from '@/types'
 
 const props = defineProps<{ courseId: number | null }>()
 
@@ -25,6 +26,9 @@ const course = computed<Course | null>(() =>
 
 /** 关联记录 Tab（课程详情聚合该课程的考试/作业/调整） */
 const tab = ref<'exam' | 'homework' | 'adjust'>('exam')
+
+/** 关联记录 → 详情弹窗（图片内联 / 附件下载；负责人可上传） */
+const detail = ref<{ kind: 'exam' | 'homework'; matter: Exam | Homework } | null>(null)
 
 const examsOf = computed(() =>
   props.courseId === null ? [] : store.exams.filter((e) => e.courseId === props.courseId),
@@ -390,8 +394,20 @@ function onDelete(): void {
             <div class="rel-body">
               <template v-if="tab === 'exam'">
                 <div v-if="examsOf.length">
-                  <div v-for="e in examsOf" :key="e.id" class="rel-item">
+                  <div
+                    v-for="e in examsOf"
+                    :key="e.id"
+                    class="rel-item rel-item--clickable"
+                    role="button"
+                    tabindex="0"
+                    @click="detail = { kind: 'exam', matter: e }"
+                    @keydown.enter="detail = { kind: 'exam', matter: e }"
+                  >
                     <span class="rel-name">{{ e.name }}</span>
+                    <span v-if="e.attachments.length" class="rel-att">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
+                      {{ e.attachments.length }}
+                    </span>
                     <span class="rel-meta num">{{ e.datetime.replace('T', ' ') }}<template v-if="e.location"> · {{ e.location }}</template></span>
                   </div>
                 </div>
@@ -399,8 +415,20 @@ function onDelete(): void {
               </template>
               <template v-else-if="tab === 'homework'">
                 <div v-if="homeworkOf.length">
-                  <div v-for="h in homeworkOf" :key="h.id" class="rel-item">
+                  <div
+                    v-for="h in homeworkOf"
+                    :key="h.id"
+                    class="rel-item rel-item--clickable"
+                    role="button"
+                    tabindex="0"
+                    @click="detail = { kind: 'homework', matter: h }"
+                    @keydown.enter="detail = { kind: 'homework', matter: h }"
+                  >
                     <span class="rel-name">{{ h.name }}</span>
+                    <span v-if="h.attachments.length" class="rel-att">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
+                      {{ h.attachments.length }}
+                    </span>
                     <span class="rel-meta num">{{ h.dueAt.slice(0, 16).replace('T', ' ') }} 截止</span>
                   </div>
                 </div>
@@ -515,6 +543,14 @@ function onDelete(): void {
 
     <!-- 调整链路详情（与课表角标 / 台账同一张卡，叠在本弹窗之上） -->
     <AdjustDetail :open="!!adjustChain" :chain="adjustChain" @close="adjustChain = null" />
+
+    <!-- 关联作业 / 考试的详情（图片内联 / 附件下载，负责人可上传） -->
+    <MatterDetail
+      :open="detail !== null"
+      :kind="detail?.kind ?? 'homework'"
+      :matter="detail?.matter ?? null"
+      @close="detail = null"
+    />
 
     <!-- 这门课的变更历史（时间线 + 撤销） -->
     <ChangeHistoryModal
@@ -719,6 +755,40 @@ function onDelete(): void {
 
 .rel-item:first-of-type {
   border-top: none;
+}
+
+/* 关联作业 / 考试可点开详情（图片内联 / 附件下载） */
+.rel-item--clickable {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  padding-left: 6px;
+  padding-right: 6px;
+  margin-left: -6px;
+  margin-right: -6px;
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.rel-item--clickable:hover {
+  background: var(--color-bg-hover);
+}
+
+.rel-item--clickable:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 1px;
+}
+
+/* 附件指示：图片 / 文件个数 */
+.rel-att {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.rel-att svg {
+  width: 12px;
+  height: 12px;
 }
 
 .rel-item--row {

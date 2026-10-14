@@ -16,6 +16,7 @@ import {
   toPeriod,
   toSemester,
 } from './db.js'
+import { toAttachment, attachmentsOf, attachmentsOfMatters } from './attachments.js'
 
 /** 整班状态快照（用于大范围操作：删学期、删节次连带的格子前移、导入覆盖、删班） */
 export function classStateSnapshot(classId) {
@@ -71,7 +72,9 @@ export function classStateSnapshot(classId) {
   const members = db
     .prepare('SELECT class_id, user_id, joined_at FROM class_member WHERE class_id = ? ORDER BY user_id ASC')
     .all(classId)
-  return { ...cls, semesters, periods, courses, exams, homework, dayRules, adjustments, notices, members }
+  // 附件随作业/考试级联删除，快照带上元数据（内容在 blob 池里，按 sha256 随时接回）
+  const attachments = attachmentsOfMatters(exams.map((e) => e.id), homework.map((h) => h.id))
+  return { ...cls, semesters, periods, courses, exams, homework, dayRules, adjustments, notices, members, attachments }
 }
 
 /** 学期子树快照：学期行 + 节次 + 课程（含上课时间与格子）+ 考试 / 作业 / 日历 / 调整。
@@ -86,12 +89,18 @@ export function semesterSubtree(semesterId) {
   const courses = toCoursesWithSessions(
     db.prepare('SELECT * FROM course WHERE semester_id = ? ORDER BY id ASC').all(semesterId),
   )
+  const exams = db.prepare('SELECT * FROM exam WHERE semester_id = ? ORDER BY id ASC').all(semesterId).map(toExam)
+  const homework = db
+    .prepare('SELECT * FROM homework WHERE semester_id = ? ORDER BY id ASC')
+    .all(semesterId)
+    .map(toHomework)
   return {
     ...toSemester(row),
     periods,
     courses,
-    exams: db.prepare('SELECT * FROM exam WHERE semester_id = ? ORDER BY id ASC').all(semesterId).map(toExam),
-    homework: db.prepare('SELECT * FROM homework WHERE semester_id = ? ORDER BY id ASC').all(semesterId).map(toHomework),
+    exams,
+    homework,
+    attachments: attachmentsOfMatters(exams.map((e) => e.id), homework.map((h) => h.id)),
     dayRules: db
       .prepare('SELECT * FROM semester_day_rule WHERE semester_id = ? ORDER BY id ASC')
       .all(semesterId)
@@ -133,11 +142,16 @@ const SNAPSHOTS = {
   },
   exam: (id) => {
     const row = db.prepare('SELECT * FROM exam WHERE id = ?').get(id)
-    return row ? toExam(row) : null
+    return row ? { ...toExam(row), attachments: attachmentsOf('exam', id) } : null
   },
   homework: (id) => {
     const row = db.prepare('SELECT * FROM homework WHERE id = ?').get(id)
-    return row ? toHomework(row) : null
+    return row ? { ...toHomework(row), attachments: attachmentsOf('homework', id) } : null
+  },
+  // 附件删除记录：快照只带元数据；内容在 blob 池里永久留存，回退按 sha256 接回
+  attachment: (id) => {
+    const row = db.prepare('SELECT * FROM attachment WHERE id = ?').get(id)
+    return row ? toAttachment(row) : null
   },
   day_rule: (id) => {
     const row = db.prepare('SELECT * FROM semester_day_rule WHERE id = ?').get(id)

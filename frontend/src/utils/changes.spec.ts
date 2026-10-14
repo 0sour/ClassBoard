@@ -31,6 +31,22 @@ describe('变更记录文案', () => {
     expect(changeTitle(rec({ entity: 'period', action: 'clear', before: null, after: null }))).toBe('清除节次')
   })
 
+  it('附件：标题有专门说法、副标题取文件名、可单条撤销', () => {
+    const att = { id: 3, examId: null, homeworkId: 5, name: '题目.png', mime: 'image/png', size: 2048, sha256: 'a'.repeat(64), kind: 'image' }
+    expect(changeTitle(rec({ entity: 'attachment', action: 'create', before: null, after: att }))).toBe('上传附件')
+    expect(changeTitle(rec({ entity: 'attachment', action: 'delete', before: att, after: null }))).toBe('删除附件')
+    expect(changeSubject(rec({ entity: 'attachment', action: 'create', before: null, after: att }))).toBe('题目.png')
+    expect(canRevert(rec({ entity: 'attachment', action: 'delete', before: att, after: null }))).toBe(true)
+  })
+
+  it('作业 / 考试的附件变化不摊进字段差异（附件有自己的记录）', () => {
+    const hw = (attachments: unknown[]) => ({ id: 5, semesterId: 2, courseId: null, name: '第三章习题', dueAt: '2026-10-20T22:00', remark: '', attachments })
+    const rows = changeRows(
+      rec({ entity: 'homework', action: 'update', before: hw([]), after: hw([{ id: 3, name: '题目.png' }]) }),
+    )
+    expect(rows).toEqual([])
+  })
+
   it('副标题取对象名字；整班快照取「学校 · 班级」', () => {
     expect(changeSubject(rec({ entity: 'course', action: 'update', before: courseSnap('A'), after: courseSnap('B') }))).toBe('B')
     expect(changeSubject(rec({ entity: 'notice', action: 'update', before: { title: '旧' }, after: { title: '新' } }))).toBe('新')

@@ -7,6 +7,7 @@
 // ============================================================
 import { db } from './db.js'
 import { badRequest } from './errors.js'
+import { hasBlob, insertAttachment } from './attachments.js'
 
 /** 能逐条回退的实体（其余实体只能整班回退：class_state / calendar 大操作 / user） */
 export const REVERTIBLE = new Set([
@@ -17,6 +18,7 @@ export const REVERTIBLE = new Set([
   'course',
   'exam',
   'homework',
+  'attachment',
   'adjustment',
   'notice',
   'day_rule',
@@ -80,6 +82,15 @@ function insertSemesterSubtree(sem) {
     insHomework.run(h.id, sem.id, courseIds.has(h.courseId) ? h.courseId : null, h.name, h.dueAt, h.remark ?? '')
   }
 
+  // 附件：元数据随考试 / 作业走；内容（blob）按 sha256 池化留存，撤销 / 回退后按哈希接回
+  const examIds = new Set((sem.exams ?? []).map((e) => e.id))
+  const hwIds = new Set((sem.homework ?? []).map((h) => h.id))
+  restoreAttachments(sem.attachments ?? [], (a) => {
+    if (a.examId != null) return examIds.has(a.examId)
+    if (a.homeworkId != null) return hwIds.has(a.homeworkId)
+    return false
+  })
+
   const insRule = db.prepare(
     'INSERT INTO semester_day_rule (id, semester_id, date, kind, to_date, note) VALUES (?, ?, ?, ?, ?, ?)',
   )
@@ -104,6 +115,29 @@ function insertSemesterSubtree(sem) {
       a.note ?? '',
       a.createdAt ?? new Date().toISOString(),
     )
+  }
+}
+
+/**
+ * 恢复一批附件元数据行（考试 / 作业快照、学期子树、整班快照共用）。
+ * keep = 判断「它所属的作业 / 考试是否也要一起恢复」；内容不在 blob 池里的跳过（池子只增不删，正常不会缺）。
+ */
+function restoreAttachments(list, keep) {
+  for (const a of list) {
+    if (!a.sha256 || !hasBlob(a.sha256)) continue
+    if (!keep(a)) continue
+    if (a.id != null && db.prepare('SELECT 1 FROM attachment WHERE id = ?').get(a.id)) continue
+    insertAttachment({
+      id: a.id ?? null,
+      examId: a.examId ?? null,
+      homeworkId: a.homeworkId ?? null,
+      name: a.name,
+      mime: a.mime ?? '',
+      size: a.size ?? 0,
+      sha256: a.sha256,
+      userId: null,
+      createdAt: a.createdAt ?? null,
+    })
   }
 }
 
@@ -204,17 +238,26 @@ export function applyClassState(snapshot) {
       homework: snapshot.homework ?? [],
       dayRules: snapshot.dayRules ?? [],
       adjustments: snapshot.adjustments ?? [],
+      // 附件的归属经考试 / 作业推导（快照是平铺的，按学期分好再插）
+      attachments: snapshot.attachments ?? [],
     }
     for (const sem of snapshot.semesters ?? []) {
       const courseIds = new Set(pool.courses.filter((c) => (c.semesterId ?? c.semester_id) === sem.id).map((c) => c.id))
+      const semExams = pool.exams.filter((e) => (e.semesterId ?? e.semester_id) === sem.id)
+      const semHw = pool.homework.filter((h) => (h.semesterId ?? h.semester_id) === sem.id)
+      const examIds = new Set(semExams.map((e) => e.id))
+      const hwIds = new Set(semHw.map((h) => h.id))
       insertSemesterSubtree({
         ...sem,
         periods: pool.periods.filter((p) => (p.semesterId ?? p.semester_id) === sem.id),
         courses: pool.courses.filter((c) => (c.semesterId ?? c.semester_id) === sem.id),
-        exams: pool.exams.filter((e) => (e.semesterId ?? e.semester_id) === sem.id),
-        homework: pool.homework.filter((h) => (h.semesterId ?? h.semester_id) === sem.id),
+        exams: semExams,
+        homework: semHw,
         dayRules: pool.dayRules.filter((r) => (r.semesterId ?? r.semester_id) === sem.id),
         adjustments: pool.adjustments.filter((a) => courseIds.has(a.courseId ?? a.course_id)),
+        attachments: pool.attachments.filter((a) =>
+          a.examId != null ? examIds.has(a.examId) : hwIds.has(a.homeworkId),
+        ),
       })
     }
     for (const n of snapshot.notices ?? []) insertNotice(n)
@@ -317,6 +360,8 @@ export function restoreEntity({ entity, entityId, classId, before }) {
         db.prepare(
           'INSERT INTO exam (id, semester_id, course_id, name, datetime, location, remark) VALUES (?, ?, ?, ?, ?, ?, ?)',
         ).run(before.id, before.semesterId, before.courseId ?? null, before.name, before.datetime, before.location ?? '', before.remark ?? '')
+        // 删考试会级联删附件；撤销时把元数据按原 id 接回（内容一直在 blob 池里）
+        restoreAttachments(before.attachments ?? [], (a) => a.examId === entityId)
       }
       return
     }
@@ -326,7 +371,35 @@ export function restoreEntity({ entity, entityId, classId, before }) {
         db.prepare(
           'INSERT INTO homework (id, semester_id, course_id, name, due_at, remark) VALUES (?, ?, ?, ?, ?, ?)',
         ).run(before.id, before.semesterId, before.courseId ?? null, before.name, before.dueAt, before.remark ?? '')
+        restoreAttachments(before.attachments ?? [], (a) => a.homeworkId === entityId)
       }
+      return
+    }
+    case 'attachment': {
+      if (!before) {
+        db.prepare('DELETE FROM attachment WHERE id = ?').run(entityId)
+        return
+      }
+      const ownerId = before.examId ?? before.homeworkId
+      const ownerTable = before.examId != null ? 'exam' : 'homework'
+      if (!db.prepare(`SELECT 1 FROM ${ownerTable} WHERE id = ?`).get(ownerId)) {
+        throw badRequest('它所属的作业 / 考试已被删除；请先撤销删除那条的记录，再恢复这个附件')
+      }
+      if (!hasBlob(before.sha256)) {
+        throw badRequest('附件内容已不在本机（可能是导入进来的记录），无法恢复')
+      }
+      db.prepare('DELETE FROM attachment WHERE id = ?').run(entityId)
+      insertAttachment({
+        id: before.id,
+        examId: before.examId ?? null,
+        homeworkId: before.homeworkId ?? null,
+        name: before.name,
+        mime: before.mime ?? '',
+        size: before.size ?? 0,
+        sha256: before.sha256,
+        userId: before.createdBy ?? null,
+        createdAt: before.createdAt ?? null,
+      })
       return
     }
     case 'adjustment': {

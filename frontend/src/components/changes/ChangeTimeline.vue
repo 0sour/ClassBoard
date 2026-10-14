@@ -62,6 +62,7 @@ const ENTITY_OPTIONS = [
   { value: 'period', label: '节次' },
   { value: 'exam', label: '考试' },
   { value: 'homework', label: '作业' },
+  { value: 'attachment', label: '附件' },
   { value: 'notice', label: '通知' },
   { value: 'class', label: '班级资料' },
   { value: 'member', label: '负责人' },

@@ -10,6 +10,7 @@ import { useScheduleStore } from '@/stores/schedule'
 import WeatherCard from './WeatherCard.vue'
 import HomeworkEditor from '@/components/matters/HomeworkEditor.vue'
 import ExamEditor from '@/components/matters/ExamEditor.vue'
+import MatterDetail from '@/components/matters/MatterDetail.vue'
 import { confirm, toast } from '@/utils/ui'
 import type { Exam, Homework } from '@/types'
 
@@ -40,6 +41,9 @@ const hwEditing = ref<Homework | null>(null)
 const showHwEditor = ref(false)
 const examEditing = ref<Exam | null>(null)
 const showExamEditor = ref(false)
+
+/** 详情弹窗：图片内联显示、附件下载（负责人还能上传 / 删除） */
+const detail = ref<{ kind: 'exam' | 'homework'; matter: Exam | Homework } | null>(null)
 
 /** 今日课程数：走统一解析（放假 / 调休按周几课表 / 调课与补课），不随周视图切换变化 */
 const todayCourseCount = computed(() => store.todayResolved.blocks.length)
@@ -101,6 +105,24 @@ function openCreate(): void {
     showHwEditor.value = true
   } else {
     examEditing.value = null
+    showExamEditor.value = true
+  }
+}
+
+function openDetail(kind: 'exam' | 'homework', matter: Exam | Homework): void {
+  detail.value = { kind, matter }
+}
+
+/** 详情里点「编辑」→ 打开对应的编辑弹窗（取 store 里的实时对象） */
+function editCurrent(): void {
+  const d = detail.value
+  if (!d) return
+  detail.value = null
+  if (d.kind === 'homework') {
+    hwEditing.value = store.homework.find((h) => h.id === d.matter.id) ?? (d.matter as Homework)
+    showHwEditor.value = true
+  } else {
+    examEditing.value = store.exams.find((e) => e.id === d.matter.id) ?? (d.matter as Exam)
     showExamEditor.value = true
   }
 }
@@ -218,13 +240,23 @@ function removeExam(e: Exam): void {
       <template v-if="panelTab === 'hw'">
         <div v-if="hwList.length" class="sp-list">
           <div v-for="h in hwList" :key="h.id" class="sp-item">
-            <div class="sp-item__main">
+            <div
+              class="sp-item__main is-clickable"
+              role="button"
+              tabindex="0"
+              @click="openDetail('homework', h)"
+              @keydown.enter="openDetail('homework', h)"
+            >
               <div class="date-chip">{{ dateChip(h.dueAt) }} {{ timeOf(h.dueAt) }} 截止</div>
               <div class="sp-item-title">{{ h.name }}</div>
               <div class="sp-item-meta">
-                <button v-if="h.courseId !== null" class="sp-link" type="button" @click="pickCourse(h.courseId)">
+                <button v-if="h.courseId !== null" class="sp-link" type="button" @click.stop="pickCourse(h.courseId)">
                   {{ courseNameOf(h.courseId) }}
                 </button>
+                <span v-if="h.attachments.length" class="sp-att">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
+                  {{ h.attachments.length }}
+                </span>
                 <span v-if="h.remark">{{ h.remark }}</span>
               </div>
             </div>
@@ -241,13 +273,23 @@ function removeExam(e: Exam): void {
       <template v-else>
         <div v-if="examList.length" class="sp-list">
           <div v-for="e in examList" :key="e.id" class="sp-item">
-            <div class="sp-item__main">
+            <div
+              class="sp-item__main is-clickable"
+              role="button"
+              tabindex="0"
+              @click="openDetail('exam', e)"
+              @keydown.enter="openDetail('exam', e)"
+            >
               <div class="date-chip">{{ dateChip(e.datetime) }} {{ timeOf(e.datetime) }}</div>
               <div class="sp-item-title">{{ e.name }}</div>
               <div class="sp-item-meta">
-                <button v-if="e.courseId !== null" class="sp-link" type="button" @click="pickCourse(e.courseId)">
+                <button v-if="e.courseId !== null" class="sp-link" type="button" @click.stop="pickCourse(e.courseId)">
                   {{ courseNameOf(e.courseId) }}
                 </button>
+                <span v-if="e.attachments.length" class="sp-att">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
+                  {{ e.attachments.length }}
+                </span>
                 <span v-if="e.location">{{ e.location }}</span>
                 <span v-if="e.remark">{{ e.remark }}</span>
               </div>
@@ -264,6 +306,13 @@ function removeExam(e: Exam): void {
 
     <HomeworkEditor :open="showHwEditor" :homework="hwEditing" @close="showHwEditor = false" @done="showHwEditor = false" />
     <ExamEditor :open="showExamEditor" :exam="examEditing" @close="showExamEditor = false" @done="showExamEditor = false" />
+    <MatterDetail
+      :open="detail !== null"
+      :kind="detail?.kind ?? 'homework'"
+      :matter="detail?.matter ?? null"
+      @close="detail = null"
+      @edit="editCurrent"
+    />
   </aside>
 </template>
 
@@ -466,6 +515,24 @@ function removeExam(e: Exam): void {
   min-width: 0;
 }
 
+/* 条目主体可点开详情（图片内联 / 附件下载） */
+.sp-item__main.is-clickable {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+  margin: -2px -4px;
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.sp-item__main.is-clickable:hover {
+  background: var(--color-bg-hover);
+}
+
+.sp-item__main.is-clickable:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 1px;
+}
+
 .sp-item__tools {
   display: flex;
   flex-direction: column;
@@ -536,6 +603,20 @@ function removeExam(e: Exam): void {
 .sp-link:hover {
   background: var(--color-brand);
   color: var(--color-text-inverse);
+}
+
+/* 附件指示：图片 / 文件的个数，点条目看详情 */
+.sp-att {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.sp-att svg {
+  width: 12px;
+  height: 12px;
 }
 
 .sp-empty {

@@ -87,6 +87,24 @@ export interface Semester {
   weekStartDay: 1 | 7
 }
 
+/**
+ * 作业 / 考试的图片与附件。
+ * 内容在服务端按 sha256 池化存放（撤销 / 回退 / 备份往返都靠它原样接回）；
+ * 可见性跟随所在对象：公开面未登录即可查看 / 下载。
+ */
+export interface Attachment {
+  id: number
+  examId: number | null
+  homeworkId: number | null
+  name: string
+  mime: string
+  size: number
+  sha256: string
+  /** image = 详情页直接内联展示；file = 提供下载 */
+  kind: 'image' | 'file'
+  createdAt: string
+}
+
 /** 考试 */
 export interface Exam {
   id: number
@@ -96,6 +114,7 @@ export interface Exam {
   datetime: string // YYYY-MM-DDTHH:mm
   location: string
   remark: string
+  attachments: Attachment[]
 }
 
 /** 作业（班级公示内容：负责人添加，截止前始终显示，无个人完成态） */
@@ -106,6 +125,7 @@ export interface Homework {
   name: string
   dueAt: string
   remark: string
+  attachments: Attachment[]
 }
 
 /** 班级通知（负责人手写；日期是排序键，置顶优先、其余按日期倒序，一条都不隐藏） */

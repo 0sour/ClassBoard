@@ -8,6 +8,7 @@ import { db, toCoursesWithSessions, toDayRule, toPeriod, toSemester, toNotice } 
 import { semestersOfClass } from '../lib/classes.js'
 import { notFound, badRequest, wrap } from '../lib/errors.js'
 import { readWeatherForCity } from '../lib/weather.js'
+import { attachmentsOf, isInlineImage, loadBlob } from '../lib/attachments.js'
 
 export const publicRouter = Router()
 
@@ -166,6 +167,7 @@ publicRouter.get(
         name: r.name,
         dueAt: r.due_at,
         remark: r.remark,
+        attachments: attachmentsOf('homework', r.id),
       })),
     )
   }),
@@ -193,8 +195,32 @@ publicRouter.get(
         datetime: r.datetime,
         location: r.location,
         remark: r.remark,
+        attachments: attachmentsOf('exam', r.id),
       })),
     )
+  }),
+)
+
+/**
+ * 附件内容（公开）：附件跟随所在对象的可见性 —— 课表和作业/考试本来就是免登录可看的。
+ * 图片内联展示；其余一律按附件下载，并带 nosniff（避免 SVG/HTML 内联的脚本风险）。
+ * 内容按 sha256 寻址、永不变更，因此可以放心长缓存。
+ */
+publicRouter.get(
+  '/attachments/:id',
+  wrap(async (req, res) => {
+    const row = db.prepare('SELECT * FROM attachment WHERE id = ?').get(Number(req.params.id))
+    if (!row) throw notFound('附件不存在')
+    const data = loadBlob(row.sha256)
+    if (!data) throw notFound('附件内容不存在')
+    const mime = row.mime || 'application/octet-stream'
+    const inline = isInlineImage(mime)
+    res.setHeader('Content-Type', inline ? mime : 'application/octet-stream')
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.setHeader('Content-Length', data.length)
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+    res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(row.name)}`)
+    res.send(data)
   }),
 )
 

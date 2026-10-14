@@ -7,6 +7,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import AppSelect, { type AppSelectOption } from '@/components/common/AppSelect.vue'
 import DatePicker from '@/components/common/DatePicker.vue'
 import { useScheduleStore } from '@/stores/schedule'
+import { courseOptionLabel } from '@/utils/course'
 import type { Notice } from '@/types'
 
 const props = defineProps<{ open: boolean; notice: Notice | null }>()
@@ -35,7 +36,7 @@ const busy = ref(false)
 const courseOptions = computed<AppSelectOption[]>(() =>
   store.courses
     .filter((c) => c.semesterId === store.currentSemesterId)
-    .map((c) => ({ value: c.id, label: c.name })),
+    .map((c) => ({ value: c.id, label: courseOptionLabel(c) })),
 )
 
 watch(

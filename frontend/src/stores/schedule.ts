@@ -14,7 +14,7 @@ import {
   type UserInfo,
   type WeatherData,
 } from '@/api/client'
-import type { Course, CourseAdjustment, CourseBlock, DayRule, Exam, Homework, Notice, Period, ResolvedDay, Semester, Weekday } from '@/types'
+import type { Attachment, Course, CourseAdjustment, CourseBlock, DayRule, Exam, Homework, Notice, Period, ResolvedDay, Semester, Weekday } from '@/types'
 import type { AdjustmentPayload } from '@/api/client'
 import { pickCourseColor } from '@/utils/course'
 import { resolveDay, resolveDays, ruleMapOf, type ResolveContext } from '@/utils/calendar'
@@ -825,6 +825,29 @@ export const useScheduleStore = defineStore('schedule', () => {
     await refreshSchedule()
   }
 
+  // ---- 作业 / 考试的图片与附件（图片在详情弹窗内联显示，其余下载）----
+
+  /** 上传一个文件到某条作业 / 考试；成功后把元数据接进对应条目 */
+  async function uploadAttachment(kind: 'exam' | 'homework', matterId: number, file: File): Promise<Attachment> {
+    assertWritable()
+    const form = new FormData()
+    form.append(kind === 'exam' ? 'examId' : 'homeworkId', String(matterId))
+    form.append('file', file)
+    const att = await api.uploadAttachment(form)
+    const list = kind === 'exam' ? exams.value : homework.value
+    const matter = list.find((m) => m.id === matterId)
+    if (matter) matter.attachments = [...matter.attachments, att]
+    return att
+  }
+
+  /** 删除一个附件（两张列表里一起摘掉，调用方不用管它挂在哪） */
+  async function deleteAttachment(id: number): Promise<void> {
+    assertWritable()
+    await api.deleteAttachment(id)
+    for (const m of exams.value) m.attachments = m.attachments.filter((a) => a.id !== id)
+    for (const m of homework.value) m.attachments = m.attachments.filter((a) => a.id !== id)
+  }
+
   // ---- 班级通知（负责人手写；置顶优先、按日期倒序，一条都不隐藏）----
 
   /** 与服务端同一排序：置顶优先 → 日期倒序 → id 倒序 */
@@ -1005,6 +1028,8 @@ export const useScheduleStore = defineStore('schedule', () => {
     addHomework,
     updateHomework,
     deleteHomework,
+    uploadAttachment,
+    deleteAttachment,
     loadMatters,
     loadNotices,
     notices,

@@ -36,6 +36,7 @@ const ENTITY_LABELS: Record<string, string> = {
   course: '课程',
   exam: '考试',
   homework: '作业',
+  attachment: '附件',
   adjustment: '单课调整',
   notice: '通知',
   calendar: '学期日历',
@@ -57,6 +58,8 @@ const SPECIAL_TITLES: Record<string, string> = {
   'period:update': '修改节次时间',
   'exam:create': '发布考试',
   'homework:create': '发布作业',
+  'attachment:create': '上传附件',
+  'attachment:delete': '删除附件',
   'adjustment:create': '登记调整',
   'adjustment:update': '修改调整',
   'adjustment:delete': '撤销调整',
@@ -97,6 +100,7 @@ const FIELD_LABELS: Record<string, Record<string, string>> = {
   class: { school: '学校', name: '班级名', major: '专业', city: '城市', current_semester_id: '当前学期' },
   day_rule: { date: '原日期', kind: '类型', toDate: '移到的日子', note: '备注' },
   user: { username: '用户名', role: '角色', status: '状态', disabled: '禁用', review_note: '审核理由' },
+  attachment: { name: '文件名', mime: '类型', size: '大小' },
   member: { userId: '账号' },
 }
 
@@ -114,7 +118,8 @@ const SKIP_KEYS = new Set([
   'updatedAt',
   'revert_of',
   'refs',
-  'adjustments',
+  // 作业 / 考试的附件变化有自己的记录，不摊进对象的字段差异里
+  'attachments',
 ])
 
 /** 关联课程的展示：给了查名函数就显示课名（没有就只显示编号） */
@@ -272,6 +277,7 @@ export function canRevert(c: Pick<ChangeRecord, 'entity' | 'action'>): boolean {
     'notice',
     'day_rule',
     'calendar',
+    'attachment',
   ].includes(c.entity)
 }
 

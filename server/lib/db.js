@@ -516,6 +516,37 @@ function migrateCourseModel() {
   if (removed.changes || removedLegacy.changes) console.log('[migrate] 个人提醒设置已移除（浏览器提醒功能下线）')
 }
 
+// ============================================================
+// 附件（作业 / 考试的图片与文件）
+//   attachment = 元数据行（挂在 exam 或 homework 上，级联删除）
+//   blob       = 文件内容，内容寻址（sha256 主键）且**不随删除清理** ——
+//                撤销 / 整班回退 / 导出导入都能按哈希把内容原样接回来
+// 幂等：CREATE TABLE IF NOT EXISTS
+// ============================================================
+{
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS attachment (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      exam_id INTEGER REFERENCES exam(id) ON DELETE CASCADE,
+      homework_id INTEGER REFERENCES homework(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      mime TEXT NOT NULL DEFAULT '',
+      size INTEGER NOT NULL DEFAULT 0,
+      sha256 TEXT NOT NULL,
+      created_by INTEGER,
+      created_at TEXT NOT NULL,
+      CHECK ((exam_id IS NULL) != (homework_id IS NULL))
+    );
+    CREATE TABLE IF NOT EXISTS blob (
+      sha256 TEXT PRIMARY KEY,
+      data BLOB NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_attachment_exam ON attachment(exam_id);
+    CREATE INDEX IF NOT EXISTS idx_attachment_homework ON attachment(homework_id);
+  `)
+}
+
 function migrateToClassPlatform() {
   const snap = createSnapshotSync(db, DATA_DIR, 'pre-class-migration')
   console.log('[migrate] 班级平台迁移开始，快照：' + snap)

@@ -26,6 +26,7 @@ import { adjustmentsRouter } from './routes/adjustments.js'
 import { examsRouter } from './routes/exams.js'
 import { homeworkRouter } from './routes/homework.js'
 import { noticesRouter } from './routes/notices.js'
+import { attachmentsRouter } from './routes/attachments.js'
 import { importRouter } from './routes/import.js'
 import { backupRouter } from './routes/backup.js'
 import { settingsRouter } from './routes/settings.js'
@@ -64,6 +65,7 @@ app.use('/api/adjustments', requireSession, requireActive, adjustmentsRouter)
 app.use('/api/exams', requireSession, requireActive, examsRouter)
 app.use('/api/homework', requireSession, requireActive, homeworkRouter)
 app.use('/api/notices', requireSession, requireActive, noticesRouter)
+app.use('/api/attachments', requireSession, requireActive, attachmentsRouter)
 app.use('/api/import', requireSession, requireActive, importRouter)
 app.use('/api/backup', requireSession, requireActive, backupRouter)
 app.use('/api/settings', requireSession, settingsRouter)
