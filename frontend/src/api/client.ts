@@ -333,9 +333,10 @@ export const api = {
   /** 城市搜索（设置页下拉）：返回 [{ name, adm1, adm2, id }] */
   searchCities: (q: string) => request<{ name: string; adm1: string; adm2: string; id: string }[]>(`/weather/cities?q=${encodeURIComponent(q)}`),
 
-  // ---- 备份 ----
-  exportBackup: async (): Promise<void> => {
-    const res = await fetch(BASE + '/backup')
+  // ---- 备份 / 导入导出 ----
+  /** 导出：scope='account' 我名下全部班级；'site' 整站（仅管理员，含账号与口令哈希） */
+  exportBackup: async (scope: 'account' | 'site' = 'account'): Promise<void> => {
+    const res = await fetch(BASE + (scope === 'site' ? '/backup/site' : '/backup'))
     if (!res.ok) {
       let message = `导出失败（${res.status}）`
       try {
@@ -358,10 +359,19 @@ export const api = {
     URL.revokeObjectURL(url)
   },
 
-  /** 恢复备份：传 classId 覆盖该班；不传则按备份新建一个班级 */
-  restoreBackup: async (file: File, classId?: number | null): Promise<{ restored: Record<string, unknown> }> => {
+  /**
+   * 恢复备份：
+   *   - 覆盖模式：传 classId（该班数据被清空后按备份重建）
+   *   - 新建班模式：不传 classId，用 school + name 给新班起名（多班备份各自沿用备份里的名字）
+   */
+  restoreBackup: async (
+    file: File,
+    opts: { classId?: number | null; school?: string; name?: string } = {},
+  ): Promise<{ restored: Record<string, unknown> }> => {
     const form = new FormData()
-    if (classId) form.append('classId', String(classId))
+    if (opts.classId) form.append('classId', String(opts.classId))
+    if (opts.school) form.append('school', opts.school)
+    if (opts.name) form.append('name', opts.name)
     form.append('file', file)
     const res = await fetch(BASE + '/backup/restore', { method: 'POST', body: form })
     if (!res.ok) {

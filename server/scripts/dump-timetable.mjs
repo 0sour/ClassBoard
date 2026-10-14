@@ -10,7 +10,7 @@
 // ============================================================
 import { createHash } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
-import { db, toAdjustment, toCoursesWithSessions, toDayRule, toExam, toHomework, toPeriod, toSemester } from '../lib/db.js'
+import { db, toAdjustment, toCoursesWithSessions, toDayRule, toExam, toHomework, toPeriod } from '../lib/db.js'
 
 const filter = process.argv[2] ?? ''
 const outFile = process.argv[3] ?? ''

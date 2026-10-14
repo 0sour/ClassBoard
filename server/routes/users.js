@@ -9,7 +9,7 @@ import { Router } from 'express'
 import { db } from '../lib/db.js'
 import { badRequest, notFound, wrap } from '../lib/errors.js'
 import { hashPassword, requireAdmin, revokeAllSessions, toUser } from '../lib/access.js'
-import { classStateSnapshot, recordChange, entitySnapshot } from '../lib/changes.js'
+import { classStateSnapshot, recordChange } from '../lib/changes.js'
 
 export const usersRouter = Router()
 

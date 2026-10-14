@@ -524,7 +524,7 @@ test('备份导出 v5 与恢复；天气 Key 脱敏', async () => {
   const payload = await out.json()
   assert.equal(out.status, 200)
   assert.equal(payload.version, 6)
-  assert.deepEqual(payload.classes[0], { school: '测试学院', name: '测试班', major: '', city: '' })
+  assert.deepEqual(payload.classes[0], { id: adminClassId, school: '测试学院', name: '测试班', major: '', city: '' })
   assert.equal(payload.semesters[0].classId, adminClassId)
   assert.equal(payload.courses.length, 1)
   assert.deepEqual(payload.courses[0].sessions[0].periods, [1, 2])
@@ -1399,7 +1399,7 @@ test('班级：创建 / 资料校验 / 同名 409 并可加入 / 资料修改', 
   assert.equal(dup.body.class.id, adminClassId)
 
   // 另一位负责人同名加入 → 同级成员
-  const { cookie, userId } = await makeApprovedLeader('mate')
+  const { cookie } = await makeApprovedLeader('mate')
   const lookup = await asApi(cookie, 'GET', '/api/classes/lookup?school=测试学院&name=测试班')
   assert.equal(lookup.body.found, true)
   const join = await asApi(cookie, 'POST', `/api/classes/${adminClassId}/join`)

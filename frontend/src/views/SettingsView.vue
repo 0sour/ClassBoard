@@ -494,11 +494,12 @@ async function saveWeatherSettings(): Promise<void> {
 const backupBusy = ref(false)
 const restoreInput = ref<HTMLInputElement | null>(null)
 
-async function exportBackup(): Promise<void> {
+async function exportBackup(scope: 'account' | 'site' = 'account'): Promise<void> {
   backupBusy.value = true
   try {
-    await apiExport()
-    toast('已导出备份文件', 'success')
+    const { api } = await import('@/api/client')
+    await api.exportBackup(scope)
+    toast(scope === 'site' ? '已导出整站备份' : '已导出备份文件', 'success')
   } catch (e) {
     toast(e instanceof Error ? e.message : '导出失败，请重试', 'error')
   } finally {
@@ -506,37 +507,86 @@ async function exportBackup(): Promise<void> {
   }
 }
 
-async function apiExport(): Promise<void> {
-  const { api } = await import('@/api/client')
-  await api.exportBackup()
+// ================= 导入恢复（两种模式） =================
+/** 待导入的文件 + 模式选择 */
+const restoreFile = ref<File | null>(null)
+const restoreMode = ref<'new' | 'overwrite'>('new')
+const restoreSchool = ref('')
+const restoreName = ref('')
+const restoreTargetClassId = ref<number | null>(null)
+const restoreError = ref('')
+/** 可覆盖的班级（我名下的） */
+const restoreClassOptions = computed<AppSelectOption[]>(() =>
+  store.classes.map((c) => ({ value: c.id, label: `${c.school} · ${c.name}` })),
+)
+
+function openRestoreDialog(file: File): void {
+  restoreFile.value = file
+  restoreMode.value = 'new'
+  restoreSchool.value = store.currentClass?.school ?? ''
+  restoreName.value = ''
+  restoreTargetClassId.value = store.currentClassId ?? null
+  restoreError.value = ''
+}
+
+async function submitRestore(): Promise<void> {
+  const file = restoreFile.value
+  if (!file) return
+  restoreError.value = ''
+  if (restoreMode.value === 'new') {
+    if (restoreSchool.value.trim().length < 2 || restoreName.value.trim().length < 2) {
+      restoreError.value = '请填写学校与班级名（各 2–40 字）'
+      return
+    }
+  } else if (!restoreTargetClassId.value) {
+    restoreError.value = '请选择要覆盖的班级'
+    return
+  }
+  const ok = await confirm({
+    title: restoreMode.value === 'new' ? '导入为新班级？' : '覆盖导入？',
+    desc:
+      restoreMode.value === 'new'
+        ? '备份会作为一个新班级导入，不影响现有班级。'
+        : '所选班级的数据会被清空后按备份重建（其余班级不受影响）。此操作会记入变更记录，可用整班回退撤销。',
+    danger: restoreMode.value === 'overwrite',
+    confirmText: '导入',
+  })
+  if (!ok) return
+  backupBusy.value = true
+  try {
+    const { api } = await import('@/api/client')
+    const res = await api.restoreBackup(
+      file,
+      restoreMode.value === 'new'
+        ? { school: restoreSchool.value.trim(), name: restoreName.value.trim() }
+        : { classId: restoreTargetClassId.value },
+    )
+    const r = res.restored as { semesters: number; courses: number; classes?: unknown[] }
+    await store.bootstrap()
+    toast(
+      `恢复完成：${r.semesters} 个学期 / ${r.courses} 门课程` +
+        (Array.isArray(r.classes) && r.classes.length > 1 ? `（${r.classes.length} 个班级）` : ''),
+      'success',
+    )
+    restoreFile.value = null
+  } catch (e) {
+    restoreError.value = e instanceof Error ? e.message : '恢复失败，请重试'
+  } finally {
+    backupBusy.value = false
+  }
 }
 
 function pickRestoreFile(): void {
   restoreInput.value?.click()
 }
 
-async function onRestoreFile(e: Event): Promise<void> {
+/** 选好文件后先问「导入到哪里」（新建班 / 覆盖已有班） */
+function onRestoreFile(e: Event): void {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
-  const ok = await confirm({
-    title: '导入备份',
-    desc: '备份将作为一个新班级导入（不影响现有班级数据）。导入后可在顶栏班级切换器中看到它。',
-    confirmText: '导入为新班级',
-  })
-  if (!ok) return
-  backupBusy.value = true
-  try {
-    const { api } = await import('@/api/client')
-    const res = await api.restoreBackup(file)
-    await store.bootstrap()
-    toast(`恢复完成：${res.restored.semesters} 个学期 / ${res.restored.courses} 门课程`, 'success')
-  } catch (err) {
-    toast(err instanceof Error ? err.message : '恢复失败，请重试', 'error')
-  } finally {
-    backupBusy.value = false
-  }
+  openRestoreDialog(file)
 }
 
 // ================= 账号（个人信息 / 已登录设备） =================
@@ -1465,17 +1515,24 @@ function formatTime(iso: string | null): string {
       </div>
       <div class="row row--wrap">
         <span class="row-main">
-          <span class="row-title">导出备份</span>
-          <span class="row-meta">导出你名下全部班级（含学期、课表、日历、科目调整与通知；天气密钥脱敏）</span>
+          <span class="row-title">导出备份（按账号）</span>
+          <span class="row-meta">你名下全部班级：学期、课表、日历、单课调整、通知；天气密钥脱敏写入</span>
         </span>
-        <button class="btn-mini" type="button" :disabled="backupBusy" @click="exportBackup">{{ backupBusy ? '处理中…' : '导出 JSON' }}</button>
+        <button class="btn-mini" type="button" :disabled="backupBusy" @click="exportBackup('account')">{{ backupBusy ? '处理中…' : '导出 JSON' }}</button>
+      </div>
+      <div v-if="store.currentUser?.role === 'admin'" class="row row--wrap">
+        <span class="row-main">
+          <span class="row-title">整站导出（管理员）</span>
+          <span class="row-meta">全部班级 + 全部账号（含口令哈希，可直接重建登录）；仅管理员可导出，请妥善保管</span>
+        </span>
+        <button class="btn-mini btn-mini--danger" type="button" :disabled="backupBusy" @click="exportBackup('site')">{{ backupBusy ? '处理中…' : '导出整站 JSON' }}</button>
       </div>
       <div class="row row--wrap">
         <span class="row-main">
           <span class="row-title">导入恢复</span>
-          <span class="row-meta">备份作为一个新班级导入；旧版备份文件自动升级到班级结构</span>
+          <span class="row-meta">两种模式：作为新班级导入，或覆盖已有班级；旧版（v2–v5）备份自动翻译成班级结构</span>
         </span>
-        <button class="btn-mini btn-mini--danger" type="button" :disabled="backupBusy" @click="pickRestoreFile">{{ backupBusy ? '处理中…' : '导入 JSON' }}</button>
+        <button class="btn-mini" type="button" :disabled="backupBusy" @click="pickRestoreFile">{{ backupBusy ? '处理中…' : '导入 JSON' }}</button>
         <input ref="restoreInput" class="hidden-input" type="file" accept=".json,application/json" @change="onRestoreFile" />
       </div>
     </div>
@@ -1688,6 +1745,58 @@ function formatTime(iso: string | null): string {
       </div>
     </div>
 
+    <!-- 导入恢复：选模式（新班 / 覆盖） -->
+    <div v-if="restoreFile" class="modal-mask" @mousedown.self="restoreFile = null">
+      <div class="modal" role="dialog" aria-modal="true" aria-label="导入备份">
+        <h3 class="modal-title">导入备份</h3>
+        <p class="modal-desc">{{ restoreFile.name }}</p>
+        <div class="restore-modes">
+          <label class="restore-mode" :class="{ active: restoreMode === 'new' }">
+            <input v-model="restoreMode" type="radio" value="new" />
+            <span>
+              <b>作为新班级</b>
+              <em>新建一个班承接这份备份，现有班级不受影响</em>
+            </span>
+          </label>
+          <label class="restore-mode" :class="{ active: restoreMode === 'overwrite' }">
+            <input v-model="restoreMode" type="radio" value="overwrite" />
+            <span>
+              <b>覆盖已有班级</b>
+              <em>清空所选班级后按备份重建（会记入变更记录，可整班回退）</em>
+            </span>
+          </label>
+        </div>
+        <div v-if="restoreMode === 'new'" class="edit-fields">
+          <label class="edit-field">
+            <span class="edit-field__label">学校</span>
+            <input v-model="restoreSchool" class="date-input" type="text" placeholder="如：无锡学院" maxlength="40" />
+          </label>
+          <label class="edit-field">
+            <span class="edit-field__label">班级名</span>
+            <input v-model="restoreName" class="date-input" type="text" placeholder="如：物联网 2301" maxlength="40" />
+          </label>
+        </div>
+        <div v-else class="edit-fields">
+          <label class="edit-field edit-field--wide">
+            <span class="edit-field__label">覆盖哪个班</span>
+            <div class="select-wrap">
+              <AppSelect v-model="restoreTargetClassId" :options="restoreClassOptions" aria-label="覆盖哪个班" />
+            </div>
+          </label>
+        </div>
+        <p class="panel-note panel-note--block">
+          多班备份选「作为新班级」时会按备份里的班级逐个新建（重名自动加「（导入）」后缀）。
+        </p>
+        <p v-if="restoreError" class="edit-error" role="alert">{{ restoreError }}</p>
+        <div class="edit-actions">
+          <button class="btn-mini" type="button" :disabled="backupBusy" @click="restoreFile = null">取消</button>
+          <button class="btn-mini btn-mini--primary" type="button" :disabled="backupBusy" @click="submitRestore">
+            {{ backupBusy ? '导入中…' : '开始导入' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- 单课调整：登记弹窗 + 详情卡（与课表角标同一张） -->
     <AdjustEditor
       :open="showAdjustEditor"
@@ -1772,6 +1881,47 @@ function formatTime(iso: string | null): string {
   color: var(--badge-extra-text);
   background: var(--badge-extra-bg);
   border: 1px solid var(--badge-extra-line);
+}
+
+/* 导入恢复：模式选择 */
+.restore-modes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  margin: var(--spacing-md) 0;
+}
+
+.restore-mode {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.restore-mode.active {
+  border-color: var(--color-brand);
+  background: var(--color-brand-subtle);
+}
+
+.restore-mode input {
+  margin-top: 3px;
+  accent-color: var(--color-brand);
+}
+
+.restore-mode b {
+  display: block;
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+}
+
+.restore-mode em {
+  font-style: normal;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  line-height: 1.5;
 }
 
 /* 变更记录视角切换（管理员） */

@@ -172,7 +172,7 @@ async function submitAdjust(): Promise<void> {
     const here = store.resolvedDay(parseDate(adjDate.value)).blocks.filter((b) => b.id === c.id)
     const same = (a: number[], b: number[]): boolean => a.length === b.length && a.every((v, i) => v === b[i])
     adjMatched.value = here.find((b) => same(b.periods, s.periods)) ?? (here.length === 1 ? here[0] : null)
-    if (!adjMatched) {
+    if (!adjMatched.value) {
       const what = here.length ? `这天这门课是 ${here.map((b) => periodsLabel(b.periods)).join('、')}` : '这天没有这门课'
       adjError.value = `${what}，与所选原时间（${periodsLabel(s.periods)}）对不上；请核对日期或改选原时间`
       return
