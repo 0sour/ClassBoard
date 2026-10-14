@@ -24,6 +24,17 @@
 
 > **已下线**（班级平台化改造中移除）：课程提醒（含实验课提醒）、事项页、访问口令、课程模板。
 
+## 🖼 界面预览
+
+> 以下截图均为**示例数据**（示例大学 · 示例 2301），不含任何真实班级信息；可用 `server/scripts/seed-demo.mjs` 一键复现（见「本地开发」）。
+
+<p align="center">
+  <img src="docs/images/week-desktop.png" alt="周课表（桌面）：调休 / 调课 / 补课角标与链路" width="660">
+  <img src="docs/images/public-class.png" alt="班级公开页（免登录只读）" width="660">
+  <br>
+  <img src="docs/images/today-mobile.png" alt="今天（手机）：日期轮盘 + 当天课程卡片" width="270">
+</p>
+
 ## 🚀 快速开始（Docker）
 
 ```bash
@@ -88,6 +99,17 @@ cd server && npm install && npm run dev
 # 前端（端口 5173，/api 代理到 3000）
 cd frontend && npm install && npm run dev
 ```
+
+想直接看到带数据的界面，可以写入一份**示例数据**（只写进专门的空目录，库里有任何班级都会被拒绝，不会碰真实数据）：
+
+```bash
+cd server
+CLASSBOARD_DATA_DIR=../backups/demo-seed node scripts/seed-demo.mjs --yes
+CLASSBOARD_DATA_DIR=../backups/demo-seed node index.js   # 账号 demo / demo123456
+```
+
+示例数据包含：班级「示例大学 · 示例 2301」、一个学期 + 12 节模板、10 门课（含实验课与单双周）、
+国庆调休与「调休 → 调课 → 再调课」链式调整、通知 / 考试 / 作业——README 的截图就是用它生成的。
 
 ## 🧪 测试
 

@@ -283,13 +283,20 @@ function editCourse(course: Course): void {
   color: var(--color-text-tertiary);
 }
 
-/* 原位置淡显（停课 / 已调走） */
+/* 原位置淡显（停课 / 已调走）：「已调至 …（备注）」较长，换行到第二行，不把课名挤成竖排 */
 .today-marker {
   border-style: dashed;
   border-color: var(--color-border-strong);
   box-shadow: none;
   background: transparent;
   cursor: default;
+  flex-wrap: wrap;
+}
+
+.today-marker .tc-slot {
+  flex: 1 1 100%;
+  white-space: normal;
+  padding-left: 22px; /* 对齐课名（圆点 10 + 间距 12） */
 }
 
 .today-marker .faint {
