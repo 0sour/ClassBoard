@@ -1819,19 +1819,14 @@ function formatTime(iso: string | null): string {
   margin-bottom: var(--spacing-lg);
 }
 
-/* Tab 导航 */
+/* Tab 导航：11 个页签，窄窗口自动换行（此前单行 + 隐藏滚动条会把右侧页签裁掉且无法滚动） */
 .settings-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--spacing-xs);
   margin-bottom: var(--spacing-lg);
   padding-bottom: var(--spacing-sm);
   border-bottom: 1px solid var(--color-border-default);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.settings-tabs::-webkit-scrollbar {
-  display: none;
 }
 
 .settings-tab {
