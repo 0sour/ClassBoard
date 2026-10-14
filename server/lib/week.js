@@ -3,7 +3,7 @@
 // 公式与 frontend/src/utils/week.ts 完全一致（同一套 weekspan 数学）
 // ============================================================
 import { db } from './db.js'
-import { getCurrentSemesterId as getCurrentSemesterIdRaw, toSemester as rowToSemester } from './db.js'
+import { getClassCurrentSemesterId, toSemester as rowToSemester } from './db.js'
 import { fmtDate, weekNumberIn, weekStartOf } from './weekspan.js'
 
 /**
@@ -28,10 +28,10 @@ export function weekRange(dateStr, weekStartDay) {
   return { startDate: fmtDate(start), endDate: fmtDate(end) }
 }
 
-/** 当前学期的完整行（按用户；未设置时为 null） */
-export function getCurrentSemester(userId) {
-  const id = getCurrentSemesterIdRaw(userId)
+/** 当前学期的完整行（按班级；未设置时为 null） */
+export function getCurrentSemester(classId) {
+  const id = getClassCurrentSemesterId(classId)
   if (id === null) return null
-  const row = db.prepare('SELECT * FROM semester WHERE id = ? AND user_id = ?').get(id, userId)
+  const row = db.prepare('SELECT * FROM semester WHERE id = ? AND class_id = ?').get(id, classId)
   return row ? rowToSemester(row) : null
 }

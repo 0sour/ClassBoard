@@ -14,7 +14,11 @@ const props = defineProps<{
   dragging?: boolean
 }>()
 
-const emit = defineEmits<{ (e: 'open', courseId: number): void }>()
+const emit = defineEmits<{
+  (e: 'open', courseId: number): void
+  /** 点调整角标：打开统一详情卡（不是课程详情） */
+  (e: 'open-adjust'): void
+}>()
 
 /** 课程色板三值 CSS 变量（从全局 :root 读取，运行时由 color 名映射） */
 const style = computed(() => ({
@@ -41,7 +45,9 @@ const adjusted = computed(() => badge.value !== '')
     <span v-if="conflict" class="conflict-dot" aria-hidden="true"></span>
     <span class="c-name">{{ course.name }}</span>
     <span v-if="!collapsed" class="c-loc">{{ course.location }}</span>
-    <span v-if="adjusted" class="adjust-corner"><AdjustBadge :block="course" compact /></span>
+    <span v-if="adjusted" class="adjust-corner">
+      <AdjustBadge :block="course" compact clickable @open="emit('open-adjust')" />
+    </span>
   </button>
 </template>
 

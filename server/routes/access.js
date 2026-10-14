@@ -50,7 +50,7 @@ accessRouter.post(
       )
       clearFails(username.trim())
       setSessionCookies(res, access, rememberToken)
-      res.json({ ok: true, user: toUser(user) })
+      res.json({ ok: true, user })
     } catch (e) {
       recordFail(username.trim())
       throw e
@@ -62,7 +62,7 @@ accessRouter.post(
   '/register',
   rateLimit,
   wrap(async (req, res) => {
-    const { username, password } = req.body ?? {}
+    const { username, password, school, major, className } = req.body ?? {}
     const name = String(username ?? '').trim()
     if (!/^[\w\u4e00-\u9fa5-]{2,20}$/.test(name)) {
       throw badRequest('用户名须为 2-20 位字母/数字/中文/下划线/连字符', [{ field: 'username', message: '用户名格式无效' }])
@@ -70,9 +70,15 @@ accessRouter.post(
     if (typeof password !== 'string' || password.length < 6 || password.length > 64) {
       throw badRequest('密码长度须为 6-64 位', [{ field: 'password', message: '密码长度须为 6-64 位' }])
     }
-    const { user, access } = register(name, password, deviceNameOf(req.headers['user-agent']), req.ip ?? '')
+    const { user, access } = register(
+      name,
+      password,
+      { school, major, className },
+      deviceNameOf(req.headers['user-agent']),
+      req.ip ?? '',
+    )
     setSessionCookies(res, access, null)
-    res.status(201).json({ ok: true, user: toUser(user) })
+    res.status(201).json({ ok: true, user })
   }),
 )
 

@@ -5,7 +5,7 @@ import { useScheduleStore } from '@/stores/schedule'
 import AppSelect from '@/components/common/AppSelect.vue'
 import ImportWizard from '@/components/import/ImportWizard.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
-import { formatMonthDay, parseDate } from '@/utils/week'
+import NoticeCenter from '@/components/notice/NoticeCenter.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -27,9 +27,8 @@ const pageTitle = computed(() => (route.meta.title as string) ?? 'ClassBoard')
 
 const isWeek = computed(() => route.name === 'week')
 const isDay = computed(() => route.name === 'day')
-const isTemplates = computed(() => route.name === 'templates')
 
-function switchView(name: 'week' | 'day' | 'templates'): void {
+function switchView(name: 'week' | 'day'): void {
   router.push({ name })
 }
 
@@ -41,7 +40,7 @@ const showUserMenu = ref(false)
 /** 退出登录 */
 function onLogout(): void {
   showUserMenu.value = false
-  void store.logout()
+  void store.logout().then(() => router.push({ name: 'login' }))
 }
 
 /** 点击外部关闭导入下拉（与提醒菜单一致：文档级 mousedown 监听，无遮罩，见 UI 4.9 约定） */
@@ -70,46 +69,17 @@ function setSemester(v: string | number | null): void {
   store.setSemester(Number(v))
 }
 
-/** 站内提醒：铃铛展开提醒下拉（不单独成页，见 UI 设计文档 1.2 / PRD 5.6）
- * 内容：未完成作业（作业截止提醒）+ 今日课程（上课提醒），数据来自真实接口 */
-const showReminderMenu = ref(false)
-const isSettings = computed(() => route.name === 'settings')
-const isMatters = computed(() => route.name === 'matters')
+/** 班级切换（负责人可同时管理多个班级；同级权限相同） */
+const classOptions = computed(() =>
+  store.classes.map((c) => ({ value: c.id, label: c.name })),
+)
 
-const reminders = computed(() => {
-  const list: { id: string; title: string; meta: string; kind: '课程' | '作业'; badge?: string }[] = []
-  // 今日上课课程：走统一解析（含放假 / 调休按周几课表 / 调课与补课），不随周视图切换变化
-  const day = store.todayResolved
-  if (day.rule?.kind === 'holiday') {
-    list.push({ id: 'holiday', title: '今天放假', meta: `${formatMonthDay(store.today)} 无课`, kind: '课程' })
-  }
-  for (const c of day.blocks) {
-    const p = store.periods[c.startPeriod - 1]
-    const suffix =
-      c.source === 'moved' && c.fromDate
-        ? `（由 ${formatMonthDay(parseDate(c.fromDate))} 调来）`
-        : c.source === 'extra'
-          ? '（补课）'
-          : ''
-    list.push({
-      id: `c${c.id}:${c.adjustmentId ?? c.sessionId ?? ''}`,
-      title: c.name,
-      meta: p ? `${formatMonthDay(store.today)} ${p.startTime} 上课${suffix}` : '今日上课',
-      kind: '课程',
-      badge: c.source === 'moved' ? '调课' : c.source === 'extra' ? '补课' : undefined,
-    })
-  }
-  // 未完成作业
-  for (const h of store.homework.filter((x) => !x.done)) {
-    list.push({
-      id: `h${h.id}`,
-      title: h.name,
-      meta: `${h.dueAt.slice(5, 10).replace('-', '月')}日截止`,
-      kind: '作业',
-    })
-  }
-  return list
-})
+function setClass(v: string | number | null): void {
+  if (v === null) return
+  void store.selectClass(Number(v))
+}
+
+const isSettings = computed(() => route.name === 'settings')
 </script>
 
 <template>
@@ -151,20 +121,19 @@ const reminders = computed(() => {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" /></svg>
         <span>今天</span>
       </button>
-      <button
-        class="seg-btn"
-        :class="{ active: isTemplates }"
-        type="button"
-        role="tab"
-        :aria-selected="isTemplates"
-        @click="switchView('templates')"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M3 9h18M9 21V9" /></svg>
-        <span>模板市场</span>
-      </button>
     </div>
 
     <div class="top-actions">
+      <!-- 班级切换（班级 → 多个学期 → 课表；多个班级时切换当前班级） -->
+      <AppSelect
+        v-if="store.classes.length"
+        class="class-select"
+        :model-value="store.currentClassId"
+        :options="classOptions"
+        aria-label="切换班级"
+        @update:model-value="setClass"
+      />
+
       <!-- 学期切换（自研 AppSelect，面板风格与 UI 一致；移动端限宽省略） -->
       <AppSelect
         class="semester-select"
@@ -193,53 +162,9 @@ const reminders = computed(() => {
         </div>
       </div>
 
-      <!-- 提醒（铃铛展开提醒下拉）与设置 -->
-      <div class="reminder-wrap">
-        <button
-          class="btn-icon"
-          :class="{ active: showReminderMenu }"
-          type="button"
-          aria-label="提醒"
-          aria-haspopup="menu"
-          :aria-expanded="showReminderMenu"
-          @click="showReminderMenu = !showReminderMenu"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg>
-          <span v-if="reminders.length" class="btn-badge">{{ reminders.length }}</span>
-        </button>
-        <div class="reminder-menu" v-if="showReminderMenu" role="menu" aria-label="提醒">
-          <div class="reminder-menu__head">提醒</div>
-          <button
-            v-for="r in reminders"
-            :key="r.id"
-            class="reminder-item"
-            type="button"
-            role="menuitem"
-          >
-            <span class="reminder-item__kind">{{ r.kind }}</span>
-            <span class="reminder-item__main">
-              <span class="reminder-item__title">
-                {{ r.title }}
-                <span v-if="r.badge" class="reminder-item__badge">{{ r.badge }}</span>
-              </span>
-              <span class="reminder-item__meta">{{ r.meta }}</span>
-            </span>
-          </button>
-          <div v-if="!reminders.length" class="reminder-empty">暂无提醒</div>
-        </div>
-        <div class="menu-backdrop" v-if="showReminderMenu" @click="showReminderMenu = false"></div>
-      </div>
-      <!-- 事项（考试/实验/作业，UI 设计文档 1.1：桌面顶栏入口）
-           移动端底部 Tab 已有「事项」入口，顶栏隐藏以免与标题争抢宽度、把设置按钮挤出屏幕 -->
-      <button
-        class="btn-icon btn-matters"
-        :class="{ active: isMatters }"
-        type="button"
-        aria-label="事项"
-        @click="$router.push('/matters')"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13" /><path d="M3 6h.01M3 12h.01M3 18h.01" /></svg>
-      </button>
+      <!-- 通知中心（负责人手写通知；角标 = 通知总数）与设置 -->
+      <NoticeCenter />
+
       <!-- 用户菜单：用户名 + 登出 -->
       <div class="user-wrap">
         <button
@@ -256,7 +181,7 @@ const reminders = computed(() => {
         <div class="user-menu" v-if="showUserMenu" role="menu" aria-label="用户">
           <div class="user-menu__head">
             <span class="user-menu__name">{{ store.currentUser?.username }}</span>
-            <span class="user-menu__role">{{ store.currentUser?.role === 'admin' ? '管理员' : '用户' }}</span>
+            <span class="user-menu__role">{{ store.currentUser?.role === 'admin' ? '管理员' : '班级负责人' }}</span>
           </div>
           <button type="button" role="menuitem" @click="$router.push('/settings?tab=account')">账号设置</button>
           <button type="button" role="menuitem" @click="onLogout">退出登录</button>
@@ -430,6 +355,12 @@ const reminders = computed(() => {
     min-width: 72px;
     max-width: 140px;
   }
+
+  .class-select {
+    flex: 0 1 130px;
+    min-width: 72px;
+    max-width: 130px;
+  }
 }
 
 @media (max-width: 767px) {
@@ -440,8 +371,8 @@ const reminders = computed(() => {
     max-width: 110px;
   }
 
-  /* 双类名提高特异性：覆盖同特异性的 .btn-icon 基础规则（后者在文件中更靠后） */
-  .btn-icon.btn-matters {
+  /* 移动端顶栏放不下班级选择器：改在「设置 → 班级」里切换（那里有完整班级列表） */
+  .class-select {
     display: none;
   }
 }
@@ -529,114 +460,6 @@ const reminders = computed(() => {
 .btn-icon svg {
   width: 18px;
   height: 18px;
-}
-
-/* 未读提醒角标（颜色对齐 UI 设计文档 1.2：--color-feedback-warning） */
-.btn-badge {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  line-height: 1;
-  color: var(--color-text-inverse);
-  background: var(--color-feedback-warning);
-  border-radius: var(--radius-full);
-}
-
-/* 提醒下拉面板 */
-.reminder-wrap {
-  position: relative;
-}
-
-.reminder-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  width: 280px;
-  background: var(--color-bg-surface);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-pop);
-  padding: var(--spacing-xs);
-  z-index: var(--z-index-modal);
-}
-
-.reminder-menu__head {
-  padding: var(--spacing-xs) var(--spacing-md);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-tertiary);
-}
-
-.reminder-item {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--spacing-sm);
-  width: 100%;
-  padding: var(--spacing-sm) var(--spacing-md);
-  border-radius: var(--radius-sm);
-  text-align: left;
-}
-
-.reminder-item:hover {
-  background: var(--color-bg-hover);
-}
-
-.reminder-item__kind {
-  flex: none;
-  font-size: 10px;
-  color: var(--color-brand);
-  background: var(--color-brand-subtle);
-  border-radius: var(--radius-full);
-  padding: 2px 7px;
-  margin-top: 1px;
-}
-
-.reminder-item__main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.reminder-item__title {
-  font-size: var(--font-size-md);
-  color: var(--color-text-body);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* 「调课 / 补课」角标 */
-.reminder-item__badge {
-  display: inline-block;
-  margin-left: 4px;
-  padding: 0 4px;
-  font-size: 10px;
-  line-height: 1.5;
-  color: var(--color-text-secondary);
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
-  vertical-align: 1px;
-}
-
-.reminder-item__meta {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-tertiary);
-}
-
-.reminder-empty {
-  padding: var(--spacing-lg) var(--spacing-md);
-  text-align: center;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-tertiary);
 }
 
 /* 点击外部关闭下拉 */

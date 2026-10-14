@@ -98,15 +98,29 @@ export interface Exam {
   remark: string
 }
 
-/** 作业 */
+/** 作业（班级公示内容：负责人添加，截止前始终显示，无个人完成态） */
 export interface Homework {
   id: number
   semesterId: number
   courseId: number | null
   name: string
   dueAt: string
-  done: boolean
   remark: string
+}
+
+/** 班级通知（负责人手写；日期是排序键，置顶优先、其余按日期倒序，一条都不隐藏） */
+export interface Notice {
+  id: number
+  classId: number
+  date: string
+  title: string
+  body: string
+  courseId: number | null
+  pinned: boolean
+  authorId: number | null
+  authorName: string
+  createdAt: string
+  updatedAt: string
 }
 
 /**
@@ -152,38 +166,65 @@ export interface CourseAdjustment {
 /** 课程块的来源：基准课表 / 由其他日期调来（单课调课）/ 补课 / 整日调休移来 */
 export type BlockSource = 'base' | 'moved' | 'extra' | 'shifted'
 
+/** 调整链的一站：调休整日移课（ruleId）或单课调整（adjustmentId） */
+export interface AdjustHop {
+  kind: 'shift' | 'move' | 'cancel' | 'extra'
+  /** 该站出发日期 */
+  from: string
+  /** 该站到达日期（cancel 为 null） */
+  to: string | null
+  /** 该站节次（cancel 为被停掉的节次） */
+  periods: number[]
+  fromPeriods: number[]
+  note: string
+  /** 单课调整 id；调休为 0，用 ruleId 指回日历规则 */
+  adjustmentId: number
+  ruleId?: number
+}
+
 /**
  * 解析后的课程块：在 CourseBlock 之上附加「来源」信息，
- * 供所有显示面（周网格 / 日卡 / 今天页 / 铃铛 / 侧栏 / 提醒）统一标记「这门课是调过来的」。
+ * 供所有显示面（周网格 / 日卡 / 今天页 / 侧栏）统一标记「这门课是调过来的」。
+ * 链式调整（调休 ⊕ 调课，任意顺序）：块只出现在**终到日**，
+ * chain 记录途经的每一站（≥2 站 → multiAdjusted）。
  */
 export interface ResolvedBlock extends CourseBlock {
   source: BlockSource
-  /** 调课 / 调休来源：原日期与原时间组 */
+  /** 基准日期（最初那一天） */
+  originDate?: string
+  /** 调课 / 调休来源：原日期与原时间组（= 基准日与基准节次） */
   fromDate?: string
   fromWeekday?: Weekday | null
   fromPeriods?: number[]
-  /** 关联的单课调整记录（可撤销） */
+  /** 关联的单课调整记录（可撤销；补课为出生记录） */
   adjustmentId?: number
   /** 调整备注 */
   adjustmentNote?: string
+  /** 完整调整链（基准块为空数组） */
+  chain?: AdjustHop[]
+  /** 链上 ≥2 站：显示「多次调整」角标 */
+  multiAdjusted?: boolean
 }
 
-/** 原位置标记：被停课 / 被调走 / 整日调休移走的课，在原来的那天留一个淡显标记 */
+/** 原位置标记：被停课 / 被调走 / 整日调休移走的课，在原来的那天留一个淡显标记；
+ *  链式调整的「中间站」也留一个淡显标记（kind='via'，文案带「经此」） */
 export interface DayMarker {
   courseId: number
   name: string
   color: string
   weekday: Weekday
   periods: number[]
-  kind: 'cancel' | 'move' | 'shift'
-  /** 调课 / 调休目标日期 */
+  kind: 'cancel' | 'move' | 'shift' | 'via'
+  /** 调课 / 调休目标日期（终到日） */
   toDate: string | null
   toPeriods: number[]
   note: string
-  /** 单课调整记录 id（调休为 0，用 ruleId 撤销） */
+  /** 从这一站把课调走的那条调整记录 id（整日调休站为 0，看 chain / ruleId） */
   adjustmentId: number
   /** 整日调休：对应的日历规则 id */
   ruleId?: number
+  /** 完整调整链（终到日视角），用于点开同一张详情卡 */
+  chain?: AdjustHop[]
 }
 
 /** 某一天解析结果：实际发生的课程块 + 原位置标记 + 该日日历规则 */

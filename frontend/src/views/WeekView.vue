@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import WeekNav from '@/components/schedule/WeekNav.vue'
 import WeekGrid from '@/components/schedule/WeekGrid.vue'
@@ -9,21 +8,38 @@ import SidePanel from '@/components/schedule/SidePanel.vue'
 import CourseModal from '@/components/schedule/CourseModal.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
 import AdjustBadge from '@/components/schedule/AdjustBadge.vue'
+import AdjustDetail from '@/components/schedule/AdjustDetail.vue'
 import Skeleton from '@/components/common/Skeleton.vue'
 import { exportElementAsPng } from '@/utils/exportPng'
-import { parseDate, toMonday } from '@/utils/week'
+import { formatDate, parseDate, toMonday } from '@/utils/week'
 import { toast } from '@/utils/ui'
 import { periodsLabel } from '@/utils/session'
-import { markerLabel, monthDayLabel } from '@/utils/calendar'
-import type { Course, Weekday } from '@/types'
+import { chainOfBlock, chainOfMarker, markerLabel, monthDayLabel, type AdjustmentChain } from '@/utils/calendar'
+import type { Course, DayMarker, ResolvedBlock, Weekday } from '@/types'
 
 const store = useScheduleStore()
-const router = useRouter()
 
 const selectedId = ref<number | null>(null)
 const editing = ref<Course | null>(null)
 const showEditor = ref(false)
 const exporting = ref(false)
+
+/** 调整详情卡（角标 / 原位置标记点开，与设置台账同一张卡） */
+const adjustChain = ref<AdjustmentChain | null>(null)
+
+/** 点课表块上的角标 → 详情卡；基准块（无链条）退回课程详情 */
+function openBlockAdjust(block: ResolvedBlock, dateStr: string): void {
+  const chain = chainOfBlock(block, dateStr)
+  if (chain) adjustChain.value = chain
+  else openCourse(block.id)
+}
+
+/** 点原位置 / 中间站标记 → 详情卡；无链条的旧标记退回课程详情 */
+function openMarkerAdjust(marker: DayMarker, dateStr: string): void {
+  const chain = chainOfMarker(marker, dateStr)
+  if (chain) adjustChain.value = chain
+  else openCourse(marker.courseId)
+}
 
 /** 空白格快捷新增：预填星期与节次 */
 const createSlot = ref<{ weekday: Weekday; period: number } | null>(null)
@@ -274,22 +290,19 @@ function openCourse(courseId: number): void {
   selectedId.value = courseId
 }
 
-/** 打开事项页并导航到对应作业 tab */
-function openHomework(h: { id: number; name: string; courseId?: number | null }): void {
-  router.push({ name: 'matters', query: { tab: 'homework', hwId: h.id } })
-}
-
 function closeModal(): void {
   selectedId.value = null
 }
 
 function editCourse(course: Course): void {
+  if (store.readonly) return
   selectedId.value = null
   editing.value = course
   showEditor.value = true
 }
 
 function createFromSlot(slot: { weekday: Weekday; period: number }): void {
+  if (store.readonly) return
   selectedId.value = null
   editing.value = null
   createSlot.value = slot
@@ -388,14 +401,14 @@ async function exportPng(): Promise<void> {
                   :key="`${c.id}:${c.sessionId ?? c.adjustmentId ?? 'x'}`"
                   class="dv-card"
                   type="button"
-                  @click="openCourse(c.id)"
+                  @click="c.chain?.length ? openBlockAdjust(c, formatDate(activeDay)) : openCourse(c.id)"
                 >
                   <span class="dv-dot-color" :style="{ background: `var(--${c.color}-text)` }"></span>
                   <span class="dv-time num">{{ periodTime(c.startPeriod).split('–')[0] }}<small>–{{ periodTime(c.endPeriod).split('–')[1] }}</small></span>
                   <span class="dv-main">
                     <span class="dv-name-row">
                       <span class="dv-name">{{ c.name }}</span>
-                      <AdjustBadge :block="c" />
+                      <AdjustBadge :block="c" clickable @open="openBlockAdjust(c, formatDate(activeDay))" />
                       <span
                         v-if="c.type === 'lab'"
                         class="dv-lab"
@@ -406,8 +419,8 @@ async function exportPng(): Promise<void> {
                   </span>
                   <span class="dv-slot num">{{ periodsLabel(c.periods) }}</span>
                 </button>
-                <!-- 原位置淡显：这一天本有课但停课 / 调走了 -->
-                <div v-for="m in dayMarkers" :key="`marker:${m.adjustmentId}`" class="dv-card dv-card--marker">
+                <!-- 原位置淡显：这一天本有课但停课 / 调走了（点开同一张调整详情卡） -->
+                <button v-for="m in dayMarkers" :key="`marker:${m.adjustmentId}`" class="dv-card dv-card--marker" type="button" @click="openMarkerAdjust(m, formatDate(activeDay))">
                   <span class="dv-dot-color dv-faint" :style="{ background: `var(--${m.color}-text)` }"></span>
                   <span class="dv-time num dv-faint">{{ periodsLabel(m.periods) }}</span>
                   <span class="dv-main">
@@ -416,7 +429,7 @@ async function exportPng(): Promise<void> {
                     </span>
                   </span>
                   <span class="dv-slot num">{{ markerLabel(m) }}</span>
-                </div>
+                </button>
                 <div v-if="dayBlocks.length === 0 && dayMarkers.length === 0" class="dv-empty">
                   {{ dayResolved.rule?.kind === 'holiday' ? '这一天放假' : '这一天没有排课' }}
                 </div>
@@ -428,12 +441,14 @@ async function exportPng(): Promise<void> {
         <!-- 桌面/平板：周课表网格（移动端由上方单日列表替代） -->
         <section v-if="!isMobile" class="schedule-card reveal">
           <div class="sched-scroll">
-            <!-- 周数据拉取中显示网格骨架（UI 4.4） -->
-            <Skeleton v-if="store.remote && !store.weekContext" variant="grid" />
+            <!-- 周数据拉取中显示网格骨架（UI 4.4）；公开只读页数据随页面一次取回，不显示骨架 -->
+            <Skeleton v-if="store.remote && !store.readonly && !store.weekContext" variant="grid" />
             <WeekGrid
               v-else
               :days="undefined"
               @open="openCourse"
+              @open-adjust="(block, dateStr) => openBlockAdjust(block, dateStr)"
+              @open-marker="(marker, dateStr) => openMarkerAdjust(marker, dateStr)"
               @create="createFromSlot"
             />
           </div>
@@ -455,10 +470,11 @@ async function exportPng(): Promise<void> {
       </div>
 
       <!-- 信息面板（桌面右侧 / 平板下方两列） -->
-      <SidePanel @open-course="openCourse" @open-homework="openHomework" />
+      <SidePanel @open-course="openCourse" />
     </div>
 
     <CourseModal :course-id="selectedId" @close="closeModal" @edit="editCourse" />
+    <AdjustDetail :open="!!adjustChain" :chain="adjustChain" @close="adjustChain = null" />
     <CourseEditor
       :open="showEditor"
       :course="editing"
@@ -743,13 +759,15 @@ async function exportPng(): Promise<void> {
 .dv-name-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap; /* 「调课 + 多次调整」两个角标在窄屏换行，不把课名挤成「微…」 */
   gap: 6px;
   min-width: 0;
 }
 
 .dv-name-row .dv-name {
   flex: 1;
-  min-width: 0;
+  /* 保底可读宽度：角标放不下就整体换行，而不是把课名压成「微…」 */
+  min-width: 7.5em;
 }
 
 /* 实验课标签（随课程色板，与桌面 CourseBlock.lab-tag 一致） */

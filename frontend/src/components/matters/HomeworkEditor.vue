@@ -18,7 +18,6 @@ const form = reactive({
   name: '',
   date: '',
   time: '',
-  done: false,
   remark: '',
 })
 
@@ -42,14 +41,12 @@ watch(
       form.name = props.homework.name
       form.date = props.homework.dueAt.slice(0, 10)
       form.time = props.homework.dueAt.slice(11, 16)
-      form.done = props.homework.done
       form.remark = props.homework.remark
     } else {
       form.courseId = null
       form.name = ''
       form.date = ''
       form.time = ''
-      form.done = false
       form.remark = ''
     }
   },
@@ -76,7 +73,6 @@ async function submit(): Promise<void> {
       courseId: form.courseId,
       name,
       dueAt: `${form.date}T${form.time}`,
-      done: form.done,
       remark: form.remark.trim(),
     }
     if (props.homework) await store.updateHomework(props.homework.id, payload)
@@ -124,13 +120,6 @@ async function submit(): Promise<void> {
                 <div class="datetime-row">
                   <DatePicker v-model="form.date" size="md" aria-label="截止日期" />
                   <TimePicker v-model="form.time" size="md" aria-label="截止时间" />
-                </div>
-              </label>
-              <label class="field">
-                <span class="field__label">完成状态</span>
-                <div class="switch-row">
-                  <input v-model="form.done" class="switch" type="checkbox" role="switch" aria-label="是否已完成" />
-                  <span class="switch-label">{{ form.done ? '已完成' : '未完成' }}</span>
                 </div>
               </label>
               <label class="field">
@@ -279,52 +268,6 @@ async function submit(): Promise<void> {
   outline: none;
   border-color: var(--color-brand);
   box-shadow: 0 0 0 2px var(--color-brand-subtle);
-}
-
-.switch-row {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  height: 40px;
-}
-
-.switch {
-  appearance: none;
-  -webkit-appearance: none;
-  position: relative;
-  width: 44px;
-  height: 26px;
-  margin: 0;
-  background: var(--color-bg-subtle);
-  border-radius: var(--radius-full);
-  cursor: pointer;
-  transition: background-color var(--motion-duration-normal) var(--motion-easing-standard);
-}
-
-.switch::after {
-  content: '';
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 20px;
-  height: 20px;
-  background: var(--color-white);
-  border-radius: var(--radius-full);
-  box-shadow: var(--shadow-card);
-  transition: transform var(--motion-duration-normal) var(--motion-easing-standard);
-}
-
-.switch:checked {
-  background: var(--color-brand);
-}
-
-.switch:checked::after {
-  transform: translateX(18px);
-}
-
-.switch-label {
-  font-size: var(--font-size-md);
-  color: var(--color-text-body);
 }
 
 .form-error {

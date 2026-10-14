@@ -7,13 +7,17 @@
 import { describe, it, expect } from 'vitest'
 import {
   adjustmentsOf,
+  badgeLabels,
+  chainLabel,
   dateOfWeekday,
   dateWithWeekdayLabel,
   groupDayRules,
   markerLabel,
   movedFromLabel,
   rangeLabel,
+  explainAdjustment,
   resolveDay,
+  ruleMapOf,
   sourceBadge,
   weekdayOfDateStr,
 } from '@/utils/calendar'
@@ -250,5 +254,142 @@ describe('日历规则列表与文案', () => {
     ]
     expect(adjustmentsOf(list, 1).map((a) => a.id)).toEqual([5, 3])
     expect(adjustmentsOf(list, 2).map((a) => a.id)).toEqual([4])
+  })
+})
+
+describe('链式调整：调休 ⊕ 调课（两种叠加顺序都要算对）', () => {
+  // 用户真实场景：9/11（第 2 周周五）第 2–4 节 高数
+  const gaoshu: Course = {
+    id: 9, semesterId: 1, type: 'course', name: '高等数学', teacher: '王老师',
+    location: 'C1-101', color: 'course-4', remark: '',
+    sessions: [{ id: 91, weekday: 5, location: '', periods: [2, 3, 4], weeks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] }],
+  }
+  const sem = { startDate: '2026-09-07', endDate: '2026-12-27', weekStartDay: 1 as const }
+  const shift = (from: string, to: string, id = 100): DayRule => ({
+    id, semesterId: 1, date: from, kind: 'shift', toDate: to, note: '',
+  })
+
+  it('场景 A：先调休（9/11→9/14）再调课（9/14→9/15）→ 课只出现在 9/15，9/11 与 9/14 都留标记', () => {
+    const adjustments: CourseAdjustment[] = [
+      adj({ id: 51, courseId: 9, date: '2026-09-14', kind: 'move', fromWeekday: 5, fromPeriods: [2, 3, 4], toDate: '2026-09-15', periods: [2, 3, 4], note: '老师出差' }),
+    ]
+    const ctx = { semester: sem, courses: [gaoshu], rules: ruleMapOf([shift('2026-09-11', '2026-09-14')]), adjustments }
+
+    const 源 = resolveDay(d('2026-09-11'), ctx)
+    expect(源.blocks).toHaveLength(0)
+    expect(源.markers).toHaveLength(1)
+    expect(源.markers[0].toDate).toBe('2026-09-15') // 标记直接写终到日
+    expect(markerLabel(源.markers[0])).toContain('已调至 9月15日')
+
+    const 中间站 = resolveDay(d('2026-09-14'), ctx)
+    expect(中间站.blocks).toHaveLength(0)
+    expect(中间站.markers).toHaveLength(1)
+    expect(中间站.markers[0].kind).toBe('via') // 中间站：淡显 + 「经此」
+    expect(markerLabel(中间站.markers[0])).toContain('（经此）')
+
+    const 终到 = resolveDay(d('2026-09-15'), ctx)
+    expect(终到.blocks).toHaveLength(1)
+    expect(终到.blocks[0].name).toBe('高等数学')
+    expect(终到.blocks[0].source).toBe('moved')
+    expect(终到.blocks[0].multiAdjusted).toBe(true) // 调休 + 调课 = 多次调整
+    expect(badgeLabels(终到.blocks[0])).toEqual(['调课', '多次调整'])
+    expect(chainLabel(终到.blocks[0].chain, 终到.blocks[0].originDate, 终到.blocks[0].fromPeriods)).toBe(
+      '9月11日（周五） 第 2–4 节 → 调休移 9月14日 → 调课改 9月15日 第 2–4 节',
+    )
+  })
+
+  it('场景 B：先调课（9/11→9/22）再调休（9/22→9/24）→ 课跟到 9/24', () => {
+    const adjustments: CourseAdjustment[] = [
+      adj({ id: 52, courseId: 9, date: '2026-09-11', kind: 'move', fromWeekday: 5, fromPeriods: [2, 3, 4], toDate: '2026-09-22', periods: [2, 3, 4], note: '换教室' }),
+    ]
+    const ctx = { semester: sem, courses: [gaoshu], rules: ruleMapOf([shift('2026-09-22', '2026-09-24')]), adjustments }
+
+    const 源 = resolveDay(d('2026-09-11'), ctx)
+    expect(源.blocks).toHaveLength(0)
+    expect(源.markers[0].toDate).toBe('2026-09-24')
+
+    const 中间站 = resolveDay(d('2026-09-22'), ctx)
+    expect(中间站.blocks).toHaveLength(0)
+    expect(中间站.markers).toHaveLength(1)
+    expect(中间站.markers[0].kind).toBe('via')
+
+    const 终到 = resolveDay(d('2026-09-24'), ctx)
+    expect(终到.blocks).toHaveLength(1)
+    expect(终到.blocks[0].source).toBe('shifted') // 最后一站是调休
+    expect(终到.blocks[0].multiAdjusted).toBe(true)
+    expect(badgeLabels(终到.blocks[0])).toEqual(['调休', '多次调整'])
+    // 调休的目标日自己也保留「补 9月22日」的日头角标
+    expect(终到.dayLabel).toBe('补 9月22日')
+  })
+
+  it('调休链 A→B→C：一路跟到底，中间站都留标记', () => {
+    const ctx = {
+      semester: sem,
+      courses: [gaoshu],
+      rules: ruleMapOf([shift('2026-09-11', '2026-09-14', 101), shift('2026-09-14', '2026-09-17', 102)]),
+      adjustments: [],
+    }
+    expect(resolveDay(d('2026-09-11'), ctx).blocks).toHaveLength(0)
+    expect(resolveDay(d('2026-09-11'), ctx).markers[0]?.toDate).toBe('2026-09-17')
+    expect(resolveDay(d('2026-09-14'), ctx).markers[0]?.kind).toBe('via')
+    const 终到 = resolveDay(d('2026-09-17'), ctx)
+    expect(终到.blocks[0]?.multiAdjusted).toBe(true)
+    expect(终到.blocks[0]?.chain?.filter((h) => h.kind === 'shift')).toHaveLength(2)
+  })
+
+  it('中间站标记用「它当时」的节次，不是终到节的节次', () => {
+    // 9/11(周五,第2–4节) --调休--> 9/14 --调课(改到第5–6节)--> 9/15
+    const adjustments: CourseAdjustment[] = [
+      adj({ id: 53, courseId: 9, date: '2026-09-14', kind: 'move', fromWeekday: 1, fromPeriods: [2, 3, 4], toDate: '2026-09-15', periods: [5, 6], note: '' }),
+    ]
+    const ctx = { semester: sem, courses: [gaoshu], rules: ruleMapOf([shift('2026-09-11', '2026-09-14')]), adjustments }
+    // 中间站 9/14：调休落点，当时还是 2–4 节
+    const 中间站 = resolveDay(d('2026-09-14'), ctx)
+    expect(中间站.markers[0]?.periods).toEqual([2, 3, 4])
+    expect(中间站.markers[0]?.toPeriods).toEqual([5, 6])
+    // 基准日 9/11：同样是 2–4 节
+    expect(resolveDay(d('2026-09-11'), ctx).markers[0]?.periods).toEqual([2, 3, 4])
+    // 终到日 9/15：5–6 节
+    expect(resolveDay(d('2026-09-15'), ctx).blocks[0]?.periods).toEqual([5, 6])
+  })
+
+  it('环保护：A→B、B→A 的冲突数据不会死循环，停在原地且仍可显示', () => {
+    const ctx = {
+      semester: sem,
+      courses: [gaoshu],
+      rules: ruleMapOf([shift('2026-09-11', '2026-09-14', 101), shift('2026-09-14', '2026-09-11', 102)]),
+      adjustments: [],
+    }
+    const 源 = resolveDay(d('2026-09-11'), ctx)
+    expect(源.blocks).toHaveLength(0) // 被移走
+    const 环 = resolveDay(d('2026-09-14'), ctx)
+    expect(环.blocks.length).toBeLessThanOrEqual(1) // 不死循环、不重复
+  })
+
+  it('explainAdjustment：给出从基准日到终到日的完整链路（台账详情卡用）', () => {
+    const adjustments: CourseAdjustment[] = [
+      adj({ id: 61, courseId: 9, date: '2026-09-14', kind: 'move', fromWeekday: 5, fromPeriods: [2, 3, 4], toDate: '2026-09-15', periods: [2, 3, 4], note: '老师出差' }),
+    ]
+    const ctx = { semester: sem, courses: [gaoshu], rules: ruleMapOf([shift('2026-09-11', '2026-09-14')]), adjustments }
+    const chain = explainAdjustment(adjustments[0], ctx)
+    expect(chain).not.toBeNull()
+    expect(chain!.courseName).toBe('高等数学')
+    expect(chain!.originDate).toBe('2026-09-11')
+    expect(chain!.steps.map((h) => h.kind)).toEqual(['shift', 'move'])
+    expect(chain!.final).toEqual({ date: '2026-09-15', periods: [2, 3, 4] })
+    expect(chain!.cancelled).toBe(false)
+  })
+
+  it('停课也走同一条流水线：调休之后再停课，标记落在停课那一站', () => {
+    const adjustments: CourseAdjustment[] = [
+      adj({ id: 62, courseId: 9, date: '2026-09-14', kind: 'cancel', fromWeekday: 5, fromPeriods: [2, 3, 4], note: '临时停课' }),
+    ]
+    const ctx = { semester: sem, courses: [gaoshu], rules: ruleMapOf([shift('2026-09-11', '2026-09-14')]), adjustments }
+    expect(resolveDay(d('2026-09-15'), ctx).blocks).toHaveLength(0)
+    const 停 = resolveDay(d('2026-09-14'), ctx)
+    expect(停.blocks).toHaveLength(0)
+    expect(停.markers).toHaveLength(1)
+    expect(停.markers[0].kind).toBe('cancel')
+    expect(markerLabel(停.markers[0])).toContain('停课')
   })
 })

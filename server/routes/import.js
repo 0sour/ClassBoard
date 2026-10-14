@@ -6,6 +6,8 @@
 // ============================================================
 import { Router } from 'express'
 import { db, DATA_DIR, replaceCourseSessions } from '../lib/db.js'
+import { memberSemester } from '../lib/classes.js'
+import { recordChange, classStateSnapshot } from '../lib/changes.js'
 import { AppError, badRequest, notFound, wrap } from '../lib/errors.js'
 import { validateCourse } from '../lib/validate.js'
 import { assignCourseColors } from '../lib/colors.js'
@@ -22,7 +24,7 @@ importRouter.post(
     const { mode, semesterId, rows, keepLabs = false } = req.body ?? {}
     if (!['append', 'overwrite'].includes(mode)) throw badRequest('mode 须为 append 或 overwrite')
     if (!Number.isInteger(semesterId)) throw badRequest('semesterId 取值无效')
-    const sem = db.prepare('SELECT id FROM semester WHERE id = ? AND user_id = ?').get(semesterId, req.user.id)
+    const sem = memberSemester(semesterId, req.user.id)
     if (!sem) throw notFound('学期不存在')
     if (!Array.isArray(rows) || rows.length === 0) throw badRequest('rows 不能为空')
     if (rows.length > MAX_ROWS) {
@@ -52,7 +54,7 @@ importRouter.post(
     }
 
     // 颜色分配：与手动录入、模板导入同一套规则（前端已算好颜色时保留其值）
-    assignCourseColors(validated, semesterId, req.user.id)
+    assignCourseColors(validated, semesterId)
 
     // 覆盖模式会删除数据：先做一致性快照
     let snapshot = null
@@ -61,34 +63,44 @@ importRouter.post(
     if (mode === 'overwrite') {
       snapshot = await createSnapshot(db, DATA_DIR, 'import-overwrite')
       removedCourses = db
-        .prepare('SELECT COUNT(*) AS n FROM course WHERE semester_id = ? AND user_id = ?')
-        .get(semesterId, req.user.id).n
+        .prepare('SELECT COUNT(*) AS n FROM course WHERE semester_id = ?')
+        .get(semesterId).n
       if (keepLabs) {
         keptLabs = db
-          .prepare("SELECT COUNT(*) AS n FROM course WHERE semester_id = ? AND user_id = ? AND type = 'lab'")
-          .get(semesterId, req.user.id).n
+          .prepare("SELECT COUNT(*) AS n FROM course WHERE semester_id = ? AND type = 'lab'")
+          .get(semesterId).n
       }
     }
+    const beforeState = classStateSnapshot(sem.class_id)
 
     const run = db.transaction(() => {
       if (mode === 'overwrite') {
         if (keepLabs) {
-          db.prepare("DELETE FROM course WHERE semester_id = ? AND user_id = ? AND type != 'lab'").run(semesterId, req.user.id)
+          db.prepare("DELETE FROM course WHERE semester_id = ? AND type != 'lab'").run(semesterId)
         } else {
-          db.prepare('DELETE FROM course WHERE semester_id = ? AND user_id = ?').run(semesterId, req.user.id)
+          db.prepare('DELETE FROM course WHERE semester_id = ?').run(semesterId)
         }
       }
       const insCourse = db.prepare(
-        `INSERT INTO course (semester_id, user_id, type, name, teacher, location, color, remark)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO course (semester_id, type, name, teacher, location, color, remark)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       for (const c of validated) {
-        const info = insCourse.run(semesterId, req.user.id, c.type, c.name, c.teacher, c.location, c.color, c.remark)
+        const info = insCourse.run(semesterId, c.type, c.name, c.teacher, c.location, c.color, c.remark)
         replaceCourseSessions(info.lastInsertRowid, c.sessions)
       }
       return validated.length
     })
     const count = run()
+    recordChange({
+      classId: sem.class_id,
+      actorId: req.user.id,
+      action: mode === 'overwrite' ? 'import_overwrite' : 'import_append',
+      entity: 'class_state',
+      entityId: sem.class_id,
+      before: beforeState,
+      after: classStateSnapshot(sem.class_id),
+    })
     res.json({ count, ...(snapshot ? { snapshot, removed: removedCourses, keptLabs } : {}) })
   }),
 )

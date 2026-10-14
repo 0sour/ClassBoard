@@ -1,56 +1,79 @@
 // ============================================================
 // ClassBoard · 路由
-// 视图：/week 周课表（桌面默认）、/day 今天（移动默认）、
-//       /matters 事项（考试/实验/作业）、/settings 设置
+//   公开面（无需登录，只读）：/ 班级选择面板、/class/:id 班级课表
+//   后台（需登录且已通过审核）：/week /day /settings
+//   /login 后台登录面板（内含不显眼的注册入口与待审核提示）
 // ============================================================
 import { createRouter, createWebHistory } from 'vue-router'
+import { useScheduleStore } from '@/stores/schedule'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    // 默认页：手机（<768px）进「今天」，桌面进「周课表」
     {
       path: '/',
-      redirect: () => (window.innerWidth < 768 ? '/day' : '/week'),
+      name: 'classes',
+      component: () => import('@/views/PublicClassesView.vue'),
+      meta: { title: '班级课表', public: true },
+    },
+    {
+      path: '/class/:id',
+      name: 'public-class',
+      component: () => import('@/views/PublicClassView.vue'),
+      meta: { title: '班级课表', public: true },
+    },
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginView.vue'),
+      meta: { title: '后台登录', bare: true },
     },
     {
       path: '/week',
       name: 'week',
       component: () => import('@/views/WeekView.vue'),
-      meta: { title: '周课表', tab: 'week' },
-    },
-    {
-      path: '/templates',
-      name: 'templates',
-      component: () => import('@/views/TemplatesView.vue'),
-      meta: { title: '模板市场', tab: 'templates' },
+      meta: { title: '周课表', tab: 'week', requiresAuth: true },
     },
     {
       path: '/day',
       name: 'day',
       component: () => import('@/views/DayView.vue'),
-      meta: { title: '今天', tab: 'day' },
-    },
-    {
-      path: '/matters',
-      name: 'matters',
-      component: () => import('@/views/MattersView.vue'),
-      meta: { title: '事项', tab: 'matters' },
+      meta: { title: '今天', tab: 'day', requiresAuth: true },
     },
     {
       path: '/settings',
       name: 'settings',
       component: () => import('@/views/SettingsView.vue'),
-      meta: { title: '设置', tab: 'settings' },
+      meta: { title: '设置', tab: 'settings', requiresAuth: true },
     },
-    // 兜底：未知路径重定向到默认页（手机「今天」/ 桌面「周课表」）
-    { path: '/:pathMatch(.*)*', redirect: () => (window.innerWidth < 768 ? '/day' : '/week') },
+    // 兜底：未知路径回班级选择面板
+    { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
 
+/** 后台路由守卫：未登录 → 后台登录页；待审核 / 已拒绝 → 登录页看状态 */
+router.beforeEach(async (to) => {
+  if (!to.meta.requiresAuth) return true
+  const store = useScheduleStore()
+  await store.ensureReady()
+  // 从公开班级页切回后台：退出只读模式并按登录态重新加载
+  if (store.readonly) {
+    store.clearPublicMode()
+    await store.bootstrap()
+  }
+  if (!store.authenticated) {
+    return { name: 'login', query: { next: to.fullPath } }
+  }
+  const user = store.currentUser
+  if (user && user.role !== 'admin' && user.status && user.status !== 'active') {
+    return { name: 'login' }
+  }
+  return true
+})
+
 router.afterEach((to) => {
-  const title = to.meta.title as string | undefined
-  document.title = title ? `${title} · ClassBoard` : 'ClassBoard · 课程表'
+  const title = (to.meta.title as string | undefined) ?? '班级课表'
+  document.title = `${title} · ClassBoard`
 })
 
 export default router

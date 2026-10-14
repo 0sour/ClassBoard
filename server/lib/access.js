@@ -149,19 +149,36 @@ export function login(username, password, remember, deviceName, ip) {
   return { user: toUser(user), access, remember: rememberToken }
 }
 
-/** 注册（受 allow_signup 开关控制）：创建普通用户并直接登录 */
-export function register(username, password, deviceName, ip) {
+/**
+ * 注册班级负责人：提交学校 / 专业 / 班级名 供管理员审核。
+ * 账号立即可登录（可查看审核状态），但 status='pending'，未通过前无任何班级权限。
+ */
+export function register(username, password, application, deviceName, ip) {
   const allow = db
     .prepare("SELECT value FROM user_setting WHERE user_id = (SELECT id FROM user WHERE role = 'admin' ORDER BY id LIMIT 1) AND key = 'allow_signup'")
     .get()
-  if (!allow || allow.value !== 'true') throw badRequest('注册未开放，请联系管理员创建账号')
+  if (!allow || allow.value !== 'true') throw badRequest('注册未开放，请联系管理员')
   const exists = db.prepare('SELECT id FROM user WHERE username = ?').get(username)
   if (exists) throw badRequest('用户名已存在', [{ field: 'username', message: '用户名已存在' }])
+  const school = String(application?.school ?? '').trim()
+  const major = String(application?.major ?? '').trim()
+  const claimedClass = String(application?.className ?? '').trim()
+  const issues = []
+  if (school.length < 2 || school.length > 40) issues.push({ field: 'school', message: '学校名长度须为 2–40' })
+  if (major.length > 40) issues.push({ field: 'major', message: '专业长度须 ≤ 40' })
+  if (claimedClass.length < 2 || claimedClass.length > 40) {
+    issues.push({ field: 'className', message: '班级名长度须为 2–40' })
+  }
+  if (issues.length) throw badRequest('注册信息校验失败', issues)
   const info = db
-    .prepare('INSERT INTO user (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)')
-    .run(username, hashPassword(password), 'user', new Date().toISOString())
-  const access = createSession(info.lastInsertRowid, 'access', deviceName, ip, ACCESS_TTL_MS)
-  return { user: toUser({ id: info.lastInsertRowid, username, role: 'user' }), access, remember: null }
+    .prepare(
+      `INSERT INTO user (username, password_hash, role, status, school, major, claimed_class, created_at)
+       VALUES (?, ?, 'leader', 'pending', ?, ?, ?, ?)`,
+    )
+    .run(username, hashPassword(password), school, major, claimedClass, new Date().toISOString())
+  const user = db.prepare('SELECT * FROM user WHERE id = ?').get(info.lastInsertRowid)
+  const access = createSession(user.id, 'access', deviceName, ip, ACCESS_TTL_MS)
+  return { user: toUser(user), access, remember: null }
 }
 
 export function logout(token) {
@@ -219,6 +236,21 @@ export function requireAdmin(req, res, next) {
   if (!req.user) return res.status(401).json({ code: 'AUTH_REQUIRED', message: '需要登录' })
   if (req.user.role !== 'admin') {
     return res.status(403).json({ code: 'FORBIDDEN', message: '需要管理员权限' })
+  }
+  next()
+}
+
+/** 已通过审核的负责人（或管理员）：待审核 / 已拒绝的账号不得进行任何班级操作 */
+export function requireActive(req, res, next) {
+  if (!req.user) return res.status(401).json({ code: 'AUTH_REQUIRED', message: '需要登录' })
+  if (req.user.role !== 'admin' && req.user.status !== 'active') {
+    return res.status(403).json({
+      code: 'ACCOUNT_PENDING',
+      message:
+        req.user.status === 'rejected'
+          ? `账号申请未通过${req.user.review_note ? '：' + req.user.review_note : ''}`
+          : '账号待审核，请等待管理员处理',
+    })
   }
   next()
 }
@@ -312,6 +344,11 @@ export function toUser(row) {
     id: row.id,
     username: row.username,
     role: row.role,
+    status: row.status ?? 'active',
+    school: row.school ?? '',
+    major: row.major ?? '',
+    claimedClass: row.claimed_class ?? '',
+    reviewNote: row.review_note ?? '',
     disabled: !!row.disabled,
     createdAt: row.created_at,
     lastLoginAt: row.last_login_at,

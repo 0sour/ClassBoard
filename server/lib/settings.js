@@ -1,13 +1,11 @@
 // ============================================================
 // ClassBoard · 设置模块（user_setting 表 key-value，按用户隔离）
+//   P2 起不再有个人提醒（浏览器课堂/实验/作业提醒已下线）
 // ============================================================
 import { db } from './db.js'
 
 export const DEFAULT_SETTINGS = {
   showOddEvenFilter: true,
-  reminder: { enabled: false, mode: 'every', advanceMinutes: 10 },
-  labReminder: { enabled: false, mode: 'every', advanceMinutes: 10 },
-  homeworkReminder: { enabled: false, advanceDays: 2 },
   weather: { enabled: false, apiKey: '', location: '' },
 }
 
@@ -51,9 +49,6 @@ export function readSettings(userId, { maskSecrets = false } = {}) {
   const weather = { ...DEFAULT_SETTINGS.weather, ...readJson(weatherUserId, 'weather', {}) }
   return {
     showOddEvenFilter: readJson(userId, 'show_odd_even_filter', DEFAULT_SETTINGS.showOddEvenFilter),
-    reminder: { ...DEFAULT_SETTINGS.reminder, ...readJson(userId, 'reminder', {}) },
-    labReminder: { ...DEFAULT_SETTINGS.labReminder, ...readJson(userId, 'lab_reminder', {}) },
-    homeworkReminder: { ...DEFAULT_SETTINGS.homeworkReminder, ...readJson(userId, 'homework_reminder', {}) },
     weather: maskSecrets ? { ...weather, apiKey: maskApiKey(weather.apiKey) } : weather,
   }
 }
@@ -62,9 +57,6 @@ export function writeSettings(userId, patch) {
   for (const [key, value] of Object.entries(patch)) {
     const storeKey = {
       showOddEvenFilter: 'show_odd_even_filter',
-      reminder: 'reminder',
-      labReminder: 'lab_reminder',
-      homeworkReminder: 'homework_reminder',
       weather: 'weather',
     }[key]
     if (storeKey) {
@@ -98,9 +90,6 @@ export function ensureDefaultSettings() {
       'INSERT OR IGNORE INTO user_setting (user_id, key, value) VALUES (?, ?, ?)',
     )
     ins.run(admin.id, 'show_odd_even_filter', JSON.stringify(DEFAULT_SETTINGS.showOddEvenFilter))
-    ins.run(admin.id, 'reminder', JSON.stringify(DEFAULT_SETTINGS.reminder))
-    ins.run(admin.id, 'lab_reminder', JSON.stringify(DEFAULT_SETTINGS.labReminder))
-    ins.run(admin.id, 'homework_reminder', JSON.stringify(DEFAULT_SETTINGS.homeworkReminder))
     ins.run(admin.id, 'weather', JSON.stringify(DEFAULT_SETTINGS.weather))
   }
 }

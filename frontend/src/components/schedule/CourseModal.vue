@@ -3,10 +3,12 @@ import { computed, nextTick, ref } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import { confirm, toast } from '@/utils/ui'
 import { periodsLabel, weeksLabel } from '@/utils/session'
-import { WEEKDAY_LABELS, adjustmentLabel, weekdayOfDateStr } from '@/utils/calendar'
+import { adjustmentLabel, explainAdjustment, weekdayOfDateStr, type AdjustmentChain } from '@/utils/calendar'
+import { parseDate } from '@/utils/week'
 import AppSelect, { type AppSelectOption } from '@/components/common/AppSelect.vue'
 import DatePicker from '@/components/common/DatePicker.vue'
-import type { Course, CourseAdjustment } from '@/types'
+import AdjustDetail from '@/components/schedule/AdjustDetail.vue'
+import type { Course, CourseAdjustment, ResolvedBlock } from '@/types'
 
 const props = defineProps<{ courseId: number | null }>()
 
@@ -84,6 +86,8 @@ const adjStart = ref(1)
 const adjEnd = ref(2)
 const adjLocation = ref('')
 const adjNote = ref('')
+/** 原日期这天匹配到的实际发生（校验与登记都以它为准） */
+const adjMatched = ref<ResolvedBlock | null>(null)
 
 const adjKindOptions: AppSelectOption[] = [
   { value: 'cancel', label: '停课（这一次不上）' },
@@ -101,9 +105,6 @@ const sessionOptions = computed<AppSelectOption[]>(() =>
 const periodOptions = computed<AppSelectOption[]>(() =>
   store.periods.map((p) => ({ value: p.index, label: `第 ${p.index} 节` })),
 )
-
-/** 选中时间组的星期（用于校验「原日期」是否对得上） */
-const adjSessionWeekday = computed(() => course.value?.sessions[adjSessionIdx.value]?.weekday ?? null)
 
 /** 从今天起，最近一次落在该星期的日期（表单默认值：多半就是这一次课） */
 function nextDateOfWeekday(weekday: number): string {
@@ -160,12 +161,19 @@ async function submitAdjust(): Promise<void> {
     return
   }
   if (adjKind.value === 'cancel' || adjKind.value === 'move') {
-    if (adjSessionWeekday.value === null) {
+    const s = c.sessions[adjSessionIdx.value]
+    if (!s) {
       adjError.value = '请选择要调整的上课时间'
       return
     }
-    if (weekdayOfDateStr(adjDate.value) !== adjSessionWeekday.value) {
-      adjError.value = `所选日期是${WEEKDAY_LABELS[weekdayOfDateStr(adjDate.value) - 1]}，与所选时间组（${WEEKDAY_LABELS[adjSessionWeekday.value - 1]}）不一致`
+    // 来源发生匹配：查这一天这门课实际有没有（已含调休 / 调课搬动后的位置），
+    // 不再要求「日期星期 = 时间组星期」——先调休、再调课的课也就能继续登记。
+    const here = store.resolvedDay(parseDate(adjDate.value)).blocks.filter((b) => b.id === c.id)
+    const same = (a: number[], b: number[]): boolean => a.length === b.length && a.every((v, i) => v === b[i])
+    adjMatched.value = here.find((b) => same(b.periods, s.periods)) ?? (here.length === 1 ? here[0] : null)
+    if (!adjMatched) {
+      const what = here.length ? `这天这门课是 ${here.map((b) => periodsLabel(b.periods)).join('、')}` : '这天没有这门课'
+      adjError.value = `${what}，与所选原时间（${periodsLabel(s.periods)}）对不上；请核对日期或改选原时间`
       return
     }
   }
@@ -191,8 +199,8 @@ async function submitAdjust(): Promise<void> {
       courseId: c.id,
       date: adjDate.value,
       kind: adjKind.value,
-      fromWeekday: adjKind.value === 'extra' ? null : (s?.weekday ?? null),
-      fromPeriods: adjKind.value === 'extra' ? [] : (s?.periods ?? []),
+      fromWeekday: adjKind.value === 'extra' ? null : weekdayOfDateStr(adjDate.value),
+      fromPeriods: adjKind.value === 'extra' ? [] : (adjMatched.value?.periods ?? s?.periods ?? []),
       toDate: adjKind.value === 'move' ? adjToDate.value : null,
       periods:
         adjKind.value === 'cancel'
@@ -209,6 +217,18 @@ async function submitAdjust(): Promise<void> {
   } finally {
     adjBusy.value = false
   }
+}
+
+/** 查看链路：走解析层算整条链（含调休与后续移动），与课表角标 / 台账点开的是同一张卡 */
+const adjustChain = ref<AdjustmentChain | null>(null)
+
+function openChain(a: CourseAdjustment): void {
+  const chain = explainAdjustment(a, store.resolveCtx)
+  if (!chain) {
+    toast('这条调整当前没有生效（原日期这天没有这门课）', 'error')
+    return
+  }
+  adjustChain.value = chain
 }
 
 /** 撤销一条调整（回到基准课表） */
@@ -377,15 +397,28 @@ function onDelete(): void {
                 <div v-if="homeworkOf.length">
                   <div v-for="h in homeworkOf" :key="h.id" class="rel-item">
                     <span class="rel-name">{{ h.name }}</span>
-                    <span class="rel-meta num">{{ h.dueAt.slice(0, 16).replace('T', ' ') }} 截止{{ h.done ? ' · 已完成' : '' }}</span>
+                    <span class="rel-meta num">{{ h.dueAt.slice(0, 16).replace('T', ' ') }} 截止</span>
                   </div>
                 </div>
                 <div v-else class="rel-empty">暂无关联作业</div>
               </template>
-              <!-- 调整：登记（停课 / 调课 / 补课）与记录撤销 -->
+              <!-- 调整：登记（停课 / 调课 / 补课）与记录撤销；公开只读页仅展示记录 -->
               <template v-else>
+                <template v-if="store.readonly">
+                  <div v-if="adjustmentsOf.length">
+                    <div v-for="a in adjustmentsOf" :key="a.id" class="rel-item rel-item--row">
+                      <span class="rel-main">
+                        <span class="rel-name">{{ adjustmentLabel(a) }}</span>
+                        <span v-if="a.note" class="rel-meta">{{ a.note }}</span>
+                      </span>
+                      <button class="btn-mini" type="button" @click="openChain(a)">链路</button>
+                    </div>
+                  </div>
+                  <div v-else class="rel-empty">暂无调整记录（停课 / 调课 / 补课）</div>
+                </template>
+
                 <!-- 表单：与详情同构的键值行，展开时替代工具行 -->
-                <div v-if="adjOpen" ref="adjFormEl" class="adj-form">
+                <div v-else-if="adjOpen" ref="adjFormEl" class="adj-form">
                   <div class="adj-row">
                     <span class="adj-k">类型</span>
                     <div class="adj-c">
@@ -452,6 +485,7 @@ function onDelete(): void {
                         <span class="rel-name">{{ adjustmentLabel(a) }}</span>
                         <span v-if="a.note" class="rel-meta">{{ a.note }}</span>
                       </span>
+                      <button class="btn-mini" type="button" @click="openChain(a)">链路</button>
                       <button class="btn-mini" type="button" @click="undoAdjust(a)">撤销</button>
                     </div>
                   </div>
@@ -462,7 +496,7 @@ function onDelete(): void {
 
           </div>
 
-          <div class="modal-foot">
+          <div v-if="!store.readonly" class="modal-foot">
             <button class="btn-ghost" type="button" :disabled="deleting" @click="onDelete">
               {{ deleting ? '正在删除…' : '删除课程' }}
             </button>
@@ -471,6 +505,9 @@ function onDelete(): void {
         </div>
       </div>
     </Transition>
+
+    <!-- 调整链路详情（与课表角标 / 台账同一张卡，叠在本弹窗之上） -->
+    <AdjustDetail :open="!!adjustChain" :chain="adjustChain" @close="adjustChain = null" />
   </Teleport>
 </template>
 

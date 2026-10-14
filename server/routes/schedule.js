@@ -1,10 +1,11 @@
 // ============================================================
-// ClassBoard · 启动聚合与周聚合路由（多用户按 user_id 隔离）
+// ClassBoard · 启动聚合与周聚合路由（按班级）
 // 周聚合直接按周号查 course_slot（索引命中），不再做 week_type 语义过滤。
 // ============================================================
 import { Router } from 'express'
-import { db, getCurrentSemesterId, toExam, toHomework, toPeriod, toSemester } from '../lib/db.js'
-import { badRequest, wrap } from '../lib/errors.js'
+import { db, toExam, toHomework } from '../lib/db.js'
+import { classFromRequest, listClassesOfUser, memberSemester } from '../lib/classes.js'
+import { badRequest, notFound, wrap } from '../lib/errors.js'
 import { readSettings } from '../lib/settings.js'
 import { getCurrentSemester, calcWeekNumber, weekRange } from '../lib/week.js'
 import { isValidDate } from '../lib/validate.js'
@@ -13,27 +14,25 @@ import { normalizeInts, runsOf } from '../lib/weekspan.js'
 export const contextRouter = Router()
 export const scheduleRouter = Router()
 
+/** 后台启动上下文：未登录只回 authenticated:false；登录返回账号与其班级列表（学期/节次由班级接口取） */
 contextRouter.get(
   '/',
   wrap(async (req, res) => {
-    if (!req.user) {
-      return res.json({ accessRequired: true })
-    }
-    const currentSemesterId = getCurrentSemesterId(req.user.id)
-    const semesters = db
-      .prepare('SELECT * FROM semester WHERE user_id = ? ORDER BY start_date ASC, id ASC')
-      .all(req.user.id)
-      .map(toSemester)
-    const periods =
-      currentSemesterId === null
-        ? []
-        : db.prepare('SELECT * FROM period_template WHERE semester_id = ? ORDER BY period_index ASC').all(currentSemesterId).map(toPeriod)
+    if (!req.user) return res.json({ authenticated: false })
     res.json({
-      semesters,
-      currentSemesterId,
-      periods,
+      authenticated: true,
+      user: {
+        id: req.user.id,
+        username: req.user.username,
+        role: req.user.role,
+        status: req.user.status,
+        reviewNote: req.user.review_note,
+        school: req.user.school,
+        major: req.user.major,
+        claimedClass: req.user.claimed_class,
+      },
+      classes: listClassesOfUser(req.user.id),
       settings: readSettings(req.user.id),
-      user: { id: req.user.id, username: req.user.username, role: req.user.role },
     })
   }),
 )
@@ -42,10 +41,10 @@ contextRouter.get(
  * 取指定周可见的课程（含该周内实际出现的节次集合）。
  * 一个 course_session 若本周有 slot，则作为一个课程块返回。
  */
-export function coursesVisibleInWeek(semesterId, userId, weekNumber, { includeAll = false } = {}) {
+export function coursesVisibleInWeek(semesterId, weekNumber, { includeAll = false } = {}) {
   const courseRows = db
-    .prepare('SELECT * FROM course WHERE semester_id = ? AND user_id = ? ORDER BY name ASC, id ASC')
-    .all(semesterId, userId)
+    .prepare('SELECT * FROM course WHERE semester_id = ? ORDER BY name ASC, id ASC')
+    .all(semesterId)
   if (!courseRows.length) return []
 
   const ids = courseRows.map((c) => c.id)
@@ -123,12 +122,19 @@ export function coursesVisibleInWeek(semesterId, userId, weekNumber, { includeAl
 scheduleRouter.get(
   '/',
   wrap(async (req, res) => {
+    const cls = classFromRequest(req)
     const dateStr = req.query.date ?? new Date().toISOString().slice(0, 10)
     if (typeof dateStr !== 'string' || !isValidDate(dateStr)) {
       throw badRequest('date 格式须为 YYYY-MM-DD', [{ field: 'date', message: 'date 格式须为 YYYY-MM-DD' }])
     }
-
-    const semester = getCurrentSemester(req.user.id)
+    // 指定学期（默认该班当前学期）
+    const semester =
+      req.query.semesterId !== undefined && req.query.semesterId !== ''
+        ? memberSemester(Number(req.query.semesterId), req.user.id)
+        : getCurrentSemester(cls.id)
+    if (req.query.semesterId !== undefined && req.query.semesterId !== '' && !semester) {
+      throw notFound('学期不存在')
+    }
     // weekNumber: 0=未开学（早于起始日）、null=学期已结束（假期）、1..n=第几周
     const weekNumber = semester ? calcWeekNumber(dateStr, semester) : null
     const isBeforeSemester = weekNumber === 0
@@ -141,15 +147,15 @@ scheduleRouter.get(
 
     if (semester) {
       if (!isHoliday && !isBeforeSemester) {
-        courses = coursesVisibleInWeek(semester.id, req.user.id, weekNumber)
+        courses = coursesVisibleInWeek(semester.id, weekNumber)
       }
       exams = db
-        .prepare("SELECT * FROM exam WHERE semester_id = ? AND user_id = ? AND datetime >= ? AND datetime <= ? ORDER BY datetime DESC")
-        .all(semester.id, req.user.id, `${range.startDate}T00:00`, `${range.endDate}T23:59`)
+        .prepare('SELECT * FROM exam WHERE semester_id = ? AND datetime >= ? AND datetime <= ? ORDER BY datetime DESC')
+        .all(semester.id, `${range.startDate}T00:00`, `${range.endDate}T23:59`)
         .map(toExam)
       homework = db
-        .prepare("SELECT * FROM homework WHERE semester_id = ? AND user_id = ? AND due_at >= ? AND due_at <= ? ORDER BY due_at DESC")
-        .all(semester.id, req.user.id, `${range.startDate}T00:00`, `${range.endDate}T23:59`)
+        .prepare('SELECT * FROM homework WHERE semester_id = ? AND due_at >= ? AND due_at <= ? ORDER BY due_at DESC')
+        .all(semester.id, `${range.startDate}T00:00`, `${range.endDate}T23:59`)
         .map(toHomework)
     }
 
@@ -162,7 +168,7 @@ scheduleRouter.get(
         isBeforeSemester,
         startDate: range ? range.startDate : null,
         endDate: range ? range.endDate : null,
-        semester: semester ? toSemester(semester) : null,
+        semester: semester || null,
       },
       courses,
       exams,

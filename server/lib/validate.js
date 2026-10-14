@@ -183,16 +183,39 @@ export function validateHomework(body) {
   if (body.courseId != null && !Number.isInteger(body.courseId)) {
     issues.push({ field: 'courseId', message: 'courseId 取值无效' })
   }
-  if (body.done != null && typeof body.done !== 'boolean') {
-    issues.push({ field: 'done', message: 'done 须为布尔值' })
-  }
   if (issues.length) throw badRequest('作业字段校验失败', issues)
   return {
     name,
     dueAt: body.dueAt,
     courseId: body.courseId ?? null,
-    done: body.done ?? false,
     remark: typeof body.remark === 'string' ? body.remark.slice(0, 200) : '',
+  }
+}
+
+/**
+ * 班级通知校验：日期（排序键，前端默认今天）+ 标题必填，正文可选。
+ * courseId 供「课程调整通知」关联具体课程（可空）；pinned 置顶。
+ */
+export function validateNotice(body) {
+  const issues = []
+  const title = typeof body.title === 'string' ? body.title.trim() : ''
+  if (!title || title.length > 100) issues.push({ field: 'title', message: '通知标题长度须为 1-100' })
+  if (!(typeof body.date === 'string' && isValidDate(body.date))) {
+    issues.push({ field: 'date', message: '日期格式须为 YYYY-MM-DD' })
+  }
+  if (body.courseId != null && !Number.isInteger(body.courseId)) {
+    issues.push({ field: 'courseId', message: 'courseId 取值无效' })
+  }
+  if (body.pinned != null && typeof body.pinned !== 'boolean') {
+    issues.push({ field: 'pinned', message: 'pinned 须为布尔值' })
+  }
+  if (issues.length) throw badRequest('通知字段校验失败', issues)
+  return {
+    title,
+    date: body.date,
+    body: typeof body.body === 'string' ? body.body.slice(0, 2000) : '',
+    courseId: body.courseId ?? null,
+    pinned: body.pinned ?? false,
   }
 }
 

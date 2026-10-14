@@ -8,41 +8,61 @@ import CitySearchSelect from '@/components/common/CitySearchSelect.vue'
 import TimePicker from '@/components/common/TimePicker.vue'
 import DatePicker from '@/components/common/DatePicker.vue'
 import { confirm, toast } from '@/utils/ui'
-import { api, type SessionInfo, type UserInfo } from '@/api/client'
-import { dateWithWeekdayLabel, groupDayRules, monthDayLabel, rangeLabel, weekdayLabel, weekdayOfDateStr } from '@/utils/calendar'
-import type { Period, Semester } from '@/types'
+import { api, type ClassInfo, type ClassMemberInfo, type SessionInfo, type UserInfo } from '@/api/client'
+import {
+  adjustmentLabel,
+  dateWithWeekdayLabel,
+  explainAdjustment,
+  groupDayRules,
+  monthDayLabel,
+  rangeLabel,
+  weekdayLabel,
+  weekdayOfDateStr,
+  type AdjustmentChain,
+} from '@/utils/calendar'
+import AdjustEditor from '@/components/schedule/AdjustEditor.vue'
+import AdjustDetail from '@/components/schedule/AdjustDetail.vue'
+import type { CourseAdjustment, Period, Semester } from '@/types'
 
 const store = useScheduleStore()
 const route = useRoute()
 const router = useRouter()
 
 // ================= Tab 导航 =================
-type TabKey = 'semester' | 'period' | 'calendar' | 'reminder' | 'weather' | 'data' | 'account' | 'users'
+type TabKey = 'class' | 'semester' | 'period' | 'calendar' | 'display' | 'weather' | 'data' | 'account' | 'approvals' | 'users'
 
 const TABS: { key: TabKey; label: string; adminOnly?: boolean }[] = [
+  { key: 'class', label: '班级' },
   { key: 'semester', label: '学期' },
   { key: 'period', label: '节次' },
   { key: 'calendar', label: '日历' },
-  { key: 'reminder', label: '提醒' },
+  { key: 'display', label: '显示' },
   // 天气为全站共享配置（存管理员名下），仅管理员可修改
   { key: 'weather', label: '天气', adminOnly: true },
   { key: 'data', label: '数据' },
   { key: 'account', label: '账号' },
+  { key: 'approvals', label: '审批', adminOnly: true },
   { key: 'users', label: '用户管理', adminOnly: true },
 ]
 
-const activeTab = ref<TabKey>('semester')
+const activeTab = ref<TabKey>('class')
 
 onMounted(() => {
   const t = route.query.tab as TabKey | undefined
   if (t && TABS.some((x) => x.key === t)) activeTab.value = t
   void loadSessions()
-  if (store.currentUser?.role === 'admin') void loadUsers()
+  void loadClassDetail()
+  if (store.currentUser?.role === 'admin') {
+    void loadUsers()
+    void loadApprovals()
+  }
 })
 
 function switchTab(t: TabKey): void {
   activeTab.value = t
   void router.replace({ query: { ...route.query, tab: t } })
+  if (t === 'class') void loadClassDetail()
+  if (t === 'approvals') void loadApprovals()
 }
 
 const visibleTabs = computed(() => TABS.filter((t) => !t.adminOnly || store.currentUser?.role === 'admin'))
@@ -62,24 +82,6 @@ const newError = ref('')
 const weekStartOptions: AppSelectOption[] = [
   { value: 1, label: '周一' },
   { value: 7, label: '周日' },
-]
-
-const reminderModeOptions: AppSelectOption[] = [
-  { value: 'every', label: '每节课提醒' },
-  { value: 'first', label: '仅当天首课提醒' },
-]
-
-const advanceMinutesOptions: AppSelectOption[] = [
-  { value: 5, label: '5 分钟' },
-  { value: 10, label: '10 分钟' },
-  { value: 15, label: '15 分钟' },
-  { value: 30, label: '30 分钟' },
-]
-
-const advanceDaysOptions: AppSelectOption[] = [
-  { value: 1, label: '1 天' },
-  { value: 2, label: '2 天' },
-  { value: 3, label: '3 天' },
 ]
 
 function startEdit(s: Semester): void {
@@ -412,33 +414,52 @@ async function clearWholeCalendar(): Promise<void> {
   }
 }
 
-// ================= 提醒设置 =================
-const reminderBusy = ref(false)
+// ================= 单课调整台账（停课 / 调课 / 补课） =================
+// 与课表角标共用同一张详情卡：列表点「链路」看 A→B→C 的每一站，也可在此登记与撤销。
+const showAdjustEditor = ref(false)
 
-const notificationState = computed(() => {
-  if (!('Notification' in window)) return 'unsupported'
-  return Notification.permission
-})
+/** 台账列表：本学期全部单课调整，新的在上 */
+const ledgerAdjustments = computed(() =>
+  [...store.adjustments]
+    .filter((a) => store.courses.some((c) => c.id === a.courseId))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id)),
+)
 
-async function requestNotificationPermission(): Promise<void> {
-  if (!('Notification' in window)) return
-  const perm = await Notification.requestPermission()
-  toast(perm === 'granted' ? '通知已授权' : '通知未授权，提醒将仅在站内展示', perm === 'granted' ? 'success' : 'warning')
+function courseNameOf(courseId: number): string {
+  return store.courses.find((c) => c.id === courseId)?.name ?? '（课程已删除）'
 }
 
-async function saveReminderSettings(): Promise<void> {
-  reminderBusy.value = true
+const kindChip: Record<CourseAdjustment['kind'], { text: string; cls: string }> = {
+  cancel: { text: '停课', cls: 'chip-cancel' },
+  move: { text: '调课', cls: 'chip-move' },
+  extra: { text: '补课', cls: 'chip-extra' },
+}
+
+/** 链路：走解析层算整条链（含调休与后续移动），与课表角标点开的是同一条 */
+const adjustChain = ref<AdjustmentChain | null>(null)
+
+function openChain(a: CourseAdjustment): void {
+  const chain = explainAdjustment(a, store.resolveCtx)
+  if (!chain) {
+    toast('这条调整当前没有生效（原日期这天没有这门课）', 'error')
+    return
+  }
+  adjustChain.value = chain
+}
+
+async function removeAdjustment(a: CourseAdjustment): Promise<void> {
+  const ok = await confirm({
+    title: '撤销这条调整？',
+    desc: `${adjustmentLabel(a)}——撤销后该课回到上一站的位置（可在变更记录中回退）。`,
+    danger: true,
+    confirmText: '撤销',
+  })
+  if (!ok) return
   try {
-    await store.updateSettings({
-      reminder: store.settings.reminder,
-      labReminder: store.settings.labReminder,
-      homeworkReminder: store.settings.homeworkReminder,
-    })
-    toast('提醒设置已保存', 'success')
+    await store.deleteAdjustment(a.id)
+    toast('已撤销调整', 'success')
   } catch (e) {
-    toast(e instanceof Error ? e.message : '保存失败，请重试', 'error')
-  } finally {
-    reminderBusy.value = false
+    toast(e instanceof Error ? e.message : '撤销失败，请重试', 'error')
   }
 }
 
@@ -495,9 +516,8 @@ async function onRestoreFile(e: Event): Promise<void> {
   if (!file) return
   const ok = await confirm({
     title: '导入备份',
-    desc: '将用备份文件覆盖当前全部数据（学期、课程、考试、作业与设置），此操作不可撤销。建议先导出当前数据作为安全网。',
-    danger: true,
-    confirmText: '覆盖导入',
+    desc: '备份将作为一个新班级导入（不影响现有班级数据）。导入后可在顶栏班级切换器中看到它。',
+    confirmText: '导入为新班级',
   })
   if (!ok) return
   backupBusy.value = true
@@ -573,11 +593,230 @@ async function changePassword(): Promise<void> {
   }
 }
 
+// ================= 班级资料（负责人侧：学校 / 班级名 / 专业 / 城市 + 成员） =================
+const classForm = reactive({ school: '', name: '', major: '', city: '' })
+const classBusy = ref(false)
+const classError = ref('')
+const classMembers = ref<ClassMemberInfo[]>([])
+const showNewClass = ref(false)
+const newClass = reactive({ school: '', name: '', major: '', city: '' })
+const newClassBusy = ref(false)
+const newClassError = ref('')
+/** 同名班级已存在：确认「加入成为共同负责人」 */
+const joinTarget = ref<ClassInfo | null>(null)
+const joinBusy = ref(false)
+
+async function loadClassDetail(): Promise<void> {
+  const id = store.currentClassId
+  if (id === null) {
+    classMembers.value = []
+    return
+  }
+  try {
+    const info = await api.getClass(id)
+    Object.assign(classForm, { school: info.school, name: info.name, major: info.major, city: info.city })
+    classMembers.value = info.members
+  } catch {
+    classMembers.value = []
+  }
+}
+
+/** 本地同步班级改动（顶栏切换器的标签 / 天气城市即刻生效，不整表重拉） */
+function patchLocalClass(info: ClassInfo): void {
+  const cls = store.classes.find((c) => c.id === info.id)
+  if (cls) Object.assign(cls, info)
+}
+
+async function saveClass(): Promise<void> {
+  const id = store.currentClassId
+  if (id === null) return
+  classError.value = ''
+  if (classForm.school.trim().length < 2 || classForm.name.trim().length < 2) {
+    classError.value = '请填写学校与班级名'
+    return
+  }
+  classBusy.value = true
+  try {
+    const info = await api.updateClass(id, {
+      school: classForm.school.trim(),
+      name: classForm.name.trim(),
+      major: classForm.major.trim(),
+      city: classForm.city.trim(),
+    })
+    patchLocalClass(info)
+    classMembers.value = info.members
+    toast('班级资料已保存', 'success')
+    await store.refreshWeather()
+  } catch (e) {
+    classError.value = e instanceof Error ? e.message : '保存失败，请重试'
+  } finally {
+    classBusy.value = false
+  }
+}
+
+function openNewClass(): void {
+  Object.assign(newClass, { school: '', name: '', major: '', city: '' })
+  newClassError.value = ''
+  showNewClass.value = true
+}
+
+async function createClass(): Promise<void> {
+  newClassError.value = ''
+  if (newClass.school.trim().length < 2 || newClass.name.trim().length < 2) {
+    newClassError.value = '请填写学校与班级名（2–40 字）'
+    return
+  }
+  newClassBusy.value = true
+  try {
+    const created = await api.createClass({
+      school: newClass.school.trim(),
+      name: newClass.name.trim(),
+      major: newClass.major.trim(),
+      city: newClass.city.trim(),
+    })
+    showNewClass.value = false
+    await store.bootstrap()
+    await store.selectClass(created.id)
+    await loadClassDetail()
+    toast(`班级「${created.name}」已创建`, 'success')
+  } catch (e) {
+    // 同名班级已存在：询问是否加入成为共同负责人
+    const err = e as Error & { code?: string; payload?: { class?: ClassInfo } }
+    if (err.code === 'CLASS_EXISTS' && err.payload?.class) {
+      showNewClass.value = false
+      joinTarget.value = err.payload.class
+      return
+    }
+    newClassError.value = e instanceof Error ? e.message : '创建失败，请重试'
+  } finally {
+    newClassBusy.value = false
+  }
+}
+
+async function joinExistingClass(): Promise<void> {
+  if (!joinTarget.value) return
+  joinBusy.value = true
+  try {
+    const id = joinTarget.value.id
+    await api.joinClass(id)
+    joinTarget.value = null
+    await store.bootstrap()
+    await store.selectClass(id)
+    await loadClassDetail()
+    toast('已加入班级，与现有负责人同级', 'success')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '加入失败，请重试', 'error')
+  } finally {
+    joinBusy.value = false
+  }
+}
+
+/** 切换当前班级（移动端顶栏放不下切换器时的主要入口） */
+async function switchClass(id: number): Promise<void> {
+  await store.selectClass(id)
+  await loadClassDetail()
+}
+
+async function leaveCurrentClass(): Promise<void> {
+  const id = store.currentClassId
+  if (id === null) return
+  const isLast = classMembers.value.length <= 1
+  const ok = await confirm({
+    title: '退出班级',
+    desc: isLast
+      ? `你是「${classForm.name}」唯一的负责人，退出将连同该班级的全部课表数据一并删除（可回退）。`
+      : `退出后「${classForm.name}」由其他负责人继续管理，你不再拥有修改权限。`,
+    danger: true,
+    confirmText: '退出',
+  })
+  if (!ok) return
+  try {
+    await api.leaveClass(id)
+    await store.bootstrap()
+    await loadClassDetail()
+    toast('已退出班级', 'success')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '退出失败，请重试', 'error')
+  }
+}
+
+async function deleteCurrentClass(): Promise<void> {
+  const id = store.currentClassId
+  if (id === null) return
+  const ok = await confirm({
+    title: '删除班级',
+    desc: `将删除班级「${classForm.name}」及其全部学期、课程、考试、作业数据。此操作会记入变更记录（可回退）。`,
+    danger: true,
+    confirmText: '删除班级',
+  })
+  if (!ok) return
+  try {
+    await api.deleteClass(id)
+    await store.bootstrap()
+    await loadClassDetail()
+    toast('班级已删除', 'success')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '删除失败，请重试', 'error')
+  }
+}
+
+// ================= 注册审批（admin） =================
+const approvals = ref<UserInfo[]>([])
+const approvalsBusy = ref(false)
+const rejectTarget = ref<UserInfo | null>(null)
+const rejectNote = ref('')
+const rejectBusy = ref(false)
+
+async function loadApprovals(): Promise<void> {
+  if (store.currentUser?.role !== 'admin') return
+  try {
+    approvals.value = await api.listApprovals('pending')
+  } catch {
+    approvals.value = []
+  }
+}
+
+async function approveUser(u: UserInfo): Promise<void> {
+  approvalsBusy.value = true
+  try {
+    await api.approveUser(u.id)
+    await loadApprovals()
+    await loadUsers()
+    toast(`已通过「${u.username}」的申请`, 'success')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '操作失败，请重试', 'error')
+  } finally {
+    approvalsBusy.value = false
+  }
+}
+
+function openReject(u: UserInfo): void {
+  rejectTarget.value = u
+  rejectNote.value = ''
+}
+
+async function submitReject(): Promise<void> {
+  if (!rejectTarget.value) return
+  const target = rejectTarget.value
+  rejectBusy.value = true
+  try {
+    await api.rejectUser(target.id, rejectNote.value.trim())
+    rejectTarget.value = null
+    await loadApprovals()
+    await loadUsers()
+    toast('已拒绝该申请', 'success')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '操作失败，请重试', 'error')
+  } finally {
+    rejectBusy.value = false
+  }
+}
+
 // ================= 用户管理（admin） =================
 const users = ref<UserInfo[]>([])
 const signupBusy = ref(false)
 const showNewUser = ref(false)
-const newUser = reactive({ username: '', password: '', role: 'user' as 'admin' | 'user' })
+const newUser = reactive({ username: '', password: '', role: 'leader' as 'admin' | 'leader' })
 const newUserError = ref('')
 const newUserBusy = ref(false)
 const resetTarget = ref<UserInfo | null>(null)
@@ -585,7 +824,6 @@ const resetPassword = ref('')
 const resetBusy = ref(false)
 const resetError = ref('')
 const deleteTarget = ref<UserInfo | null>(null)
-const deleteTransfer = ref<string>('')
 const deleteBusy = ref(false)
 const deleteError = ref('')
 
@@ -612,7 +850,7 @@ async function toggleSignup(): Promise<void> {
 }
 
 function openNewUser(): void {
-  Object.assign(newUser, { username: '', password: '', role: 'user' as const })
+  Object.assign(newUser, { username: '', password: '', role: 'leader' as const })
   newUserError.value = ''
   showNewUser.value = true
 }
@@ -660,14 +898,14 @@ async function toggleUserDisabled(u: UserInfo): Promise<void> {
 }
 
 async function toggleUserRole(u: UserInfo): Promise<void> {
-  const next = u.role === 'admin' ? 'user' : 'admin'
+  const next = u.role === 'admin' ? 'leader' : 'admin'
   const ok = await confirm({
     title: next === 'admin' ? '设为管理员' : '取消管理员',
     desc: next === 'admin'
-      ? `将「${u.username}」设为管理员（拥有全部权限与用户管理能力）。`
-      : `将「${u.username}」降为普通用户。`,
+      ? `将「${u.username}」设为管理员（拥有全站管理、审批与用户管理能力）。`
+      : `将「${u.username}」降为班级负责人（仅拥有自己班级的权限）。`,
     danger: next !== 'admin',
-    confirmText: next === 'admin' ? '设为管理员' : '降为普通用户',
+    confirmText: next === 'admin' ? '设为管理员' : '降为负责人',
   })
   if (!ok) return
   try {
@@ -708,7 +946,6 @@ async function submitReset(): Promise<void> {
 
 function openDelete(u: UserInfo): void {
   deleteTarget.value = u
-  deleteTransfer.value = ''
   deleteError.value = ''
 }
 
@@ -717,11 +954,11 @@ async function submitDelete(): Promise<void> {
   deleteError.value = ''
   deleteBusy.value = true
   try {
-    const transferTo = deleteTransfer.value === '' ? null : Number(deleteTransfer.value)
-    await api.deleteUser(deleteTarget.value.id, transferTo)
+    const target = deleteTarget.value
+    await api.deleteUser(target.id)
     deleteTarget.value = null
     await loadUsers()
-    toast('用户已删除', 'success')
+    toast('账号已删除', 'success')
   } catch (e) {
     deleteError.value = e instanceof Error ? e.message : '删除失败，请重试'
   } finally {
@@ -755,6 +992,133 @@ function formatTime(iso: string | null): string {
         {{ t.label }}
       </button>
     </nav>
+
+    <!-- 班级资料（班级 → 多个学期 → 课表；同级负责人可共同修改） -->
+    <div v-show="activeTab === 'class'" class="panel reveal">
+      <div class="panel-head">
+        <h3>我的班级</h3>
+        <button v-if="!showNewClass" class="btn-add" type="button" @click="openNewClass">＋ 新建班级</button>
+      </div>
+
+      <template v-if="store.currentClass">
+        <p class="panel-note panel-note--block">
+          学校 + 班级名是班级的唯一标识；同名班级由多位负责人共同管理，权限完全同级。
+        </p>
+
+        <!-- 我名下的班级（多班负责人可在此切换；移动端顶栏不显示切换器） -->
+        <template v-if="store.classes.length > 1">
+          <div class="row row--wrap">
+            <span class="row-main">
+              <span class="row-title">我名下的班级（{{ store.classes.length }}）</span>
+              <span class="row-meta">切换后顶栏周课表 / 今天的班级随之切换</span>
+            </span>
+          </div>
+          <div v-for="c in store.classes" :key="c.id" class="row">
+            <span class="row-main">
+              <span class="row-title">
+                {{ c.name }}
+                <span v-if="c.id === store.currentClassId" class="chip">当前</span>
+              </span>
+              <span class="row-meta">{{ c.school || '未填写学校' }} · {{ c.semesterCount }} 个学期</span>
+            </span>
+            <button v-if="c.id !== store.currentClassId" class="btn-mini" type="button" @click="switchClass(c.id)">切换</button>
+          </div>
+        </template>
+
+        <div class="edit-fields">
+          <label class="edit-field">
+            <span class="edit-field__label">学校</span>
+            <input v-model="classForm.school" class="date-input" type="text" maxlength="40" placeholder="如：无锡学院" />
+          </label>
+          <label class="edit-field">
+            <span class="edit-field__label">班级名</span>
+            <input v-model="classForm.name" class="date-input" type="text" maxlength="40" placeholder="如：24集成2" />
+          </label>
+          <label class="edit-field">
+            <span class="edit-field__label">专业</span>
+            <input v-model="classForm.major" class="date-input" type="text" maxlength="40" placeholder="如：集成电路设计与集成系统" />
+          </label>
+          <label class="edit-field">
+            <span class="edit-field__label">城市（天气）</span>
+            <CitySearchSelect
+              :model-value="classForm.city"
+              placeholder="输入城市名搜索，如「无锡」"
+              aria-label="班级城市"
+              @update:model-value="(v: string) => classForm.city = v"
+            />
+          </label>
+        </div>
+        <p v-if="classError" class="edit-error" role="alert">{{ classError }}</p>
+        <div class="edit-actions">
+          <button class="btn-mini btn-mini--primary" type="button" :disabled="classBusy" @click="saveClass">
+            {{ classBusy ? '保存中…' : '保存班级资料' }}
+          </button>
+        </div>
+
+        <div class="row row--wrap" style="margin-top: var(--spacing-lg)">
+          <span class="row-main">
+            <span class="row-title">负责人（{{ classMembers.length }}）</span>
+            <span class="row-meta">同级成员均可修改该班级的课表、通知与数据</span>
+          </span>
+        </div>
+        <div v-for="m in classMembers" :key="m.id" class="row">
+          <span class="row-main">
+            <span class="row-title">
+              {{ m.username }}
+              <span v-if="m.role === 'admin'" class="chip">管理员</span>
+              <span v-if="m.id === store.currentUser?.id" class="chip">我</span>
+            </span>
+            <span class="row-meta num">加入于 {{ formatTime(m.joinedAt) }}</span>
+          </span>
+        </div>
+
+        <div class="edit-actions" style="margin-top: var(--spacing-lg); justify-content: flex-start; gap: var(--spacing-sm)">
+          <button class="btn-mini" type="button" @click="leaveCurrentClass">退出班级</button>
+          <button class="btn-mini btn-mini--danger" type="button" @click="deleteCurrentClass">删除班级</button>
+        </div>
+      </template>
+
+      <template v-else>
+        <p class="panel-note panel-note--block">
+          还没有班级。创建一个班级即可开始维护课表（负责人可同时管理多个班级）。
+        </p>
+      </template>
+
+      <!-- 新建班级 -->
+      <div v-if="showNewClass" class="new-semester" style="margin-top: var(--spacing-lg)">
+        <div class="edit-fields">
+          <label class="edit-field">
+            <span class="edit-field__label">学校</span>
+            <input v-model="newClass.school" class="date-input" type="text" maxlength="40" placeholder="如：无锡学院" />
+          </label>
+          <label class="edit-field">
+            <span class="edit-field__label">班级名</span>
+            <input v-model="newClass.name" class="date-input" type="text" maxlength="40" placeholder="如：24集成2" />
+          </label>
+          <label class="edit-field">
+            <span class="edit-field__label">专业（可选）</span>
+            <input v-model="newClass.major" class="date-input" type="text" maxlength="40" />
+          </label>
+          <label class="edit-field">
+            <span class="edit-field__label">城市（可选，天气用）</span>
+            <CitySearchSelect
+              :model-value="newClass.city"
+              placeholder="输入城市名搜索"
+              aria-label="班级城市"
+              @update:model-value="(v: string) => newClass.city = v"
+            />
+          </label>
+        </div>
+        <p class="panel-note panel-note--block">学校 + 班级名相同 = 同一个班；若已存在，会询问你是否加入成为共同负责人。</p>
+        <p v-if="newClassError" class="edit-error" role="alert">{{ newClassError }}</p>
+        <div class="edit-actions">
+          <button class="btn-mini btn-mini--primary" type="button" :disabled="newClassBusy" @click="createClass">
+            {{ newClassBusy ? '创建中…' : '创建班级' }}
+          </button>
+          <button class="btn-mini" type="button" :disabled="newClassBusy" @click="showNewClass = false">取消</button>
+        </div>
+      </div>
+    </div>
 
     <!-- 学期管理 -->
     <div v-show="activeTab === 'semester'" class="panel reveal">
@@ -897,7 +1261,7 @@ function formatTime(iso: string | null): string {
       </div>
     </div>
 
-    <!-- 学期日历：放假 / 调休「按周几上课」（只影响某天按谁的课表上课，不改课程数据） -->
+    <!-- 日历台账：整日规则（放假 / 调休）+ 单课调整（停课 / 调课 / 补课），同一页管全 -->
     <div v-show="activeTab === 'calendar'" class="panel reveal">
       <div class="panel-head">
         <h3>学期日历 · 放假与调休</h3>
@@ -958,10 +1322,38 @@ function formatTime(iso: string | null): string {
         </span>
         <button class="btn-mini btn-mini--danger" type="button" @click="removeCalendarRange(r.from, r.to)">清除</button>
       </div>
+
+      <!-- 单课调整台账：停课 / 调课 / 补课（与课表角标的详情卡同源） -->
+      <div class="ledger-head">
+        <h3>单课调整</h3>
+        <button class="btn-mini btn-mini--primary" type="button" @click="showAdjustEditor = true">＋ 登记调整</button>
+      </div>
+      <p class="panel-note panel-note--block">
+        停课、调课、补课都写在这份台账里（不改基准课表，随时可撤销）。「链路」摊开这门课从基准日到终到日的每一站；
+        与课表上角标点开的是同一张卡。
+      </p>
+      <div v-if="!ledgerAdjustments.length" class="panel-note panel-note--block">本学期还没有单课调整。</div>
+      <div v-for="a in ledgerAdjustments" :key="a.id" class="row">
+        <span class="row-main">
+          <span class="row-title">
+            <span class="chip" :class="kindChip[a.kind].cls">{{ kindChip[a.kind].text }}</span>
+            {{ courseNameOf(a.courseId) }}
+          </span>
+          <span class="row-meta">{{ adjustmentLabel(a) }}<span v-if="a.note"> · {{ a.note }}</span></span>
+        </span>
+        <button class="btn-mini" type="button" @click="openChain(a)">链路</button>
+        <button class="btn-mini btn-mini--danger" type="button" @click="removeAdjustment(a)">撤销</button>
+      </div>
     </div>
 
-    <!-- 单双周过滤 -->
-    <div v-show="activeTab === 'reminder'" class="panel reveal">
+    <!-- 显示：周课表显示选项（个人提醒功能已下线，P2 起由负责人通过通知中心发布消息） -->
+    <div v-show="activeTab === 'display'" class="panel reveal">
+      <div class="panel-head">
+        <h3>显示</h3>
+      </div>
+      <p class="panel-note panel-note--block">
+        浏览器上课 / 实验 / 作业提醒已下线：需要通知同学时，用顶栏铃铛发布班级通知。
+      </p>
       <div class="row">
         <span class="row-main">
           <span class="row-title">单双周过滤</span>
@@ -975,106 +1367,6 @@ function formatTime(iso: string | null): string {
           :checked="store.showOddEvenFilter"
           @change="toggleOddEven(($event.target as HTMLInputElement).checked)"
         />
-      </div>
-    </div>
-
-    <!-- 提醒设置 -->
-    <div v-show="activeTab === 'reminder'" class="panel reveal">
-      <div class="panel-head">
-        <h3>提醒</h3>
-        <span class="panel-note">默认关闭；页面未打开时不产生提醒</span>
-      </div>
-      <div class="row">
-        <span class="row-main">
-          <span class="row-title">课程提醒</span>
-          <span class="row-meta">上课前 N 分钟浏览器通知 + 站内铃铛</span>
-        </span>
-        <input
-          class="switch"
-          type="checkbox"
-          role="switch"
-          aria-label="课程提醒"
-          :checked="store.settings.reminder.enabled"
-          @change="store.settings.reminder.enabled = ($event.target as HTMLInputElement).checked"
-        />
-      </div>
-      <div v-if="store.settings.reminder.enabled" class="sub-row">
-        <label class="edit-field">
-          <span class="edit-field__label">提醒时机</span>
-          <div class="select-wrap">
-            <AppSelect v-model="store.settings.reminder.mode" :options="reminderModeOptions" aria-label="提醒时机" />
-          </div>
-        </label>
-        <label class="edit-field">
-          <span class="edit-field__label">提前分钟数</span>
-          <div class="select-wrap">
-            <AppSelect v-model="store.settings.reminder.advanceMinutes" :options="advanceMinutesOptions" aria-label="提前分钟数" />
-          </div>
-        </label>
-      </div>
-      <div class="row">
-        <span class="row-main">
-          <span class="row-title">实验课提醒</span>
-          <span class="row-meta">仅对课程类型=实验课的课程生效，与课程提醒互不影响</span>
-        </span>
-        <input
-          class="switch"
-          type="checkbox"
-          role="switch"
-          aria-label="实验课提醒"
-          :checked="store.settings.labReminder.enabled"
-          @change="store.settings.labReminder.enabled = ($event.target as HTMLInputElement).checked"
-        />
-      </div>
-      <div v-if="store.settings.labReminder.enabled" class="sub-row">
-        <label class="edit-field">
-          <span class="edit-field__label">提醒时机</span>
-          <div class="select-wrap">
-            <AppSelect v-model="store.settings.labReminder.mode" :options="reminderModeOptions" aria-label="实验课提醒时机" />
-          </div>
-        </label>
-        <label class="edit-field">
-          <span class="edit-field__label">提前分钟数</span>
-          <div class="select-wrap">
-            <AppSelect v-model="store.settings.labReminder.advanceMinutes" :options="advanceMinutesOptions" aria-label="实验课提前分钟数" />
-          </div>
-        </label>
-      </div>
-      <div class="row">
-        <span class="row-main">
-          <span class="row-title">作业截止提醒</span>
-          <span class="row-meta">截止前 N 天在站内铃铛提示</span>
-        </span>
-        <input
-          class="switch"
-          type="checkbox"
-          role="switch"
-          aria-label="作业截止提醒"
-          :checked="store.settings.homeworkReminder.enabled"
-          @change="store.settings.homeworkReminder.enabled = ($event.target as HTMLInputElement).checked"
-        />
-      </div>
-      <div v-if="store.settings.homeworkReminder.enabled" class="sub-row">
-        <label class="edit-field">
-          <span class="edit-field__label">提前天数</span>
-          <div class="select-wrap">
-            <AppSelect v-model="store.settings.homeworkReminder.advanceDays" :options="advanceDaysOptions" aria-label="提前天数" />
-          </div>
-        </label>
-      </div>
-      <div class="row row--wrap">
-        <span class="row-main">
-          <span class="row-title">浏览器通知授权</span>
-          <span class="row-meta">
-            {{ notificationState === 'granted' ? '已授权' : notificationState === 'denied' ? '已拒绝（需在浏览器设置中开启）' : notificationState === 'unsupported' ? '当前浏览器不支持通知' : '未授权' }}
-          </span>
-        </span>
-        <button v-if="notificationState === 'default'" class="btn-mini" type="button" @click="requestNotificationPermission">授权通知</button>
-      </div>
-      <div class="edit-actions">
-        <button class="btn-mini btn-mini--primary" type="button" :disabled="reminderBusy" @click="saveReminderSettings">
-          {{ reminderBusy ? '保存中…' : '保存提醒设置' }}
-        </button>
       </div>
     </div>
 
@@ -1148,14 +1440,14 @@ function formatTime(iso: string | null): string {
       <div class="row row--wrap">
         <span class="row-main">
           <span class="row-title">导出备份</span>
-          <span class="row-meta">导出全部学期、课程、考试、作业与设置为 JSON 文件</span>
+          <span class="row-meta">导出你名下全部班级（含学期、课表、日历、科目调整与通知；天气密钥脱敏）</span>
         </span>
         <button class="btn-mini" type="button" :disabled="backupBusy" @click="exportBackup">{{ backupBusy ? '处理中…' : '导出 JSON' }}</button>
       </div>
       <div class="row row--wrap">
         <span class="row-main">
           <span class="row-title">导入恢复</span>
-          <span class="row-meta">用备份文件覆盖当前全部数据（建议先导出当前数据）</span>
+          <span class="row-meta">备份作为一个新班级导入；旧版备份文件自动升级到班级结构</span>
         </span>
         <button class="btn-mini btn-mini--danger" type="button" :disabled="backupBusy" @click="pickRestoreFile">{{ backupBusy ? '处理中…' : '导入 JSON' }}</button>
         <input ref="restoreInput" class="hidden-input" type="file" accept=".json,application/json" @change="onRestoreFile" />
@@ -1166,7 +1458,7 @@ function formatTime(iso: string | null): string {
     <div v-show="activeTab === 'account'" class="panel reveal">
       <div class="panel-head">
         <h3>账号</h3>
-        <span class="panel-note">{{ store.currentUser?.username }} · {{ store.currentUser?.role === 'admin' ? '管理员' : '普通用户' }}</span>
+        <span class="panel-note">{{ store.currentUser?.username }} · {{ store.currentUser?.role === 'admin' ? '管理员' : '班级负责人' }}</span>
       </div>
       <div class="row">
         <span class="row-main">
@@ -1207,6 +1499,29 @@ function formatTime(iso: string | null): string {
       <div v-if="!sessions.length" class="sp-empty">暂无会话记录</div>
     </div>
 
+    <!-- 注册审批（admin 专属） -->
+    <div v-show="activeTab === 'approvals'" class="panel reveal">
+      <div class="panel-head">
+        <h3>负责人注册审批</h3>
+        <button class="btn-mini" type="button" @click="loadApprovals">刷新</button>
+      </div>
+      <p class="panel-note panel-note--block">
+        负责人账号注册后需在此通过审核，才能创建 / 加入班级；拒绝时可填理由，申请人登录后可见。
+      </p>
+      <div v-for="u in approvals" :key="u.id" class="row row--wrap">
+        <span class="row-main">
+          <span class="row-title">{{ u.username }}</span>
+          <span class="row-meta">
+            学校：{{ u.school || '—' }} · 专业：{{ u.major || '—' }} · 班级：{{ u.claimedClass || '—' }}
+          </span>
+          <span class="row-meta num">申请于 {{ formatTime(u.createdAt) }}</span>
+        </span>
+        <button class="btn-mini btn-mini--primary" type="button" :disabled="approvalsBusy" @click="approveUser(u)">通过</button>
+        <button class="btn-mini btn-mini--danger" type="button" :disabled="approvalsBusy" @click="openReject(u)">拒绝</button>
+      </div>
+      <div v-if="!approvals.length" class="sp-empty">暂无待审核的注册申请</div>
+    </div>
+
     <!-- 用户管理（admin 专属） -->
     <div v-show="activeTab === 'users'" class="panel reveal">
       <div class="panel-head">
@@ -1217,7 +1532,7 @@ function formatTime(iso: string | null): string {
       <div class="row row--wrap">
         <span class="row-main">
           <span class="row-title">开放注册</span>
-          <span class="row-meta">{{ store.signupEnabled ? '已开放：登录页显示注册入口，任何人可注册普通用户' : '已关闭：仅管理员可创建账号' }}</span>
+          <span class="row-meta">{{ store.signupEnabled ? '已开放：登录页显示「申请成为班级负责人」入口，注册后需在此审批' : '已关闭：仅管理员可创建账号' }}</span>
         </span>
         <input
           class="switch"
@@ -1243,7 +1558,7 @@ function formatTime(iso: string | null): string {
           <label class="edit-field">
             <span class="edit-field__label">角色</span>
             <div class="select-wrap">
-              <AppSelect v-model="newUser.role" :options="[{ value: 'user', label: '普通用户' }, { value: 'admin', label: '管理员' }]" aria-label="角色" />
+              <AppSelect v-model="newUser.role" :options="[{ value: 'leader', label: '班级负责人' }, { value: 'admin', label: '管理员' }]" aria-label="角色" />
             </div>
           </label>
         </div>
@@ -1254,18 +1569,21 @@ function formatTime(iso: string | null): string {
         </div>
       </div>
 
-      <div v-for="u in users" :key="u.id" class="row">
+      <div v-for="u in users" :key="u.id" class="row row--wrap">
         <span class="row-main">
           <span class="row-title">
             {{ u.username }}
             <span v-if="u.role === 'admin'" class="chip">管理员</span>
+            <span v-else class="chip">负责人</span>
+            <span v-if="u.status === 'pending'" class="chip">待审核</span>
+            <span v-if="u.status === 'rejected'" class="chip chip--danger">已拒绝</span>
             <span v-if="u.disabled" class="chip chip--danger">已禁用</span>
             <span v-if="u.id === store.currentUser?.id" class="chip">当前</span>
           </span>
           <span class="row-meta num">创建于 {{ formatTime(u.createdAt) }} · 最后登录 {{ formatTime(u.lastLoginAt) }}</span>
         </span>
         <button v-if="u.id !== store.currentUser?.id" class="btn-mini" type="button" @click="toggleUserRole(u)">
-          {{ u.role === 'admin' ? '降为普通' : '设为管理员' }}
+          {{ u.role === 'admin' ? '降为负责人' : '设为管理员' }}
         </button>
         <button v-if="u.id !== store.currentUser?.id" class="btn-mini" type="button" @click="toggleUserDisabled(u)">
           {{ u.disabled ? '启用' : '禁用' }}
@@ -1293,22 +1611,47 @@ function formatTime(iso: string | null): string {
       </div>
     </div>
 
-    <!-- 删除用户弹窗（数据归属选择） -->
-    <div v-if="deleteTarget" class="modal-mask" @mousedown.self="deleteTarget = null">
-      <div class="modal" role="dialog" aria-modal="true" aria-label="删除用户">
-        <h3 class="modal-title">删除用户「{{ deleteTarget.username }}」</h3>
-        <p class="modal-desc">该用户的学期、课程、考试、作业数据将如何处理？</p>
+    <!-- 拒绝申请（可填理由） -->
+    <div v-if="rejectTarget" class="modal-mask" @mousedown.self="rejectTarget = null">
+      <div class="modal" role="dialog" aria-modal="true" aria-label="拒绝申请">
+        <h3 class="modal-title">拒绝「{{ rejectTarget.username }}」的申请</h3>
         <label class="field">
-          <span class="field__label">数据归属</span>
-          <div class="select-wrap">
-            <AppSelect
-              :model-value="deleteTransfer"
-              :options="[{ value: '', label: '一并删除该用户全部数据' }, ...users.filter((x) => x.id !== deleteTarget!.id).map((x) => ({ value: String(x.id), label: `转移给 ${x.username}` }))]"
-              aria-label="数据归属"
-              @update:model-value="(v: string | number | null) => deleteTransfer = v === null ? '' : String(v)"
-            />
-          </div>
+          <span class="field__label">理由（可选，申请人登录后可见）</span>
+          <input v-model="rejectNote" class="date-input" type="text" maxlength="100" placeholder="如：班级信息不完整" />
         </label>
+        <div class="edit-actions">
+          <button class="btn-mini" type="button" :disabled="rejectBusy" @click="rejectTarget = null">取消</button>
+          <button class="btn-mini btn-mini--danger" type="button" :disabled="rejectBusy" @click="submitReject">
+            {{ rejectBusy ? '提交中…' : '确认拒绝' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 同名班级已存在：加入成为共同负责人 -->
+    <div v-if="joinTarget" class="modal-mask" @mousedown.self="joinTarget = null">
+      <div class="modal" role="dialog" aria-modal="true" aria-label="加入班级">
+        <h3 class="modal-title">班级已存在</h3>
+        <p class="modal-desc">
+          「{{ joinTarget.school }} · {{ joinTarget.name }}」已由其他负责人创建。加入后你与该班现有负责人权限完全同级，可共同维护课表。
+        </p>
+        <div class="edit-actions">
+          <button class="btn-mini" type="button" :disabled="joinBusy" @click="joinTarget = null">取消</button>
+          <button class="btn-mini btn-mini--primary" type="button" :disabled="joinBusy" @click="joinExistingClass">
+            {{ joinBusy ? '加入中…' : '加入该班级' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 删除账号弹窗 -->
+    <div v-if="deleteTarget" class="modal-mask" @mousedown.self="deleteTarget = null">
+      <div class="modal" role="dialog" aria-modal="true" aria-label="删除账号">
+        <h3 class="modal-title">删除账号「{{ deleteTarget.username }}」</h3>
+        <p class="modal-desc">
+          该账号将退出其全部班级；若某个班因此没有负责人，将连同该班数据一并删除。
+          此操作会记入变更记录（可回退）。
+        </p>
         <p v-if="deleteError" class="edit-error" role="alert">{{ deleteError }}</p>
         <div class="edit-actions">
           <button class="btn-mini" type="button" :disabled="deleteBusy" @click="deleteTarget = null">取消</button>
@@ -1318,6 +1661,14 @@ function formatTime(iso: string | null): string {
         </div>
       </div>
     </div>
+
+    <!-- 单课调整：登记弹窗 + 详情卡（与课表角标同一张） -->
+    <AdjustEditor
+      :open="showAdjustEditor"
+      @close="showAdjustEditor = false"
+      @done="showAdjustEditor = false; toast('已登记调整', 'success')"
+    />
+    <AdjustDetail :open="!!adjustChain" :chain="adjustChain" @close="adjustChain = null" />
   </div>
 </template>
 
@@ -1376,6 +1727,41 @@ function formatTime(iso: string | null): string {
   color: var(--color-feedback-error);
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid var(--color-danger-line, #fecaca);
+}
+
+/* 单课调整台账：类型胶囊沿用角标语义色（UI 设计文档 3.6） */
+.chip-cancel {
+  color: var(--badge-cancel-text);
+  background: var(--badge-cancel-bg);
+  border: 1px solid var(--badge-cancel-line);
+}
+
+.chip-move {
+  color: var(--badge-move-text);
+  background: var(--badge-move-bg);
+  border: 1px solid var(--badge-move-line);
+}
+
+.chip-extra {
+  color: var(--badge-extra-text);
+  background: var(--badge-extra-bg);
+  border: 1px solid var(--badge-extra-line);
+}
+
+.ledger-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-xl);
+  padding-top: var(--spacing-lg);
+  border-top: 1px solid var(--color-border-default);
+}
+
+.ledger-head h3 {
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  font-weight: var(--font-weight-medium);
 }
 
 .panel {

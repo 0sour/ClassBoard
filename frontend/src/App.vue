@@ -1,27 +1,32 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { useScheduleStore } from '@/stores/schedule'
 import TopBar from '@/components/layout/TopBar.vue'
 import BottomTabBar from '@/components/layout/BottomTabBar.vue'
 import ToastHost from '@/components/common/ToastHost.vue'
 import ConfirmHost from '@/components/common/ConfirmHost.vue'
-import AccessView from '@/views/AccessView.vue'
-import { startReminderEngine } from '@/utils/reminder'
 
 const store = useScheduleStore()
+const route = useRoute()
 
-let stopReminder: (() => void) | null = null
+/**
+ * 无后台外壳的页面：
+ *   public = 班级选择面板 / 班级课表（学生视角，自带页面头部）
+ *   bare   = 后台登录页（独立整屏）
+ * 其余（/week /day /settings）渲染顶栏 + 底部标签栏的后台外壳。
+ */
+const bare = computed(() => Boolean(route.meta.public || route.meta.bare))
+
 let dateTimer: number | null = null
 const retrying = ref(false)
 
 onMounted(() => {
-  stopReminder = startReminderEngine()
-  // 跨天检查：挂机过夜后「今天」页/周号/铃铛需要跟着日期走
+  // 跨天检查：挂机过夜后「今天」页/周号需要跟着日期走
   dateTimer = window.setInterval(() => store.tickDate(), 60_000)
 })
 
 onBeforeUnmount(() => {
-  stopReminder?.()
   if (dateTimer !== null) window.clearInterval(dateTimer)
 })
 
@@ -37,10 +42,7 @@ async function retryConnect(): Promise<void> {
 </script>
 
 <template>
-  <!-- 访问口令已开启且未登录：先过口令页（规范 3.7） -->
-  <AccessView v-if="store.accessRequired" />
-
-  <div v-else class="app">
+  <div class="app">
     <!-- 后端不可达：明确提示并提供重试（不再静默显示空课表） -->
     <div v-if="store.connectError" class="offline-bar" role="alert">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -54,15 +56,28 @@ async function retryConnect(): Promise<void> {
       </button>
     </div>
 
-    <TopBar />
-    <main class="app-main">
+    <!-- 公开面 / 登录页：自带页面结构，不渲染后台外壳 -->
+    <main v-if="bare" class="app-main app-main--bare">
       <RouterView v-slot="{ Component }">
         <Transition name="page" mode="out-in">
           <component :is="Component" />
         </Transition>
       </RouterView>
     </main>
-    <BottomTabBar />
+
+    <!-- 后台外壳：顶栏 + 内容 + 底部标签栏 -->
+    <template v-else>
+      <TopBar />
+      <main class="app-main">
+        <RouterView v-slot="{ Component }">
+          <Transition name="page" mode="out-in">
+            <component :is="Component" />
+          </Transition>
+        </RouterView>
+      </main>
+      <BottomTabBar />
+    </template>
+
     <ToastHost />
     <ConfirmHost />
   </div>
@@ -78,6 +93,10 @@ async function retryConnect(): Promise<void> {
 .app-main {
   flex: 1;
   padding-bottom: calc(64px + env(safe-area-inset-bottom));
+}
+
+.app-main--bare {
+  padding-bottom: 0;
 }
 
 @media (min-width: 768px) {

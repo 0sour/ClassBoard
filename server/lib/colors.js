@@ -22,10 +22,10 @@ export function isValidColor(name) {
  *                           false=仅补齐缺失/非法的颜色，已提供的合法颜色予以保留
  *                           （PDF 导入语义：前端已按同一规则算好颜色，服务端不覆盖）
  */
-export function assignCourseColors(rows, semesterId, userId, { overwrite = false } = {}) {
+export function assignCourseColors(rows, semesterId, { overwrite = false } = {}) {
   const existing = db
-    .prepare('SELECT name, color FROM course WHERE semester_id = ? AND user_id = ?')
-    .all(semesterId, userId)
+    .prepare('SELECT name, color FROM course WHERE semester_id = ?')
+    .all(semesterId)
   const colorByName = new Map(existing.map((c) => [c.name, c.color]))
   let autoCount = existing.length
 

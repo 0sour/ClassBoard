@@ -4,43 +4,48 @@
 // 归属校验：调整 → 课程 → 用户与学期（course 删除时级联清理）。
 // ============================================================
 import { Router } from 'express'
-import { db, getCurrentSemesterId, toAdjustment } from '../lib/db.js'
+import { db, getClassCurrentSemesterId, toAdjustment } from '../lib/db.js'
+import { classFromRequest, memberCourse, memberSemester } from '../lib/classes.js'
+import { recordChange, entitySnapshot } from '../lib/changes.js'
 import { badRequest, notFound, wrap } from '../lib/errors.js'
 import { isValidDate, validateAdjustment } from '../lib/validate.js'
 import { periodLimitOf } from '../lib/semesters.js'
 
 export const adjustmentsRouter = Router()
 
-function resolveSemesterId(query, userId) {
-  if (query.semesterId !== undefined) return Number(query.semesterId)
-  return getCurrentSemesterId(userId)
+/** 解析学期：?semesterId= 优先，否则取 ?classId= 的当前学期 */
+function resolveSemester(req) {
+  if (req.query.semesterId !== undefined && req.query.semesterId !== '') {
+    const row = memberSemester(Number(req.query.semesterId), req.user.id)
+    if (!row) throw notFound('学期不存在')
+    return row
+  }
+  const cls = classFromRequest(req)
+  const id = getClassCurrentSemesterId(cls.id)
+  return id === null ? null : db.prepare('SELECT * FROM semester WHERE id = ?').get(id)
 }
 
-function ownedSemester(semesterId, userId) {
-  const sem = db.prepare('SELECT * FROM semester WHERE id = ? AND user_id = ?').get(semesterId, userId)
-  if (!sem) throw notFound('学期不存在')
-  return sem
-}
-
-/** 调整行 + 其课程（限当前用户） */
+/** 调整行 + 其课程（校验调用者是否为该班成员） */
 function adjustmentWithCourse(id, userId) {
-  return db
+  const row = db
     .prepare(
       `SELECT a.*, c.semester_id AS course_semester_id
          FROM course_adjustment a JOIN course c ON c.id = a.course_id
-        WHERE a.id = ? AND c.user_id = ?`,
+        WHERE a.id = ?`,
     )
-    .get(id, userId)
+    .get(id)
+  if (!row) return null
+  return memberCourse(row.course_id, userId) ? row : null
 }
 
-function listAdjustments(semesterId, userId) {
+function listAdjustments(semesterId) {
   return db
     .prepare(
       `SELECT a.* FROM course_adjustment a JOIN course c ON c.id = a.course_id
-        WHERE c.user_id = ? AND c.semester_id = ?
+        WHERE c.semester_id = ?
         ORDER BY a.date ASC, a.id ASC`,
     )
-    .all(userId, semesterId)
+    .all(semesterId)
     .map(toAdjustment)
 }
 
@@ -48,10 +53,9 @@ function listAdjustments(semesterId, userId) {
 adjustmentsRouter.get(
   '/',
   wrap(async (req, res) => {
-    const semesterId = resolveSemesterId(req.query, req.user.id)
-    if (semesterId === null) return res.json([])
-    ownedSemester(semesterId, req.user.id)
-    res.json(listAdjustments(semesterId, req.user.id))
+    const sem = resolveSemester(req)
+    if (!sem) return res.json([])
+    res.json(listAdjustments(sem.id))
   }),
 )
 
@@ -62,11 +66,9 @@ adjustmentsRouter.post(
     const body = req.body ?? {}
     const courseId = Number(body.courseId)
     if (!Number.isInteger(courseId)) throw badRequest('courseId 取值无效')
-    const course = db
-      .prepare('SELECT * FROM course WHERE id = ? AND user_id = ?')
-      .get(courseId, req.user.id)
+    const course = memberCourse(courseId, req.user.id)
     if (!course) throw notFound('课程不存在')
-    const semester = ownedSemester(course.semester_id, req.user.id)
+    const semester = memberSemester(course.semester_id, req.user.id)
     const c = validateAdjustment(body, { maxPeriod: periodLimitOf(semester.id), semester })
     const info = db
       .prepare(
@@ -86,7 +88,16 @@ adjustmentsRouter.post(
         c.note,
         new Date().toISOString(),
       )
-    res.status(201).json(toAdjustment(db.prepare('SELECT * FROM course_adjustment WHERE id = ?').get(info.lastInsertRowid)))
+    const newId = info.lastInsertRowid
+    recordChange({
+      classId: semester.class_id,
+      actorId: req.user.id,
+      action: 'create',
+      entity: 'adjustment',
+      entityId: newId,
+      after: entitySnapshot('adjustment', newId),
+    })
+    res.status(201).json(toAdjustment(db.prepare('SELECT * FROM course_adjustment WHERE id = ?').get(newId)))
   }),
 )
 
@@ -97,8 +108,9 @@ adjustmentsRouter.put(
     const id = Number(req.params.id)
     const row = adjustmentWithCourse(id, req.user.id)
     if (!row) throw notFound('调整不存在')
-    const semester = ownedSemester(row.course_semester_id, req.user.id)
+    const semester = memberSemester(row.course_semester_id, req.user.id)
     const c = validateAdjustment(req.body ?? {}, { maxPeriod: periodLimitOf(semester.id), semester })
+    const before = entitySnapshot('adjustment', id)
     db.prepare(
       `UPDATE course_adjustment
           SET date = ?, kind = ?, from_weekday = ?, from_periods = ?, to_date = ?, periods = ?, location = ?, note = ?
@@ -114,6 +126,15 @@ adjustmentsRouter.put(
       c.note,
       id,
     )
+    recordChange({
+      classId: semester.class_id,
+      actorId: req.user.id,
+      action: 'update',
+      entity: 'adjustment',
+      entityId: id,
+      before,
+      after: entitySnapshot('adjustment', id),
+    })
     res.json(toAdjustment(db.prepare('SELECT * FROM course_adjustment WHERE id = ?').get(id)))
   }),
 )
@@ -125,6 +146,8 @@ adjustmentsRouter.delete(
     const id = Number(req.params.id)
     const row = adjustmentWithCourse(id, req.user.id)
     if (!row) throw notFound('调整不存在')
+    const semester = memberSemester(row.course_semester_id, req.user.id)
+    const before = entitySnapshot('adjustment', id)
     // 拖拽撤销用：允许按「课程 + 原日期」批量删除该日全部调整
     const byDate = req.query.date
     if (typeof byDate === 'string') {
@@ -133,6 +156,14 @@ adjustmentsRouter.delete(
     } else {
       db.prepare('DELETE FROM course_adjustment WHERE id = ?').run(id)
     }
+    recordChange({
+      classId: semester?.class_id ?? null,
+      actorId: req.user.id,
+      action: 'delete',
+      entity: 'adjustment',
+      entityId: id,
+      before,
+    })
     res.status(204).end()
   }),
 )

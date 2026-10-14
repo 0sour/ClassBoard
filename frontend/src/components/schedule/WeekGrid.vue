@@ -21,6 +21,10 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: 'open', courseId: number): void
   (e: 'create', slot: { weekday: Weekday; period: number }): void
+  /** 点调整角标：打开统一详情卡（日期 = 所在列） */
+  (e: 'open-adjust', block: ResolvedBlock, dateStr: string): void
+  /** 点原位置 / 中间站标记：同一张详情卡 */
+  (e: 'open-marker', marker: DayMarker, dateStr: string): void
   /** 移动端滑动切日：next=左滑（更晚一天），prev=右滑（更早一天） */
   (e: 'swipe', dir: 'next' | 'prev'): void
 }>()
@@ -167,11 +171,11 @@ function isTodayCol(idx: number): boolean {
 const conflictGroups = computed(() => {
   return displayColumns.value.map((col) => {
     const used = new Set<string>()
-    const groups: { block: CourseBlockModel }[][] = []
+    const groups: { block: ResolvedBlock }[][] = []
     for (const item of col) {
       const itemKey = blockKey(item.block)
       if (!item.conflict || used.has(itemKey)) continue
-      const group: { block: CourseBlockModel }[] = []
+      const group: { block: ResolvedBlock }[] = []
       let frontier: ColItem[] = [item]
       used.add(itemKey)
       while (frontier.length) {
@@ -257,6 +261,7 @@ const HEADER_H = 44 // day-head 高度（网格首行）
 /** 课程卡 pointerdown：启动长按计时，进入潜在拖拽（双日视图禁用拖拽，避免与滑动冲突） */
 function onBlockPointerDown(block: CourseBlockModel, e: PointerEvent, sourceDate: Date): void {
   if (props.days) return
+  if (store.readonly) return // 公开只读页面：不提供拖拽调课
   if (!block.periods.length) return
   dragAnchor = { x: e.clientX, y: e.clientY, active: true }
   dragSourceDate.value = formatDate(sourceDate)
@@ -547,38 +552,45 @@ const rowHeight = computed(() => {
           <span
             v-if="dayRuleOf(idx)?.dayLabel"
             class="pill rule"
-            :class="{ holiday: dayRuleOf(idx)?.rule?.kind === 'holiday' }"
+            :class="{
+              holiday: dayRuleOf(idx)?.rule?.kind === 'holiday',
+              makeup: !dayRuleOf(idx)?.rule?.kind && (dayRuleOf(idx)?.shiftSources.length ?? 0) > 0,
+            }"
           >{{ dayRuleOf(idx)?.dayLabel }}</span>
         </div>
         <div class="dt num">{{ dayOf(idx).getMonth() + 1 }}/{{ dayOf(idx).getDate() }}</div>
       </div>
 
-      <!-- 空白槽：点击快捷新增课程（预填星期与节次，PRD 5.2 / UI 3.1） -->
-      <button
-        v-for="p in store.periods"
-        :key="'slot-' + p.id"
-        class="slot"
-        type="button"
-        :style="{
-          gridRow: `${p.index + 1} / ${p.index + 2}`,
-          gridColumn: '1',
-        }"
-        :aria-label="`新增课程：周${DAY_LABELS[dayOf(idx).getDay() === 0 ? 6 : dayOf(idx).getDay() - 1]} 第${p.index}节`"
-        @click="emit('create', { weekday: weekdayOf(idx), period: p.index })"
-      ></button>
+      <!-- 空白槽：点击快捷新增课程（预填星期与节次，PRD 5.2 / UI 3.1）；公开只读页不渲染 -->
+      <template v-if="!store.readonly">
+        <button
+          v-for="p in store.periods"
+          :key="'slot-' + p.id"
+          class="slot"
+          type="button"
+          :style="{
+            gridRow: `${p.index + 1} / ${p.index + 2}`,
+            gridColumn: '1',
+          }"
+          :aria-label="`新增课程：周${DAY_LABELS[dayOf(idx).getDay() === 0 ? 6 : dayOf(idx).getDay() - 1]} 第${p.index}节`"
+          @click="emit('create', { weekday: weekdayOf(idx), period: p.index })"
+        ></button>
+      </template>
 
-      <!-- 原位置淡显标记：这一天本有课但停课 / 调走了（不参与冲突检测与统计） -->
+      <!-- 原位置淡显标记：这一天本有课但停课 / 调走 / 中途经此（不参与冲突检测与统计） -->
       <button
         v-for="m in markersOf(idx)"
         v-show="m.periods.length"
-        :key="'m-' + m.adjustmentId"
+        :key="'m-' + m.adjustmentId + '-' + m.kind"
         class="slot-marker"
+        :class="`marker-${m.kind}`"
         type="button"
         :style="{
           gridRow: `${m.periods[0] + 1} / ${m.periods[m.periods.length - 1] + 2}`,
           gridColumn: '1',
         }"
-        @click="handleOpen(m.courseId)"
+        :title="markerLabel(m)"
+        @click="emit('open-marker', m, formatDate(dayOf(idx)))"
       >
         <span class="marker-name">{{ m.name }}</span>
         <span class="marker-label">{{ markerLabel(m) }}</span>
@@ -596,6 +608,7 @@ const rowHeight = computed(() => {
         :dragging="draggingBlock ? blockKey(draggingBlock) === blockKey(item.block) : false"
         @pointerdown="(e: PointerEvent) => onBlockPointerDown(item.block, e, dayOf(idx))"
         @open="handleOpen"
+        @open-adjust="emit('open-adjust', item.block, formatDate(dayOf(idx)))"
       />
 
       <!-- 冲突课程组：flex 分栏，hover 展开 2/3（1/3 只显示名称） -->
@@ -619,6 +632,7 @@ const rowHeight = computed(() => {
           @pointerdown="(e: PointerEvent) => onBlockPointerDown(item.block, e, dayOf(idx))"
           @mouseenter="handleHoverEnter(blockKey(item.block))"
           @open="handleOpen"
+          @open-adjust="emit('open-adjust', item.block, formatDate(dayOf(idx)))"
         />
       </div>
     </div>
@@ -833,17 +847,25 @@ const rowHeight = computed(() => {
   font-weight: var(--font-weight-medium);
 }
 
-/* 学期日历角标（假期 / 调休按周几课表）：中性描边，不抢「今天」的强调色 */
+/* 学期日历角标（假期 / 调休 / 补 X）：与调整角标同族语义色（UI 设计文档 3.6） */
 .pill.rule {
-  color: var(--color-text-secondary);
-  background: var(--color-bg-surface);
-  border: 1px solid var(--color-border-strong);
+  color: var(--badge-shift-text);
+  background: var(--badge-shift-bg);
+  border: 1px solid var(--badge-shift-line);
   white-space: nowrap;
 }
 
 .pill.rule.holiday {
   border-style: dashed;
   color: var(--color-text-tertiary);
+  background: var(--color-bg-subtle);
+  border-color: var(--color-border-strong);
+}
+
+.pill.rule.makeup {
+  color: var(--badge-extra-text);
+  background: var(--badge-extra-bg);
+  border-color: var(--badge-extra-line);
 }
 
 /* 原位置淡显标记：停课 / 已调走的课（虚线 + 低透明度，不参与冲突与统计） */
@@ -880,6 +902,50 @@ const rowHeight = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 按类型分色（与角标同族语义色）：停课红、调课蓝、调休紫、中间站靛蓝点线 */
+.marker-cancel {
+  border-color: var(--badge-cancel-line);
+  background: var(--badge-cancel-bg);
+}
+
+.marker-cancel .marker-name,
+.marker-cancel .marker-label {
+  color: var(--badge-cancel-text);
+}
+
+.marker-move {
+  border-color: var(--badge-move-line);
+}
+
+.marker-move .marker-label {
+  color: var(--badge-move-text);
+}
+
+.marker-shift {
+  border-color: var(--badge-shift-line);
+}
+
+.marker-shift .marker-label {
+  color: var(--badge-shift-text);
+}
+
+/* 中间站（经此）：更淡、不划名，只留一个「经此」提示 */
+.marker-via {
+  border-style: dotted;
+  opacity: 0.5;
+  background: var(--badge-multi-bg);
+  border-color: var(--badge-multi-line);
+}
+
+.marker-via .marker-name {
+  text-decoration: none;
+  color: var(--badge-multi-text);
+}
+
+.marker-via .marker-label {
+  color: var(--badge-multi-text);
 }
 
 /* 今天列底色 */

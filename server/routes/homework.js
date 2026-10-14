@@ -1,40 +1,40 @@
 // ============================================================
-// ClassBoard · 作业路由（技术文档 4.3.4 #25-#29，多用户按 user_id 隔离）
+// ClassBoard · 作业路由（按班级学期归属）
+//   作业 = 班级公示内容：负责人添加、可关联课程，截止前对所有人生效；
+//   没有个人完成态（P2 起 done 字段已删除，「已截止」只是按时间分组）。
 // ============================================================
 import { Router } from 'express'
-import { db, getCurrentSemesterId, toHomework } from '../lib/db.js'
+import { db, getClassCurrentSemesterId, toHomework } from '../lib/db.js'
+import { classFromRequest, memberCourse, memberSemester } from '../lib/classes.js'
+import { recordChange, entitySnapshot } from '../lib/changes.js'
 import { badRequest, notFound, wrap } from '../lib/errors.js'
 import { validateHomework } from '../lib/validate.js'
 
 export const homeworkRouter = Router()
 
-function defaultSemesterId(body, userId) {
-  if (body.semesterId !== undefined && body.semesterId !== null) return Number(body.semesterId)
-  return getCurrentSemesterId(userId)
-}
-
-function ownedSemester(semesterId, userId) {
-  const sem = db.prepare('SELECT id FROM semester WHERE id = ? AND user_id = ?').get(semesterId, userId)
-  if (!sem) throw notFound('学期不存在')
-  return sem
+function resolveSemesterId(value, req) {
+  if (value !== undefined && value !== null && value !== '') return Number(value)
+  const cls = classFromRequest(req)
+  return getClassCurrentSemesterId(cls.id)
 }
 
 homeworkRouter.get(
   '/',
   wrap(async (req, res) => {
-    const semesterId = req.query.semesterId !== undefined ? Number(req.query.semesterId) : getCurrentSemesterId(req.user.id)
-    if (req.query.status !== undefined && !['open', 'done'].includes(req.query.status)) {
-      throw badRequest('status 取值无效')
-    }
+    const semesterId = resolveSemesterId(req.query.semesterId, req)
     if (semesterId === null) return res.json([])
-    let sql = 'SELECT * FROM homework WHERE semester_id = ? AND user_id = ?'
-    const params = [semesterId, req.user.id]
-    if (req.query.status === 'open') {
-      sql += ' AND done = 0'
-    } else if (req.query.status === 'done') {
-      sql += ' AND done = 1'
+    const sem = memberSemester(semesterId, req.user.id)
+    if (!sem) throw notFound('学期不存在')
+    // scope=upcoming 只取未截止（公开页「待交」用）；缺省返回全量（「已截止」历史用）
+    let sql = 'SELECT * FROM homework WHERE semester_id = ?'
+    const params = [semesterId]
+    if (req.query.scope === 'upcoming') {
+      sql += ' AND due_at >= ?'
+      params.push(new Date().toISOString().slice(0, 16))
+    } else if (req.query.scope !== undefined && req.query.scope !== 'all') {
+      throw badRequest('scope 取值无效')
     }
-    sql += ' ORDER BY due_at DESC'
+    sql += ' ORDER BY due_at ASC, id ASC'
     res.json(db.prepare(sql).all(...params).map(toHomework))
   }),
 )
@@ -42,17 +42,29 @@ homeworkRouter.get(
 homeworkRouter.post(
   '/',
   wrap(async (req, res) => {
-    const semesterId = defaultSemesterId(req.body, req.user.id)
-    if (semesterId === null) throw badRequest('未设置当前学期，请先创建或切换学期')
-    ownedSemester(semesterId, req.user.id)
+    const semesterId = resolveSemesterId(req.body.semesterId, req)
+    if (semesterId === null || !Number.isInteger(semesterId)) {
+      throw badRequest('未设置当前学期，请先创建或切换学期')
+    }
+    const sem = memberSemester(semesterId, req.user.id)
+    if (!sem) throw notFound('学期不存在')
     const h = validateHomework(req.body)
-    if (h.courseId !== null && !db.prepare('SELECT id FROM course WHERE id = ? AND user_id = ?').get(h.courseId, req.user.id)) {
+    if (h.courseId !== null && !memberCourse(h.courseId, req.user.id)) {
       throw badRequest('课程不存在', [{ field: 'courseId', message: '课程不存在' }])
     }
     const info = db
-      .prepare('INSERT INTO homework (semester_id, user_id, course_id, name, due_at, done, remark) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(semesterId, req.user.id, h.courseId, h.name, h.dueAt, h.done ? 1 : 0, h.remark)
-    res.status(201).json(toHomework(db.prepare('SELECT * FROM homework WHERE id = ?').get(info.lastInsertRowid)))
+      .prepare('INSERT INTO homework (semester_id, course_id, name, due_at, remark) VALUES (?, ?, ?, ?, ?)')
+      .run(semesterId, h.courseId, h.name, h.dueAt, h.remark)
+    const id = info.lastInsertRowid
+    recordChange({
+      classId: sem.class_id,
+      actorId: req.user.id,
+      action: 'create',
+      entity: 'homework',
+      entityId: id,
+      after: entitySnapshot('homework', id),
+    })
+    res.status(201).json(toHomework(db.prepare('SELECT * FROM homework WHERE id = ?').get(id)))
   }),
 )
 
@@ -60,36 +72,47 @@ homeworkRouter.put(
   '/:id',
   wrap(async (req, res) => {
     const id = Number(req.params.id)
-    const row = db.prepare('SELECT * FROM homework WHERE id = ? AND user_id = ?').get(id, req.user.id)
-    if (!row) throw notFound('作业不存在')
+    const row = db.prepare('SELECT * FROM homework WHERE id = ?').get(id)
+    const sem = row ? memberSemester(row.semester_id, req.user.id) : null
+    if (!row || !sem) throw notFound('作业不存在')
     const h = validateHomework(req.body)
-    if (h.courseId !== null && !db.prepare('SELECT id FROM course WHERE id = ? AND user_id = ?').get(h.courseId, req.user.id)) {
+    if (h.courseId !== null && !memberCourse(h.courseId, req.user.id)) {
       throw badRequest('课程不存在', [{ field: 'courseId', message: '课程不存在' }])
     }
-    db.prepare('UPDATE homework SET course_id = ?, name = ?, due_at = ?, done = ?, remark = ? WHERE id = ?').run(
-      h.courseId, h.name, h.dueAt, h.done ? 1 : 0, h.remark, id,
+    const before = entitySnapshot('homework', id)
+    db.prepare('UPDATE homework SET course_id = ?, name = ?, due_at = ?, remark = ? WHERE id = ?').run(
+      h.courseId, h.name, h.dueAt, h.remark, id,
     )
+    recordChange({
+      classId: sem.class_id,
+      actorId: req.user.id,
+      action: 'update',
+      entity: 'homework',
+      entityId: id,
+      before,
+      after: entitySnapshot('homework', id),
+    })
     res.json(toHomework(db.prepare('SELECT * FROM homework WHERE id = ?').get(id)))
-  }),
-)
-
-homeworkRouter.patch(
-  '/:id/done',
-  wrap(async (req, res) => {
-    const id = Number(req.params.id)
-    const row = db.prepare('SELECT * FROM homework WHERE id = ? AND user_id = ?').get(id, req.user.id)
-    if (!row) throw notFound('作业不存在')
-    if (typeof req.body.done !== 'boolean') throw badRequest('done 须为布尔值')
-    db.prepare('UPDATE homework SET done = ? WHERE id = ?').run(req.body.done ? 1 : 0, id)
-    res.json({ id, done: req.body.done })
   }),
 )
 
 homeworkRouter.delete(
   '/:id',
   wrap(async (req, res) => {
-    const info = db.prepare('DELETE FROM homework WHERE id = ? AND user_id = ?').run(Number(req.params.id), req.user.id)
-    if (!info.changes) throw notFound('作业不存在')
+    const id = Number(req.params.id)
+    const row = db.prepare('SELECT * FROM homework WHERE id = ?').get(id)
+    const sem = row ? memberSemester(row.semester_id, req.user.id) : null
+    if (!row || !sem) throw notFound('作业不存在')
+    const before = entitySnapshot('homework', id)
+    db.prepare('DELETE FROM homework WHERE id = ?').run(id)
+    recordChange({
+      classId: sem.class_id,
+      actorId: req.user.id,
+      action: 'delete',
+      entity: 'homework',
+      entityId: id,
+      before,
+    })
     res.status(204).end()
   }),
 )

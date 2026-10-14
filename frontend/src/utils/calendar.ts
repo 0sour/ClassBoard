@@ -1,14 +1,25 @@
 // ============================================================
 // ClassBoard · 学期日历与单课调整的解析层（唯一真理）
-// 给定日期 → 该日实际发生的课程块（含「是否调整而来」的来源信息）+ 原位置标记。
-// 桌面周网格、手机滑动日卡、今天页、侧栏、铃铛、提醒引擎全部走这里，
+// 给定日期 → 该日实际发生的课程块（含链式调整的来源信息）+ 原位置 / 中间站标记。
+// 桌面周网格、手机滑动日卡、今天页、侧栏、台账全部走这里，
 // 避免多套路径各算各的造成不一致（历史教训：手机端与桌面端曾各有一套周过滤）。
-// 基准课表（course_slot）永不被本模块改动：调休与调课都是「日期覆盖层」。
+//
+// 分层（为什么这么写）：
+//   旧实现把「调休移来的块」与「调课目标块」当两套独立路径处理，
+//   于是「先调休再调课」「先调课再调休」两种叠加都会算错
+//   （课同时出现在两处，或调休把调课结果漏掉）。现统一成一条流水线：
+//     1) 枚举基准发生：课程时间组 × 周次 → 那一天的那一节次（放假当天不产生）
+//     2) 调休闭包：基准日若被整日移课，沿 A→B→C 一路跟到底（带环保护）
+//     3) 单课调整按 id 顺序游走：按「当前所在日期 + 节次」匹配（来源发生匹配，
+//        不再依赖星期——调休会改掉落点的真实星期）；每次移动后若新落点本身又是
+//        调休源日，继续沿调休链走（先调课后调休也成立）；如此往复直到稳定
+//     4) 出账：块只出现在终到日；基准日与中间站留淡显标记（中间站带「经此」）
+//   基准课表（course_slot）永不被改动，以上全是日期覆盖层的推导。
 // ============================================================
 import type {
+  AdjustHop,
   Course,
   CourseAdjustment,
-  CourseBlock,
   DayMarker,
   DayRule,
   ResolvedBlock,
@@ -17,7 +28,7 @@ import type {
   Weekday,
 } from '@/types'
 import { calcWeekNumber, formatDate, getWeekday, parseDate, weekStartOf } from './week'
-import { courseBlocks, normalizeInts, periodsLabel, runsOf, toBlocks } from './session'
+import { normalizeInts, periodsLabel, runsOf } from './session'
 
 /** 星期文案（1=周一 … 7=周日） */
 export const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] as const
@@ -81,7 +92,7 @@ export function dayRuleLabel(rule: DayRule | null | undefined, shiftSources: Day
   return ''
 }
 
-/** 按「连续日期 + 同类型 + 同备注」合并为区间（设置页列表展示用；移课是「某日→某日」，不合并） */
+/** 按「连续日期 + 同类型 + 同备注」合并为区间（台账列表展示用；移课是「某日→某日」，不合并） */
 export interface DayRuleRange {
   from: string
   to: string
@@ -125,10 +136,10 @@ export function rangeLabel(r: Pick<DayRuleRange, 'from' | 'to'>): string {
 }
 
 // ============================================================
-// 单课调整文案
+// 单课调整 / 调整链文案
 // ============================================================
 
-/** 调整记录一行文案（课程详情 / 提示） */
+/** 调整记录一行文案（台账 / 课程详情） */
 export function adjustmentLabel(a: CourseAdjustment): string {
   const from = `${dateWithWeekdayLabel(a.date)} ${periodsLabel(a.fromPeriods)}`
   if (a.kind === 'cancel') return `停课：${from}`
@@ -137,7 +148,7 @@ export function adjustmentLabel(a: CourseAdjustment): string {
   return `调课：${from} → ${to}`
 }
 
-/** 原位置淡显标记文案：'已调至 10月17日 第 3–4 节' / '已移至 10月10日' / '停课' */
+/** 原位置淡显标记文案：'已调至 10月17日 第 3–4 节' / '已移至 10月10日' / '停课'；中间站加「（经此）」 */
 export function markerLabel(m: Pick<DayMarker, 'kind' | 'toDate' | 'toPeriods' | 'note'>): string {
   if (m.kind === 'cancel') return m.note ? `停课（${m.note}）` : '停课'
   if (m.kind === 'shift') {
@@ -146,10 +157,11 @@ export function markerLabel(m: Pick<DayMarker, 'kind' | 'toDate' | 'toPeriods' |
   }
   const parts = [m.toDate ? monthDayLabel(m.toDate) : '', periodsLabel(m.toPeriods ?? [])].filter(Boolean)
   const base = parts.length ? `已调至 ${parts.join(' ')}` : '已调课'
-  return m.note ? `${base}（${m.note}）` : base
+  const text = m.note ? `${base}（${m.note}）` : base
+  return m.kind === 'via' ? `${text}（经此）` : text
 }
 
-/** 调来块的角标文案 */
+/** 调来块的角标文案：'调课' / '补课' / '调休' */
 export function sourceBadge(source: string | undefined): string {
   if (source === 'moved') return '调课'
   if (source === 'extra') return '补课'
@@ -157,11 +169,48 @@ export function sourceBadge(source: string | undefined): string {
   return ''
 }
 
-/** 调来块的完整说明：'由 10月15日（周四） 第 5–6 节 调来' / '9月29日（周二） 的课调至今天' */
-export function movedFromLabel(
-  b: Pick<ResolvedBlock, 'fromDate' | 'fromPeriods' | 'adjustmentNote'> & { source?: ResolvedBlock['source'] },
+/** 角标文案组：类型角标 + 「多次调整」（链上 ≥2 站） */
+export function badgeLabels(block: { source?: string; multiAdjusted?: boolean }): string[] {
+  const out: string[] = []
+  const type = sourceBadge(block.source)
+  if (type) out.push(type)
+  if (block.multiAdjusted) out.push('多次调整')
+  return out
+}
+
+/** 调整链 → 一行说明：'9月11日（周四）第 2–4 节 → 调休移 9月14日 → 调课改 9月15日' */
+export function chainLabel(
+  chain: AdjustHop[] | undefined,
+  originDate?: string,
+  originPeriods?: number[],
 ): string {
-  if (b.source === 'extra') return b.adjustmentNote ? `补课（${b.adjustmentNote}）` : '补课'
+  if (!chain?.length) return ''
+  const head = originDate
+    ? `${dateWithWeekdayLabel(originDate)}${originPeriods?.length ? ` ${periodsLabel(originPeriods)}` : ''}`
+    : ''
+  const steps = chain.map((h) => {
+    if (h.kind === 'shift') return `调休移 ${monthDayLabel(h.to as string)}`
+    if (h.kind === 'cancel') return '停课'
+    if (h.kind === 'extra') return `补课 ${monthDayLabel(h.from)}`
+    return `调课改 ${monthDayLabel(h.to as string)}${h.periods.length ? ` ${periodsLabel(h.periods)}` : ''}`
+  })
+  return [head, ...steps].filter(Boolean).join(' → ')
+}
+
+/** 调来块的完整说明：'由 10月15日（周四） 第 5–6 节 调来' / 链式调整给出完整路径 */
+export function movedFromLabel(
+  b: Pick<ResolvedBlock, 'fromDate' | 'fromPeriods' | 'adjustmentNote' | 'chain' | 'originDate'> & {
+    source?: string
+  },
+): string {
+  if (b.source === 'extra') {
+    return b.adjustmentNote ? `补课（${b.adjustmentNote}）` : '补课'
+  }
+  // 链式调整（≥2 站）：给出完整路径，比「由某日调来」更清楚
+  if (b.chain && b.chain.length >= 2) {
+    const text = chainLabel(b.chain, b.originDate ?? b.fromDate, b.fromPeriods)
+    return text ? `调整路径：${text}` : ''
+  }
   if (b.source === 'shifted') {
     const base = b.fromDate ? `${dateWithWeekdayLabel(b.fromDate)} 的课调至今天` : '调休移来的课'
     return b.adjustmentNote ? `${base}（${b.adjustmentNote}）` : base
@@ -176,7 +225,7 @@ export function movedFromLabel(
 // ============================================================
 
 export interface ResolveContext {
-  /** 当前学期（为 null 时不做周次过滤） */
+  /** 当前学期（为 null 时不产生任何发生） */
   semester: Pick<Semester, 'startDate' | 'endDate' | 'weekStartDay'> | null
   /** 该学期的课程（调用方负责按学期过滤） */
   courses: Course[]
@@ -196,179 +245,440 @@ function rulesMapOf(rules: ResolveContext['rules']): Map<string, DayRule> {
   return isRuleMap(rules) ? rules : ruleMapOf(rules)
 }
 
-/** 块是否命中调整记录定位的原时间组（节次优先；未记录节次时按星期匹配） */
-function matchesSourceBlock(b: CourseBlock, a: CourseAdjustment): boolean {
-  if (a.fromWeekday && b.weekday !== a.fromWeekday) return false
-  const from = normalizeInts(a.fromPeriods)
-  if (from.length) return normalizeInts(b.allPeriods).join('.') === from.join('.')
-  return Boolean(a.fromWeekday)
+function samePeriods(a: number[], b: number[]): boolean {
+  const x = normalizeInts(a)
+  const y = normalizeInts(b)
+  return x.length === y.length && x.every((v, i) => v === y[i])
 }
 
-/** 由调整记录构造「调来 / 补课」块 */
-function adjustedBlock(course: Course, a: CourseAdjustment, date: Date, locationFallback: string): ResolvedBlock {
-  const periods = normalizeInts(a.periods)
-  return {
-    id: course.id,
-    sessionId: null,
-    semesterId: course.semesterId,
-    type: course.type,
-    name: course.name,
-    teacher: course.teacher,
-    location: a.location || locationFallback || course.location,
-    color: course.color,
-    remark: course.remark,
-    weekday: getWeekday(date),
-    periods,
-    startPeriod: periods.length ? periods[0] : 1,
-    endPeriod: periods.length ? periods[periods.length - 1] : 1,
-    runs: runsOf(periods),
-    allPeriods: periods,
-    weeks: [],
-    active: true,
-    source: a.kind === 'move' ? 'moved' : 'extra',
-    fromDate: a.kind === 'move' ? a.date : undefined,
-    fromWeekday: a.fromWeekday,
-    fromPeriods: normalizeInts(a.fromPeriods),
-    adjustmentId: a.id,
-    adjustmentNote: a.note,
+/** 基准发生：某门课的某个时间组在某一周的那一天 */
+interface Occurrence {
+  course: Course
+  sessionId: number | null
+  /** 基准日期（最早那一天） */
+  originDate: string
+  /** 基准节次（时间组节次；补课为登记时的节次） */
+  originPeriods: number[]
+  /** 出生方式：基准课表 / 补课 */
+  born: 'base' | 'extra'
+  /** 补课的出生记录 id（其余为 null，游走时跳过自己） */
+  bornAdjustmentId: number | null
+  /** 当前所在日期（游走后 = 终到日） */
+  date: string
+  periods: number[]
+  locationNow: string
+  cancelled: boolean
+  /** 途经的每一站（含起点；用于中间站标记） */
+  visited: string[]
+  chain: AdjustHop[]
+}
+
+/** 学期周数（枚举基准发生的上限） */
+function weekCountOf(sem: ResolveContext['semester']): number {
+  if (!sem) return 0
+  const total = calcWeekNumber(parseDate(sem.endDate), sem)
+  return total === null ? 0 : Math.max(0, Math.min(30, total))
+}
+
+/** 调休闭包：从 dateStr 出发，沿「整日移课」链跟到终到日（带环保护） */
+function shiftPath(
+  dateStr: string,
+  rules: Map<string, DayRule>,
+): { date: string; hops: AdjustHop[]; cycle: boolean } {
+  const hops: AdjustHop[] = []
+  const seen = new Set([dateStr])
+  let cur = dateStr
+  let cycle = false
+  for (;;) {
+    const r = rules.get(cur)
+    if (!r || r.kind !== 'shift' || !r.toDate) break
+    if (seen.has(r.toDate)) {
+      cycle = true // A→B→A 这类冲突数据：停在当前这一站，不再前进
+      break
+    }
+    seen.add(r.toDate)
+    hops.push({
+      kind: 'shift',
+      from: cur,
+      to: r.toDate,
+      periods: [],
+      fromPeriods: [],
+      note: r.note ?? '',
+      adjustmentId: 0,
+      ruleId: r.id,
+    })
+    cur = r.toDate
   }
+  return { date: cur, hops, cycle }
 }
 
-/**
- * 基准课表上「某一天」应有的课（不看日历规则）：该日所在周 + 该日真实星期。
- * 调休移课要把源日这一整天的课原样搬走，故按源日的「周号 + 星期」取。
- */
-function baseBlocksOf(date: Date, ctx: ResolveContext): ResolvedBlock[] {
-  const weekNumber = ctx.semester ? calcWeekNumber(date, ctx.semester) : null
-  if (weekNumber === null || weekNumber === 0) return []
-  const weekday = getWeekday(date)
-  const out: ResolvedBlock[] = []
-  for (const c of ctx.courses) {
-    const list = ctx.ignoreWeeks ? courseBlocks(c) : toBlocks(c, weekNumber)
-    for (const b of list) {
-      if (b.weekday !== weekday) continue
-      if (!ctx.ignoreWeeks && !b.active) continue
-      out.push({ ...b, source: 'base' })
+/** 枚举某学期的全部基准发生（放假当天不产生；补课单独追加） */
+function occurrencesOf(ctx: ResolveContext, rules: Map<string, DayRule>): Occurrence[] {
+  const out: Occurrence[] = []
+  const weeks = weekCountOf(ctx.semester)
+
+  if (ctx.semester && weeks > 0) {
+    for (const c of ctx.courses) {
+      for (const s of c.sessions ?? []) {
+        const periods = normalizeInts(s.periods)
+        if (!periods.length) continue
+        const sessionWeeks = normalizeInts(s.weeks)
+        for (let w = 1; w <= weeks; w++) {
+          if (!ctx.ignoreWeeks && sessionWeeks.length && !sessionWeeks.includes(w)) continue
+          const dateStr = dateOfWeekday(w, s.weekday, ctx.semester)
+          // 学期起止不整周时，周次可能越过学期边界
+          if (dateStr < ctx.semester.startDate || dateStr > ctx.semester.endDate) continue
+          if (rules.get(dateStr)?.kind === 'holiday') continue // 放假当天没有课
+          out.push({
+            course: c,
+            sessionId: s.id ?? null,
+            originDate: dateStr,
+            originPeriods: periods,
+            born: 'base',
+            bornAdjustmentId: null,
+            date: dateStr,
+            periods,
+            locationNow: s.location || c.location,
+            cancelled: false,
+            visited: [dateStr],
+            chain: [],
+          })
+        }
+      }
     }
   }
+
+  // 补课：登记即产生一次发生（显式指定优先，落在哪天就在哪天）
+  for (const a of ctx.adjustments ?? []) {
+    if (a.kind !== 'extra') continue
+    const c = ctx.courses.find((x) => x.id === a.courseId)
+    if (!c) continue
+    const periods = normalizeInts(a.periods).length ? normalizeInts(a.periods) : normalizeInts(a.fromPeriods)
+    out.push({
+      course: c,
+      sessionId: null,
+      originDate: a.date,
+      originPeriods: periods,
+      born: 'extra',
+      bornAdjustmentId: a.id,
+      date: a.date,
+      periods,
+      locationNow: a.location || c.location,
+      cancelled: false,
+      visited: [a.date],
+      chain: [
+        {
+          kind: 'extra',
+          from: a.date,
+          to: a.date,
+          periods,
+          fromPeriods: [],
+          note: a.note,
+          adjustmentId: a.id,
+        },
+      ],
+    })
+  }
+
   return out
 }
 
+/** 单课调整是否命中「此刻这一站」：来源发生匹配（节次精确；星期仅作旧数据兜底） */
+function matchesHere(occ: Occurrence, a: CourseAdjustment): boolean {
+  if (a.kind === 'extra') return false
+  if (a.date !== occ.date) return false
+  const from = normalizeInts(a.fromPeriods)
+  if (from.length) return samePeriods(from, occ.periods)
+  // 旧记录没有节次：按星期匹配（调休会改掉真实星期，故也接受时间组的原始星期）
+  if (!a.fromWeekday) return false
+  return (
+    weekdayOfDateStr(occ.date) === a.fromWeekday ||
+    occ.course.sessions.some((s) => s.weekday === a.fromWeekday)
+  )
+}
+
 /**
- * 解析某一天实际发生的课程。
- * 1) 日历规则：放假 → 当天无课；调休移课 → 源日无课（课被搬走）、目标日显示源日当天的课
- * 2) 基础课来自各课程时间组（weekday 命中且 weeks 含该日周号）——**不假设课表每周重复**
- * 3) 叠加单课调整：原位置的 cancel/move 移除并留标记；目标日的 move / 当日的 extra 追加带来源标记的块
- * 显式指定的调课/补课/调休目标日不受「该日放假」影响（用户手动指定优先）。
+ * 沿调休链继续走（每次落点变化后调用）。
+ * 途经的每一站都记进 visited：A→B→C 里 B 是中间站，也要留「经此」标记。
  */
-export function resolveDay(date: Date, ctx: ResolveContext): ResolvedDay {
-  const dateStr = formatDate(date)
-  const rules = rulesMapOf(ctx.rules)
-  const rule = rules.get(dateStr) ?? null
-  /** 该日作为调休目标：有哪些源日的课被移到了这一天 */
-  const shiftSources = [...rules.values()].filter((r) => r.kind === 'shift' && r.toDate === dateStr)
+function followShifts(occ: Occurrence, rules: Map<string, DayRule>): void {
+  const { date, hops } = shiftPath(occ.date, rules)
+  if (date === occ.date || !hops.length) return
+  if (hops.some((h) => occ.visited.includes(h.to as string))) return // 回到走过的站：判为环，原地停住
+  for (const h of hops) occ.visited.push(h.to as string)
+  occ.chain.push(...hops)
+  occ.date = date
+}
 
-  const courseById = new Map(ctx.courses.map((c) => [c.id, c]))
-
-  // 本日自己的课：放假与「课被移走」两种情况都为空
-  let blocks: ResolvedBlock[] = []
-  const movedAway = rule?.kind === 'shift'
-  const ownBlocks = rule?.kind === 'holiday' ? [] : baseBlocksOf(date, ctx)
-  if (!movedAway) blocks = ownBlocks
-
-  const markers: DayMarker[] = []
-
-  // 整日调休：源日原位置留淡显标记，目标日把源日当天的课整批搬来
-  if (movedAway && rule) {
-    for (const b of ownBlocks) {
-      markers.push({
-        courseId: b.id,
-        name: b.name,
-        color: b.color,
-        weekday: b.weekday,
-        periods: normalizeInts(b.allPeriods),
-        kind: 'shift',
-        toDate: rule.toDate,
-        toPeriods: [],
-        note: rule.note,
-        adjustmentId: 0,
-        ruleId: rule.id,
-      })
-    }
-  }
-  for (const src of shiftSources) {
-    for (const b of baseBlocksOf(parseDate(src.date), ctx)) {
-      blocks.push({
-        ...b,
-        // 板块渲染列 = 目标日的真实星期
-        weekday: getWeekday(date),
-        source: 'shifted',
-        fromDate: src.date,
-        adjustmentNote: src.note,
-      })
-    }
-  }
-
-  // 单课调整（停课 / 调课 / 补课）
-  for (const a of ctx.adjustments ?? []) {
-    const course = courseById.get(a.courseId)
-    if (!course) continue
-
-    // 原位置：停课 / 调走的课——移除基础块并留淡显标记
-    if ((a.kind === 'cancel' || a.kind === 'move') && a.date === dateStr) {
-      const matched = blocks.filter((b) => b.id === a.courseId && matchesSourceBlock(b, a))
-      if (matched.length) blocks = blocks.filter((b) => !matched.includes(b))
-      const sourceSession = course.sessions.find(
-        (s) =>
-          s.weekday === a.fromWeekday &&
-          normalizeInts(s.periods).join('.') === normalizeInts(a.fromPeriods).join('.'),
-      )
-      markers.push({
-        courseId: course.id,
-        name: course.name,
-        color: course.color,
-        weekday: (a.fromWeekday ?? matched[0]?.weekday ?? getWeekday(date)) as Weekday,
-        periods: normalizeInts(a.fromPeriods).length
-          ? normalizeInts(a.fromPeriods)
-          : normalizeInts(matched[0]?.allPeriods ?? sourceSession?.periods ?? []),
-        kind: a.kind,
-        toDate: a.toDate,
-        toPeriods: normalizeInts(a.periods),
+/**
+ * 流水线：基准发生 → 调休 → 调整游走 → 再调休 …… 直到稳定。
+ * 调整记录按 id 升序（创建顺序）逐条尝试；每条最多命中一次。
+ */
+function settle(occ: Occurrence, adjustments: CourseAdjustment[], rules: Map<string, DayRule>): void {
+  followShifts(occ, rules)
+  const applied = new Set<number>()
+  for (let round = 0; round < 8; round++) {
+    let moved = false
+    for (const a of adjustments) {
+      if (occ.cancelled) return
+      if (applied.has(a.id)) continue
+      if (a.id === occ.bornAdjustmentId) continue
+      if (!matchesHere(occ, a)) continue
+      applied.add(a.id)
+      moved = true
+      if (a.kind === 'cancel') {
+        occ.chain.push({
+          kind: 'cancel',
+          from: occ.date,
+          to: null,
+          periods: occ.periods,
+          fromPeriods: normalizeInts(a.fromPeriods),
+          note: a.note,
+          adjustmentId: a.id,
+        })
+        occ.cancelled = true
+        return
+      }
+      const to = a.toDate as string
+      const periods = normalizeInts(a.periods)
+      occ.chain.push({
+        kind: 'move',
+        from: occ.date,
+        to,
+        periods: periods.length ? periods : occ.periods,
+        fromPeriods: normalizeInts(a.fromPeriods),
         note: a.note,
         adjustmentId: a.id,
       })
+      occ.date = to
+      if (!occ.visited.includes(to)) occ.visited.push(to)
+      if (periods.length) occ.periods = periods
+      if (a.location) occ.locationNow = a.location
+      followShifts(occ, rules) // 落点本身若是调休源日，继续跟（先调课、后调休的场景）
+    }
+    if (!moved) break
+  }
+}
+
+interface Index {
+  blocks: Map<string, ResolvedBlock[]>
+  markers: Map<string, DayMarker[]>
+}
+
+function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
+  const list = map.get(key)
+  if (list) list.push(value)
+  else map.set(key, [value])
+}
+
+/** 一次性算出整学期的落点，按日期索引（周网格 7 列复用同一份） */
+function buildIndex(ctx: ResolveContext): Index {
+  const rules = rulesMapOf(ctx.rules)
+  const adjustments = [...(ctx.adjustments ?? [])].sort((a, b) => a.id - b.id)
+  const occurrences = occurrencesOf(ctx, rules)
+  for (const occ of occurrences) settle(occ, adjustments, rules)
+
+  const blocks: Map<string, ResolvedBlock[]> = new Map()
+  const markers: Map<string, DayMarker[]> = new Map()
+
+  for (const occ of occurrences) {
+    const base = occ.course
+    const lastHop = occ.chain[occ.chain.length - 1]
+    const multi = occ.chain.filter((h) => h.kind !== 'extra').length >= 2
+
+    if (occ.cancelled) {
+      // 停课：在「被停掉的那一站」留停课标记
+      push(markers, occ.date, {
+        courseId: base.id,
+        name: base.name,
+        color: base.color,
+        weekday: getWeekday(parseDate(occ.date)),
+        periods: occ.periods,
+        kind: 'cancel',
+        toDate: null,
+        toPeriods: [],
+        note: lastHop?.note ?? '',
+        adjustmentId: lastHop?.adjustmentId ?? 0,
+        chain: occ.chain,
+      })
+      continue
     }
 
-    // 目标位置：调来的课 / 补课
-    const targetsHere = (a.kind === 'move' && a.toDate === dateStr) || (a.kind === 'extra' && a.date === dateStr)
-    if (targetsHere) {
-      const sourceSession = course.sessions.find(
-        (s) =>
-          s.weekday === a.fromWeekday &&
-          normalizeInts(s.periods).join('.') === normalizeInts(a.fromPeriods).join('.'),
-      )
-      blocks.push(adjustedBlock(course, a, date, sourceSession?.location ?? ''))
+    const source: ResolvedBlock['source'] =
+      occ.born === 'extra'
+        ? 'extra'
+        : occ.chain.length === 0
+          ? 'base'
+          : lastHop.kind === 'move'
+            ? 'moved'
+            : 'shifted'
+
+    push(blocks, occ.date, {
+      id: base.id,
+      sessionId: occ.sessionId,
+      semesterId: base.semesterId,
+      type: base.type,
+      name: base.name,
+      teacher: base.teacher,
+      location: occ.locationNow,
+      color: base.color,
+      remark: base.remark,
+      weekday: getWeekday(parseDate(occ.date)),
+      periods: occ.periods,
+      startPeriod: occ.periods.length ? occ.periods[0] : 1,
+      endPeriod: occ.periods.length ? occ.periods[occ.periods.length - 1] : 1,
+      runs: runsOf(occ.periods),
+      allPeriods: occ.born === 'base' ? occ.originPeriods : occ.periods,
+      weeks: [],
+      active: true,
+      source,
+      originDate: occ.originDate,
+      fromDate: occ.chain.length ? occ.originDate : undefined,
+      fromWeekday: occ.chain.length ? getWeekday(parseDate(occ.originDate)) : undefined,
+      fromPeriods: occ.chain.length ? occ.originPeriods : undefined,
+      adjustmentId: lastHop?.adjustmentId || undefined,
+      adjustmentNote: lastHop?.note,
+      chain: occ.chain,
+      multiAdjusted: multi,
+    })
+
+    // 途经各站（基准日 + 中间站）：留淡显标记，一律指向终到日。
+    // 各站的时间组用它自己当时的（调课会改节次，中间站不该显示终到节的节次）。
+    let stopPeriods = occ.originPeriods.slice()
+    for (const hop of occ.chain) {
+      const here = hop.kind === 'move' && hop.fromPeriods.length ? hop.fromPeriods.slice() : stopPeriods.slice()
+      if (hop.kind === 'move') stopPeriods = hop.periods.slice()
+      if (hop.from === occ.date) continue // 环保护停在原站：不画重复标记
+      const isOrigin = hop.from === occ.originDate && occ.born === 'base'
+      push(markers, hop.from, {
+        courseId: base.id,
+        name: base.name,
+        color: base.color,
+        weekday: getWeekday(parseDate(hop.from)),
+        periods: here.length ? here : occ.originPeriods.slice(),
+        kind: isOrigin ? (lastHop.kind === 'shift' ? 'shift' : 'move') : 'via',
+        toDate: occ.date,
+        toPeriods: occ.periods,
+        note: hop.note,
+        adjustmentId: hop.adjustmentId,
+        chain: occ.chain,
+      })
     }
   }
 
-  blocks.sort((x, y) => x.startPeriod - y.startPeriod || x.endPeriod - y.endPeriod || x.id - y.id)
+  return { blocks, markers }
+}
+
+function dayView(
+  dateStr: string,
+  ctx: ResolveContext,
+  rules: Map<string, DayRule>,
+  index: Index,
+): ResolvedDay {
+  const date = parseDate(dateStr)
+  const rule = rules.get(dateStr) ?? null
+  /** 该日作为调休目标：有哪些源日的课被移到了这一天 */
+  const shiftSources = [...rules.values()].filter((r) => r.kind === 'shift' && r.toDate === dateStr)
+  const list = [...(index.blocks.get(dateStr) ?? [])]
+  // 同节次同日期的并列排序：基准课在调来的课之前（与原实现一致，避免同课两块先后跳动）
+  const rank = (b: ResolvedBlock) => (b.source === 'base' ? 0 : 1)
+  list.sort(
+    (x, y) =>
+      x.startPeriod - y.startPeriod ||
+      x.endPeriod - y.endPeriod ||
+      rank(x) - rank(y) ||
+      x.id - y.id,
+  )
+  const markers = [...(index.markers.get(dateStr) ?? [])]
+  markers.sort((x, y) => (x.periods[0] ?? 0) - (y.periods[0] ?? 0) || x.courseId - y.courseId)
 
   return {
     date: dateStr,
     weekNumber: ctx.semester ? calcWeekNumber(date, ctx.semester) : null,
-    effectiveWeekday: movedAway || rule?.kind === 'holiday' ? null : getWeekday(date),
+    effectiveWeekday: rule?.kind === 'holiday' || rule?.kind === 'shift' ? null : getWeekday(date),
     rule,
     shiftSources,
     dayLabel: dayRuleLabel(rule, shiftSources),
-    blocks,
+    blocks: list,
     markers,
   }
 }
 
-/** 解析多天（周网格 7 列 / 手机日卡），规则表只归一化一次 */
+/** 解析某一天（单日调用：今天页 / 日卡 / 标记） */
+export function resolveDay(date: Date, ctx: ResolveContext): ResolvedDay {
+  const rules = rulesMapOf(ctx.rules)
+  const merged: ResolveContext = { ...ctx, rules }
+  return dayView(formatDate(date), merged, rules, buildIndex(merged))
+}
+
+/** 解析多天（周网格 7 列 / 手机日卡）：索引只建一次 */
 export function resolveDays(dates: Date[], ctx: ResolveContext): ResolvedDay[] {
-  const merged: ResolveContext = { ...ctx, rules: rulesMapOf(ctx.rules) }
-  return dates.map((d) => resolveDay(d, merged))
+  const rules = rulesMapOf(ctx.rules)
+  const merged: ResolveContext = { ...ctx, rules }
+  const index = buildIndex(merged)
+  return dates.map((d) => dayView(formatDate(d), merged, rules, index))
+}
+
+/** 单条调整记录的完整链路（台账详情卡 / 课程详情「查看链路」） */
+export interface AdjustmentChain {
+  courseName: string
+  courseId: number
+  originDate: string
+  originPeriods: number[]
+  steps: AdjustHop[]
+  /** 终到日与终到节次；停课为 null */
+  final: { date: string; periods: number[] } | null
+  cancelled: boolean
+}
+
+export function explainAdjustment(
+  adjustment: CourseAdjustment,
+  ctx: ResolveContext,
+): AdjustmentChain | null {
+  const rules = rulesMapOf(ctx.rules)
+  const merged: ResolveContext = { ...ctx, rules }
+  const adjustments = [...(ctx.adjustments ?? [])].sort((a, b) => a.id - b.id)
+  const occurrences = occurrencesOf(merged, rules).filter((o) => o.course.id === adjustment.courseId)
+  for (const occ of occurrences) {
+    settle(occ, adjustments, rules)
+    if (occ.chain.some((h) => h.adjustmentId === adjustment.id && h.kind !== 'extra')) {
+      return {
+        courseName: occ.course.name,
+        courseId: occ.course.id,
+        originDate: occ.originDate,
+        originPeriods: occ.originPeriods,
+        steps: occ.chain,
+        final: occ.cancelled ? null : { date: occ.date, periods: occ.periods },
+        cancelled: occ.cancelled,
+      }
+    }
+  }
+  // 补课：链路就是它自己
+  if (adjustment.kind === 'extra') {
+    const c = ctx.courses.find((x) => x.id === adjustment.courseId)
+    if (c) {
+      return {
+        courseName: c.name,
+        courseId: c.id,
+        originDate: adjustment.date,
+        originPeriods: normalizeInts(adjustment.periods),
+        steps: [
+          {
+            kind: 'extra',
+            from: adjustment.date,
+            to: adjustment.date,
+            periods: normalizeInts(adjustment.periods),
+            fromPeriods: [],
+            note: adjustment.note,
+            adjustmentId: adjustment.id,
+          },
+        ],
+        final: { date: adjustment.date, periods: normalizeInts(adjustment.periods) },
+        cancelled: false,
+      }
+    }
+  }
+  return null
 }
 
 /** 某门课的调整记录（课程详情展示 / 撤销用），按日期升序 */
@@ -376,4 +686,48 @@ export function adjustmentsOf(adjustments: CourseAdjustment[] | undefined, cours
   return (adjustments ?? [])
     .filter((a) => a.courseId === courseId)
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id))
+}
+
+// ============================================================
+// 显示面 → 详情卡：块 / 标记自带链条，直接合成同一张卡的数据
+//   （解析结果里已带 chain 与基准信息，无需重跑解析）
+// ============================================================
+
+function originOf(
+  item: { chain?: AdjustHop[]; originDate?: string; fromPeriods?: number[] },
+  fallbackDate: string,
+): [string, number[]] {
+  const first = item.chain?.[0]
+  const periods = item.fromPeriods?.length ? item.fromPeriods : (first?.fromPeriods ?? [])
+  return [item.originDate ?? first?.from ?? fallbackDate, [...periods]]
+}
+
+/** 课表块（终到日视角）→ 详情卡数据；基准块（无链条）返回 null */
+export function chainOfBlock(block: ResolvedBlock, dateStr: string): AdjustmentChain | null {
+  if (!block.chain?.length) return null
+  const [originDate, originPeriods] = originOf(block, dateStr)
+  return {
+    courseName: block.name,
+    courseId: block.id,
+    originDate,
+    originPeriods,
+    steps: block.chain,
+    final: { date: dateStr, periods: [...block.periods] },
+    cancelled: false,
+  }
+}
+
+/** 原位置 / 中间站标记 → 详情卡数据（停课标记的终态为「已停课」） */
+export function chainOfMarker(m: DayMarker, markerDate: string): AdjustmentChain | null {
+  if (!m.chain?.length) return null
+  const [originDate, originPeriods] = originOf(m, markerDate)
+  return {
+    courseName: m.name,
+    courseId: m.courseId,
+    originDate,
+    originPeriods,
+    steps: m.chain,
+    final: m.kind === 'cancel' || !m.toDate ? null : { date: m.toDate, periods: [...m.toPeriods] },
+    cancelled: m.kind === 'cancel',
+  }
 }

@@ -9,11 +9,13 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { errorHandler } from './lib/errors.js'
-import { attachSession, requireSession } from './lib/access.js'
+import { attachSession, requireActive, requireSession } from './lib/access.js'
 import { ensureDefaultSettings } from './lib/settings.js'
 import { accessRouter } from './routes/access.js'
 import { usersRouter } from './routes/users.js'
-import { templatesRouter } from './routes/templates.js'
+import { approvalsRouter } from './routes/approvals.js'
+import { classesRouter } from './routes/classes.js'
+import { publicRouter } from './routes/public.js'
 import { contextRouter, scheduleRouter } from './routes/schedule.js'
 import { semestersRouter } from './routes/semesters.js'
 import { periodsRouter } from './routes/periods.js'
@@ -22,6 +24,7 @@ import { calendarRouter } from './routes/calendar.js'
 import { adjustmentsRouter } from './routes/adjustments.js'
 import { examsRouter } from './routes/exams.js'
 import { homeworkRouter } from './routes/homework.js'
+import { noticesRouter } from './routes/notices.js'
 import { importRouter } from './routes/import.js'
 import { backupRouter } from './routes/backup.js'
 import { settingsRouter } from './routes/settings.js'
@@ -40,21 +43,26 @@ app.use(express.json({ limit: '2mb' }))
 app.use(cookieParser())
 app.use(attachSession)
 
-// 认证与用户管理：login/register/me/sessions 公开（会话中间件内部处理），users 需管理员
+// 公开面（无需登录，只读）：班级列表 / 班级课表数据 / 通知 / 天气
+app.use('/api/public', publicRouter)
+// 认证与用户管理：login/register/me/sessions 公开（会话中间件内部处理），users 与 approvals 需管理员
 app.use('/api/access', accessRouter)
 app.use('/api/users', usersRouter)
-app.use('/api/templates', templatesRouter)
+app.use('/api/approvals', approvalsRouter)
 app.use('/api/context', contextRouter)
-app.use('/api/schedule', requireSession, scheduleRouter)
-app.use('/api/semesters', requireSession, semestersRouter)
-app.use('/api/periods', requireSession, periodsRouter)
-app.use('/api/courses', requireSession, coursesRouter)
-app.use('/api/calendar', requireSession, calendarRouter)
-app.use('/api/adjustments', requireSession, adjustmentsRouter)
-app.use('/api/exams', requireSession, examsRouter)
-app.use('/api/homework', requireSession, homeworkRouter)
-app.use('/api/import', requireSession, importRouter)
-app.use('/api/backup', requireSession, backupRouter)
+// 负责人侧（需已通过审核）：班级与全部班级业务数据
+app.use('/api/classes', requireSession, requireActive, classesRouter)
+app.use('/api/schedule', requireSession, requireActive, scheduleRouter)
+app.use('/api/semesters', requireSession, requireActive, semestersRouter)
+app.use('/api/periods', requireSession, requireActive, periodsRouter)
+app.use('/api/courses', requireSession, requireActive, coursesRouter)
+app.use('/api/calendar', requireSession, requireActive, calendarRouter)
+app.use('/api/adjustments', requireSession, requireActive, adjustmentsRouter)
+app.use('/api/exams', requireSession, requireActive, examsRouter)
+app.use('/api/homework', requireSession, requireActive, homeworkRouter)
+app.use('/api/notices', requireSession, requireActive, noticesRouter)
+app.use('/api/import', requireSession, requireActive, importRouter)
+app.use('/api/backup', requireSession, requireActive, backupRouter)
 app.use('/api/settings', requireSession, settingsRouter)
 app.use('/api/weather', requireSession, weatherRouter)
 

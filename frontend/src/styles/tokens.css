@@ -41,6 +41,13 @@
   --course-7-bg: #eef1fd;   --course-7-line: #c7cff9;   --course-7-text: #3730a3;
   --course-8-bg: #fdf8e3;   --course-8-line: #f2e2a0;   --course-8-text: #713f12;
 
+  /* 调整角标（UI 设计文档 3.6：按类型固定语义色；取自课程色板的同族色） */
+  --badge-move-bg: #eef4ff;    --badge-move-line: #c3d8fb;    --badge-move-text: #1e40af;  /* 调课 */
+  --badge-extra-bg: #ecf8f0;   --badge-extra-line: #bce6cd;   --badge-extra-text: #166534; /* 补课 */
+  --badge-shift-bg: #f3efff;   --badge-shift-line: #d4c6fb;   --badge-shift-text: #5b21b6; /* 调休 */
+  --badge-cancel-bg: #fdeef1;  --badge-cancel-line: #f6c4ce;  --badge-cancel-text: #9f1239; /* 停课 */
+  --badge-multi-bg: #eef1fd;   --badge-multi-line: #c7cff9;   --badge-multi-text: #3730a3;  /* 多次调整 */
+
   /* 语义层 */
   --color-brand: var(--color-primary-500);
   --color-brand-hover: var(--color-primary-600);

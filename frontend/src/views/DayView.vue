@@ -5,14 +5,33 @@ import WeatherCard from '@/components/schedule/WeatherCard.vue'
 import CourseModal from '@/components/schedule/CourseModal.vue'
 import CourseEditor from '@/components/course/CourseEditor.vue'
 import AdjustBadge from '@/components/schedule/AdjustBadge.vue'
+import AdjustDetail from '@/components/schedule/AdjustDetail.vue'
 import { periodsLabel } from '@/utils/session'
-import { markerLabel, monthDayLabel } from '@/utils/calendar'
-import type { Course } from '@/types'
+import { formatDate } from '@/utils/week'
+import { chainOfBlock, chainOfMarker, markerLabel, monthDayLabel, type AdjustmentChain } from '@/utils/calendar'
+import type { Course, DayMarker, ResolvedBlock } from '@/types'
 
 const store = useScheduleStore()
 const selectedId = ref<number | null>(null)
 const editing = ref<Course | null>(null)
 const showEditor = ref(false)
+
+/** 调整详情卡（角标 / 原位置标记点开，与设置台账同一张卡） */
+const adjustChain = ref<AdjustmentChain | null>(null)
+
+/** 点角标 → 详情卡；基准块退回课程详情 */
+function openBlockAdjust(block: ResolvedBlock): void {
+  const chain = chainOfBlock(block, formatDate(store.today))
+  if (chain) adjustChain.value = chain
+  else openCourse(block.id)
+}
+
+/** 点原位置 / 中间站标记 → 详情卡；无链条的旧标记退回课程详情 */
+function openMarkerAdjust(marker: DayMarker): void {
+  const chain = chainOfMarker(marker, formatDate(store.today))
+  if (chain) adjustChain.value = chain
+  else openCourse(marker.courseId)
+}
 
 // 天气卡仅移动端显示（桌面端由周课表侧栏的毛玻璃卡承担）
 const isMobile = ref(window.innerWidth < 768)
@@ -48,9 +67,15 @@ const todayNotice = computed(() => {
   return { text: parts.join(' · '), kind: r.rule?.kind === 'shift' || r.shiftSources.length ? ('follow' as const) : ('adjust' as const) }
 })
 
+/** 今天课程的作业（截止前始终显示；已截止的在侧栏「已截止」里看） */
 const todayHomework = computed(() => {
   const ids = todayBlocks.value.map((c) => c.id)
-  return store.homework.filter((h) => !h.done && (h.courseId === null || ids.includes(h.courseId)))
+  const now = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  const stamp = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}T${p(now.getHours())}:${p(now.getMinutes())}`
+  return store.homework
+    .filter((h) => h.dueAt >= stamp && (h.courseId === null || ids.includes(h.courseId)))
+    .sort((a, b) => (a.dueAt < b.dueAt ? -1 : 1))
 })
 
 onMounted(() => {
@@ -62,6 +87,7 @@ function openCourse(courseId: number): void {
 }
 
 function editCourse(course: Course): void {
+  if (store.readonly) return
   selectedId.value = null
   editing.value = course
   showEditor.value = true
@@ -89,7 +115,7 @@ function editCourse(course: Course): void {
         :key="`${b.id}:${b.sessionId ?? b.adjustmentId ?? 'x'}:${b.weekday}`"
         class="today-card reveal"
         type="button"
-        @click="openCourse(b.id)"
+        @click="b.chain?.length ? openBlockAdjust(b) : openCourse(b.id)"
       >
         <span class="tc-dot" :style="{ background: `var(--${b.color}-text)` }"></span>
         <span class="tc-time num">
@@ -97,23 +123,23 @@ function editCourse(course: Course): void {
         </span>
         <span class="tc-main">
           <span class="tc-name">
-            {{ b.name }}
-            <AdjustBadge :block="b" />
+            <span class="tc-name-text">{{ b.name }}</span>
+            <AdjustBadge :block="b" clickable @open="openBlockAdjust(b)" />
           </span>
           <span class="tc-loc">{{ b.location }} · {{ b.teacher }}</span>
         </span>
         <span class="tc-slot num">{{ periodsLabel(b.periods) }}</span>
       </button>
 
-      <!-- 原位置淡显：今天本有课但停课 / 调走了 -->
-      <div v-for="m in todayMarkers" :key="`marker:${m.adjustmentId}`" class="today-card today-marker reveal">
+      <!-- 原位置淡显：今天本有课但停课 / 调走了（点开同一张调整详情卡） -->
+      <button v-for="m in todayMarkers" :key="`marker:${m.adjustmentId}`" class="today-card today-marker reveal" type="button" @click="openMarkerAdjust(m)">
         <span class="tc-dot faint" :style="{ background: `var(--${m.color}-text)` }"></span>
         <span class="tc-time num faint">{{ periodsLabel(m.periods) }}</span>
         <span class="tc-main">
           <span class="tc-name faint">{{ m.name }}</span>
         </span>
         <span class="tc-slot num">{{ markerLabel(m) }}</span>
-      </div>
+      </button>
     </div>
 
     <div class="today-empty" v-if="todayBlocks.length === 0 && todayMarkers.length === 0">
@@ -121,7 +147,7 @@ function editCourse(course: Course): void {
     </div>
 
     <div class="today-hw" v-if="todayHomework.length">
-      <h3>今日作业</h3>
+      <h3>今日课程的作业</h3>
       <div v-for="h in todayHomework" :key="h.id" class="hw-item">
         <span>{{ h.name }}</span>
         <span class="hw-due num">{{ h.dueAt.slice(0, 10) }} 截止</span>
@@ -129,6 +155,7 @@ function editCourse(course: Course): void {
     </div>
 
     <CourseModal :course-id="selectedId" @close="selectedId = null" @edit="editCourse" />
+    <AdjustDetail :open="!!adjustChain" :chain="adjustChain" @close="adjustChain = null" />
     <CourseEditor
       :open="showEditor"
       :course="editing"
@@ -214,9 +241,19 @@ function editCourse(course: Course): void {
 }
 
 .tc-name {
+  display: flex;
+  flex-wrap: wrap; /* 窄屏两个角标换行，保住课名可读 */
+  align-items: center;
+  gap: 6px;
   font-size: var(--font-size-body);
   font-weight: var(--font-weight-bold);
   color: var(--color-text-primary);
+}
+
+/* 保底可读宽度：角标放不下就整体换行，而不是把课名压成一个字 */
+.tc-name-text {
+  flex: 1;
+  min-width: 7.5em;
 }
 
 .tc-loc {
