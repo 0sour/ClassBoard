@@ -305,8 +305,8 @@ function removeOne(a: Attachment): void {
 }
 
 .m-kind.exam {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
 }
 
 .m-title {
@@ -350,7 +350,7 @@ function removeOne(a: Attachment): void {
   padding: var(--spacing-md);
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-md);
-  background: var(--color-bg-subtle, var(--color-bg-surface));
+  background: var(--color-bg-subtle);
 }
 
 .meta-row {
@@ -439,7 +439,7 @@ function removeOne(a: Attachment): void {
 }
 
 .img-del:hover {
-  background: var(--color-feedback-error, #dc2626);
+  background: var(--color-feedback-error);
 }
 
 .file-list {
@@ -504,7 +504,7 @@ function removeOne(a: Attachment): void {
   flex: none;
   padding: 0 4px;
   font-size: var(--font-size-xs);
-  color: var(--color-feedback-error, #dc2626);
+  color: var(--color-feedback-error);
 }
 
 .file-del:hover {
