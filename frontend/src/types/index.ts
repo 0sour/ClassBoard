@@ -256,3 +256,26 @@ export const COURSE_COLOR_NAMES = [
 ] as const
 
 export type CourseColorName = (typeof COURSE_COLOR_NAMES)[number]
+
+/** 变更记录（git 式）：before / after 是当时该对象的快照（整班级操作则是整班快照） */
+export interface ChangeRecord {
+  id: number
+  classId: number | null
+  className: string
+  actorId: number | null
+  actorName: string
+  action: string
+  entity: string
+  entityId: number | null
+  before: unknown
+  after: unknown
+  revertOf: number | null
+  createdAt: string
+}
+
+/** 列表接口返回（班级视角 / 全站视角共用） */
+export interface ChangeList {
+  total?: number
+  changes: ChangeRecord[]
+  classes?: { id: number; name: string }[]
+}

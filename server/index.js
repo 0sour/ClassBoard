@@ -12,6 +12,7 @@ import { errorHandler } from './lib/errors.js'
 import { attachSession, requireActive, requireSession } from './lib/access.js'
 import { ensureDefaultSettings } from './lib/settings.js'
 import { accessRouter } from './routes/access.js'
+import { changesRouter } from './routes/changes.js'
 import { usersRouter } from './routes/users.js'
 import { approvalsRouter } from './routes/approvals.js'
 import { classesRouter } from './routes/classes.js'
@@ -52,6 +53,8 @@ app.use('/api/approvals', approvalsRouter)
 app.use('/api/context', contextRouter)
 // 负责人侧（需已通过审核）：班级与全部班级业务数据
 app.use('/api/classes', requireSession, requireActive, classesRouter)
+// 变更记录：班级视角 / 全站视角（管理员）/ 单条撤销 / 整班回退
+app.use('/api', requireSession, requireActive, changesRouter)
 app.use('/api/schedule', requireSession, requireActive, scheduleRouter)
 app.use('/api/semesters', requireSession, requireActive, semestersRouter)
 app.use('/api/periods', requireSession, requireActive, periodsRouter)

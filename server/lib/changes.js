@@ -74,24 +74,63 @@ export function classStateSnapshot(classId) {
   return { ...cls, semesters, periods, courses, exams, homework, dayRules, adjustments, notices, members }
 }
 
+/** 学期子树快照：学期行 + 节次 + 课程（含上课时间与格子）+ 考试 / 作业 / 日历 / 调整。
+ *  删学期、删课程都会级联带走这些行，快照必须够还原，否则「回退」只是空壳。 */
+export function semesterSubtree(semesterId) {
+  const row = db.prepare('SELECT * FROM semester WHERE id = ?').get(semesterId)
+  if (!row) return null
+  const periods = db
+    .prepare('SELECT * FROM period_template WHERE semester_id = ? ORDER BY period_index ASC')
+    .all(semesterId)
+    .map(toPeriod)
+  const courses = toCoursesWithSessions(
+    db.prepare('SELECT * FROM course WHERE semester_id = ? ORDER BY id ASC').all(semesterId),
+  )
+  return {
+    ...toSemester(row),
+    periods,
+    courses,
+    exams: db.prepare('SELECT * FROM exam WHERE semester_id = ? ORDER BY id ASC').all(semesterId).map(toExam),
+    homework: db.prepare('SELECT * FROM homework WHERE semester_id = ? ORDER BY id ASC').all(semesterId).map(toHomework),
+    dayRules: db
+      .prepare('SELECT * FROM semester_day_rule WHERE semester_id = ? ORDER BY id ASC')
+      .all(semesterId)
+      .map(toDayRule),
+    adjustments: courses.length
+      ? db
+          .prepare(
+            `SELECT * FROM course_adjustment WHERE course_id IN (${courses.map(() => '?').join(',')}) ORDER BY id ASC`,
+          )
+          .all(...courses.map((c) => c.id))
+          .map(toAdjustment)
+      : [],
+  }
+}
+
 /** 实体 → 快照读取器（返回 null 表示该实体当前不存在） */
 const SNAPSHOTS = {
   class: (id) => db.prepare('SELECT * FROM class WHERE id = ?').get(id) ?? null,
   member: (id) => db.prepare('SELECT * FROM class_member WHERE rowid = ?').get(id) ?? null,
-  semester: (id) => {
-    const row = db.prepare('SELECT * FROM semester WHERE id = ?').get(id)
-    if (!row) return null
-    const periods = db
-      .prepare('SELECT * FROM period_template WHERE semester_id = ? ORDER BY period_index ASC')
-      .all(id)
-      .map(toPeriod)
-    return { ...toSemester(row), periods }
-  },
+  semester: (id) => semesterSubtree(id),
   period: (id) => {
     const row = db.prepare('SELECT * FROM period_template WHERE id = ?').get(id)
     return row ? toPeriod(row) : null
   },
-  course: (id) => loadCourseWithSessions(db.prepare('SELECT * FROM course WHERE id = ?').get(id)),
+  course: (id) => {
+    const c = loadCourseWithSessions(db.prepare('SELECT * FROM course WHERE id = ?').get(id))
+    if (!c) return null
+    // 调课记录随课程级联删除，快照里带上，回退才不会丢
+    c.adjustments = db
+      .prepare('SELECT * FROM course_adjustment WHERE course_id = ? ORDER BY id ASC')
+      .all(id)
+      .map(toAdjustment)
+    // 删课程会把考试 / 作业的 courseId 置空，记下原引用，回退时接回去
+    c.refs = {
+      exams: db.prepare('SELECT id FROM exam WHERE course_id = ?').all(id).map((r) => r.id),
+      homework: db.prepare('SELECT id FROM homework WHERE course_id = ?').all(id).map((r) => r.id),
+    }
+    return c
+  },
   exam: (id) => {
     const row = db.prepare('SELECT * FROM exam WHERE id = ?').get(id)
     return row ? toExam(row) : null

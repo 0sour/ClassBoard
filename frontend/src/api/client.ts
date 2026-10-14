@@ -2,7 +2,17 @@
 // ClassBoard · REST API 客户端（与 server 契约一一对应）
 // 归属：班级 → 多个学期 → 课表；公开面（/public/*）无需登录且只读
 // ============================================================
-import type { Course, CourseAdjustment, DayRule, Exam, Homework, Notice, Period, Semester } from '@/types'
+import type {
+  ChangeList,
+  Course,
+  CourseAdjustment,
+  DayRule,
+  Exam,
+  Homework,
+  Notice,
+  Period,
+  Semester,
+} from '@/types'
 import type { ImportRow } from '@/utils/pdf'
 
 const BASE = '/api'
@@ -382,6 +392,27 @@ export const api = {
   listSessions: () => request<{ sessions: SessionInfo[] }>('/access/sessions'),
 
   revokeSession: (id: number) => request<void>(`/access/sessions/${id}`, { method: 'DELETE' }),
+
+  // ---- 变更记录与回退 ----
+  /** 班级变更记录（负责人）：可按实体 / 对象 id / 操作人筛选，before 为游标（加载更多） */
+  listChanges: (
+    classId: number,
+    opts: { entity?: string; entityId?: number; actorId?: number; action?: string; before?: number; limit?: number } = {},
+  ) => request<ChangeList>(`/classes/${classId}/changes${query({ ...opts })}`),
+
+  /** 全站变更记录（admin）：platform=1 只看平台级（班级已删除等） */
+  listAllChanges: (opts: { classId?: number; platform?: 1; actor?: string; entity?: string; before?: number; limit?: number } = {}) =>
+    request<ChangeList>(`/changes${query({ ...opts })}`),
+
+  /** 撤销一条记录（把该对象恢复成它的 before）；之后又被改过 → 409 CHANGE_CONFLICT */
+  revertChange: (id: number) => request<{ ok: true; reverted: number }>(`/changes/${id}/revert`, { method: 'POST' }),
+
+  /** 整班回退：回到某条记录的状态（before=true 表示回到它改之前） */
+  rollbackClass: (classId: number, changeId: number, before = false) =>
+    request<{ ok: true; rolledBackTo: number; discarded: number }>(`/classes/${classId}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify({ changeId, before }),
+    }),
 
   // ---- 注册审批（admin）----
   listApprovals: (status: 'pending' | 'all' = 'pending') => request<UserInfo[]>(`/approvals${query({ status })}`),

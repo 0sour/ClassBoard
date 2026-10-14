@@ -21,6 +21,7 @@ import {
   type AdjustmentChain,
 } from '@/utils/calendar'
 import AdjustEditor from '@/components/schedule/AdjustEditor.vue'
+import ChangeTimeline from '@/components/changes/ChangeTimeline.vue'
 import AdjustDetail from '@/components/schedule/AdjustDetail.vue'
 import type { CourseAdjustment, Period, Semester } from '@/types'
 
@@ -29,13 +30,14 @@ const route = useRoute()
 const router = useRouter()
 
 // ================= Tab 导航 =================
-type TabKey = 'class' | 'semester' | 'period' | 'calendar' | 'display' | 'weather' | 'data' | 'account' | 'approvals' | 'users'
+type TabKey = 'class' | 'semester' | 'period' | 'calendar' | 'changes' | 'display' | 'weather' | 'data' | 'account' | 'approvals' | 'users'
 
 const TABS: { key: TabKey; label: string; adminOnly?: boolean }[] = [
   { key: 'class', label: '班级' },
   { key: 'semester', label: '学期' },
   { key: 'period', label: '节次' },
   { key: 'calendar', label: '日历' },
+  { key: 'changes', label: '变更记录' },
   { key: 'display', label: '显示' },
   // 天气为全站共享配置（存管理员名下），仅管理员可修改
   { key: 'weather', label: '天气', adminOnly: true },
@@ -462,6 +464,10 @@ async function removeAdjustment(a: CourseAdjustment): Promise<void> {
     toast(e instanceof Error ? e.message : '撤销失败，请重试', 'error')
   }
 }
+
+// ================= 变更记录（时间线 / 撤销 / 整班回退） =================
+/** 管理员可切全站视角；负责人只看得到自己班的 */
+const changeScope = ref<'class' | 'site'>('class')
 
 // ================= 单双周过滤 =================
 async function toggleOddEven(v: boolean): Promise<void> {
@@ -1323,7 +1329,7 @@ function formatTime(iso: string | null): string {
         <button class="btn-mini btn-mini--danger" type="button" @click="removeCalendarRange(r.from, r.to)">清除</button>
       </div>
 
-      <!-- 单课调整台账：停课 / 调课 / 补课（与课表角标的详情卡同源） -->
+    <!-- 单课调整台账：停课 / 调课 / 补课（与课表角标的详情卡同源） -->
       <div class="ledger-head">
         <h3>单课调整</h3>
         <button class="btn-mini btn-mini--primary" type="button" @click="showAdjustEditor = true">＋ 登记调整</button>
@@ -1344,6 +1350,26 @@ function formatTime(iso: string | null): string {
         <button class="btn-mini" type="button" @click="openChain(a)">链路</button>
         <button class="btn-mini btn-mini--danger" type="button" @click="removeAdjustment(a)">撤销</button>
       </div>
+    </div>
+
+      <!-- 变更记录：谁在什么时候动了什么（字段级 diff），可单条撤销或整班回退 -->
+    <div v-show="activeTab === 'changes'" class="panel reveal">
+      <div class="panel-head">
+        <h3>变更记录</h3>
+        <div v-if="store.currentUser?.role === 'admin'" class="seg-view">
+          <button class="seg-view__item" :class="{ active: changeScope === 'class' }" type="button" @click="changeScope = 'class'">
+            本班
+          </button>
+          <button class="seg-view__item" :class="{ active: changeScope === 'site' }" type="button" @click="changeScope = 'site'">
+            全站
+          </button>
+        </div>
+      </div>
+      <p class="panel-note panel-note--block">
+        每一次写操作都在这里留一条记录（谁 / 什么时候 / 改了什么），撤销=把对象恢复成改动之前的样子并追加一条「撤销」记录；
+        想整体回到某个时刻用「回退到这里」，它会把班级数据一起回退到那一刻。
+      </p>
+      <ChangeTimeline :scope="changeScope" />
     </div>
 
     <!-- 显示：周课表显示选项（个人提醒功能已下线，P2 起由负责人通过通知中心发布消息） -->
@@ -1746,6 +1772,29 @@ function formatTime(iso: string | null): string {
   color: var(--badge-extra-text);
   background: var(--badge-extra-bg);
   border: 1px solid var(--badge-extra-line);
+}
+
+/* 变更记录视角切换（管理员） */
+.seg-view {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-md);
+}
+
+.seg-view__item {
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+.seg-view__item.active {
+  background: var(--color-bg-surface);
+  color: var(--color-brand);
+  font-weight: var(--font-weight-medium);
+  box-shadow: var(--shadow-card);
 }
 
 .ledger-head {

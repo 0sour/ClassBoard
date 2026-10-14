@@ -101,7 +101,8 @@ coursesRouter.put(
       db.prepare(
         'UPDATE course SET type = ?, name = ?, teacher = ?, location = ?, color = ?, remark = ? WHERE id = ?',
       ).run(c.type, c.name, c.teacher, c.location, c.color, c.remark, id)
-      replaceCourseSessions(id, c.sessions)
+      // sessions 缺省 = 只改元信息：不动上课时间（前端编辑弹窗总会带全量 sessions）
+      if (req.body?.sessions !== undefined) replaceCourseSessions(id, c.sessions)
     })
     update()
     recordChange({

@@ -8,6 +8,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import NoticeEditor from './NoticeEditor.vue'
+import ChangeHistoryModal from '@/components/changes/ChangeHistoryModal.vue'
 import { confirm, toast } from '@/utils/ui'
 import { monthDayLabel } from '@/utils/calendar'
 import type { Notice } from '@/types'
@@ -19,9 +20,17 @@ const open = ref(false)
 const editing = ref<Notice | null>(null)
 const showEditor = ref(false)
 const deleting = ref(false)
+/** 这条通知的变更历史（时间线 + 撤销） */
+const historyOf = ref<Notice | null>(null)
 
 const notices = computed(() => store.notices)
 const canEdit = computed(() => !store.readonly)
+
+/** 打开某条通知的变更历史 */
+function openHistory(n: Notice): void {
+  close() // 先收起下拉，否则弹窗会被下拉挡住
+  historyOf.value = n
+}
 
 function toggle(): void {
   open.value = !open.value
@@ -143,6 +152,7 @@ function courseNameOf(n: Notice): string {
           <div v-if="canEdit" class="notice-tools">
             <button class="notice-tool" type="button" :disabled="deleting" @click="togglePin(n)">{{ n.pinned ? '取消置顶' : '置顶' }}</button>
             <button class="notice-tool" type="button" @click="openEdit(n)">编辑</button>
+            <button class="notice-tool" type="button" @click="openHistory(n)">历史</button>
             <button class="notice-tool notice-tool--danger" type="button" :disabled="deleting" @click="removeNotice(n)">删除</button>
           </div>
           <div v-else class="notice-meta">{{ n.authorName ? `由 ${n.authorName} 发布` : '' }}</div>
@@ -154,6 +164,13 @@ function courseNameOf(n: Notice): string {
     </div>
 
     <NoticeEditor :open="showEditor" :notice="editing" @close="showEditor = false" @done="onEditorDone" />
+    <ChangeHistoryModal
+      :open="!!historyOf"
+      entity="notice"
+      :entity-id="historyOf?.id ?? null"
+      :title="historyOf?.title ?? '通知'"
+      @close="historyOf = null"
+    />
   </div>
 </template>
 

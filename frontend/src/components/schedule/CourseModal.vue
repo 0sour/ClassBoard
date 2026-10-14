@@ -8,6 +8,7 @@ import { parseDate } from '@/utils/week'
 import AppSelect, { type AppSelectOption } from '@/components/common/AppSelect.vue'
 import DatePicker from '@/components/common/DatePicker.vue'
 import AdjustDetail from '@/components/schedule/AdjustDetail.vue'
+import ChangeHistoryModal from '@/components/changes/ChangeHistoryModal.vue'
 import type { Course, CourseAdjustment, ResolvedBlock } from '@/types'
 
 const props = defineProps<{ courseId: number | null }>()
@@ -218,6 +219,9 @@ async function submitAdjust(): Promise<void> {
     adjBusy.value = false
   }
 }
+
+/** 这门课的变更历史（含撤销） */
+const showHistory = ref(false)
 
 /** 查看链路：走解析层算整条链（含调休与后续移动），与课表角标 / 台账点开的是同一张卡 */
 const adjustChain = ref<AdjustmentChain | null>(null)
@@ -497,9 +501,12 @@ function onDelete(): void {
           </div>
 
           <div v-if="!store.readonly" class="modal-foot">
-            <button class="btn-ghost" type="button" :disabled="deleting" @click="onDelete">
-              {{ deleting ? '正在删除…' : '删除课程' }}
-            </button>
+            <span class="foot-left">
+              <button class="btn-ghost" type="button" :disabled="deleting" @click="onDelete">
+                {{ deleting ? '正在删除…' : '删除课程' }}
+              </button>
+              <button class="btn-ghost" type="button" @click="showHistory = true">历史</button>
+            </span>
             <button class="btn-primary" type="button" @click="emit('edit', course)">编辑</button>
           </div>
         </div>
@@ -508,6 +515,15 @@ function onDelete(): void {
 
     <!-- 调整链路详情（与课表角标 / 台账同一张卡，叠在本弹窗之上） -->
     <AdjustDetail :open="!!adjustChain" :chain="adjustChain" @close="adjustChain = null" />
+
+    <!-- 这门课的变更历史（时间线 + 撤销） -->
+    <ChangeHistoryModal
+      :open="showHistory"
+      entity="course"
+      :entity-id="courseId"
+      :title="course?.name ?? '课程'"
+      @close="showHistory = false"
+    />
   </Teleport>
 </template>
 
@@ -860,10 +876,17 @@ function onDelete(): void {
 
 .modal-foot {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: var(--spacing-md);
   padding: var(--spacing-md) var(--spacing-xl) var(--spacing-lg);
   border-top: 1px solid var(--color-border-default);
+}
+
+.foot-left {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
 }
 
 .btn-ghost,

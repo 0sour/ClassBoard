@@ -80,7 +80,8 @@ classesRouter.post(
       action: 'create',
       entity: 'class',
       entityId: cls.id,
-      after: entitySnapshot('class', cls.id),
+      // 整班快照（此刻是空班）：新班从这里起每一步都有可回退的起点
+      after: classStateSnapshot(cls.id),
     })
     recordChange({
       classId: cls.id,
