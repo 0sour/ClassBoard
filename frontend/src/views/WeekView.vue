@@ -1,0 +1,966 @@
+<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useScheduleStore } from '@/stores/schedule'
+import WeekNav from '@/components/schedule/WeekNav.vue'
+import WeekGrid from '@/components/schedule/WeekGrid.vue'
+import WeekPicker from '@/components/schedule/WeekPicker.vue'
+import SidePanel from '@/components/schedule/SidePanel.vue'
+import CourseModal from '@/components/schedule/CourseModal.vue'
+import CourseEditor from '@/components/course/CourseEditor.vue'
+import AdjustBadge from '@/components/schedule/AdjustBadge.vue'
+import AdjustDetail from '@/components/schedule/AdjustDetail.vue'
+import Skeleton from '@/components/common/Skeleton.vue'
+import { exportElementAsPng } from '@/utils/exportPng'
+import { formatDate, parseDate, toMonday } from '@/utils/week'
+import { toast } from '@/utils/ui'
+import { periodsLabel } from '@/utils/session'
+import { chainOfBlock, chainOfMarker, markerLabel, monthDayLabel, type AdjustmentChain } from '@/utils/calendar'
+import type { Course, DayMarker, ResolvedBlock, Weekday } from '@/types'
+
+const store = useScheduleStore()
+
+const selectedId = ref<number | null>(null)
+/** 点开课程详情时的那一块（含日期）：详情里显示这一次的实际时间 */
+const selectedOcc = ref<{ block: ResolvedBlock; date: string } | null>(null)
+const editing = ref<Course | null>(null)
+const showEditor = ref(false)
+const exporting = ref(false)
+
+/** 调整详情卡（角标 / 原位置标记点开，与设置台账同一张卡） */
+const adjustChain = ref<AdjustmentChain | null>(null)
+
+/** 点课表块上的角标 → 详情卡；基准块（无链条）退回课程详情 */
+function openBlockAdjust(block: ResolvedBlock, dateStr: string): void {
+  const chain = chainOfBlock(block, dateStr)
+  if (chain) adjustChain.value = chain
+  else openCourse(block.id)
+}
+
+/** 点原位置 / 中间站标记 → 详情卡；无链条的旧标记退回课程详情 */
+function openMarkerAdjust(marker: DayMarker, dateStr: string): void {
+  const chain = chainOfMarker(marker, dateStr)
+  if (chain) adjustChain.value = chain
+  else openCourse(marker.courseId)
+}
+
+/** 空白格快捷新增：预填星期与节次 */
+const createSlot = ref<{ weekday: Weekday; period: number } | null>(null)
+
+// ============================================================
+// 移动端单日视图：一次显示一天课程列表 + 顶部 7 格轮盘
+// 数据流：唯一状态 wheelCenter → 派生轮盘 7 格 + 标题 + 课程列表
+// ============================================================
+const DAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] as const
+const WEEKDAY_NUM = ['一', '二', '三', '四', '五', '六', '日'] as const
+/** 列表动画方向（切日时按新旧日期先后决定滑入方向） */
+const wheelDir = ref<'next' | 'prev'>('next')
+
+/** 移动端判定（<768px 与全局断点一致） */
+const isMobile = ref(window.innerWidth < 768)
+
+function onResize(): void {
+  isMobile.value = window.innerWidth < 768
+  // 轮盘为原生滚动布局，窗口变化无需重算
+}
+
+window.addEventListener('resize', onResize)
+
+/** 两个日期是否为同一天 */
+function isSameDate(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+}
+
+// ============================================================
+// 轮盘式日期选择（固定序列 + 原生滚动，滚动停在哪就在哪）
+// 序列以今天为中心固定 ±100 天（201 格），永不重建、永无回滚。
+// scroll 事件实时读 scrollLeft → 中央格索引 → 更新选中日期。
+// 点击格/今天按钮 → scrollTo 平滑滚动，滚动过程日期实时跟随。
+// ============================================================
+const WHEEL_ITEM_W = 56 // 格宽（CSS 固定）
+const WHEEL_CENTER = 150 // 今天所在格索引（301 格：0..300）
+const WHEEL_SPAN = 150 // 单侧天数（覆盖整个学期：学期末距今天最远约 120 天）
+const wheelRef = ref<HTMLElement | null>(null)
+/** 当前中央格索引（scroll 实时更新） */
+const wheelIdx = ref(WHEEL_CENTER)
+const wheelDragging = ref(false)
+let wheelScrollRaf = 0
+/** 自动回正定时器（滚动停止 300ms 后吸附） */
+let wheelSettleTimer: number | null = null
+/** 吸附中标志（避免 settle 引发的 scroll 再调度自己） */
+let wheelSettling = false
+
+/** 归零时分秒，避免日期比较误判 */
+function normalizeDay(d: Date): Date {
+  const nd = new Date(d)
+  nd.setHours(0, 0, 0, 0)
+  return nd
+}
+
+/** 固定日期序列（以今天为中心 ±100 天，永不重建） */
+const wheelDates = computed(() => {
+  const list: { date: Date; wd: string }[] = []
+  const today = normalizeDay(new Date(store.today))
+  for (let i = -WHEEL_SPAN; i <= WHEEL_SPAN; i++) {
+    const d = new Date(today)
+    d.setDate(today.getDate() + i)
+    list.push({ date: d, wd: WEEKDAY_NUM[(d.getDay() + 6) % 7] })
+  }
+  return list
+})
+
+/** 当前选中日期（中央格）——标题与课程列表的唯一来源 */
+const activeDay = computed(() => {
+  const item = wheelDates.value[wheelIdx.value]
+  return item ? item.date : normalizeDay(new Date(store.today))
+})
+
+/** 单日标题：「周三 · 8月26日」 */
+const dayTitle = computed(() => {
+  const d = activeDay.value
+  return `${DAY_LABELS[d.getDay() === 0 ? 6 : d.getDay() - 1]} · ${d.getMonth() + 1}月${d.getDate()}日`
+})
+
+/** 当前展示日的解析结果（含放假 / 调休按周几课表 / 调课补课；已按节次排序） */
+const dayResolved = computed(() => store.resolvedDay(activeDay.value))
+const dayBlocks = computed(() => dayResolved.value.blocks)
+const dayMarkers = computed(() => dayResolved.value.markers)
+
+/** 单日提示：放假 / 调休（课已移走或补某天的课）/ 有几门课是调整过来的 */
+const dayNotice = computed(() => {
+  const r = dayResolved.value
+  const parts: string[] = []
+  if (r.rule?.kind === 'holiday') parts.push('假期')
+  else if (r.rule?.kind === 'shift') parts.push(`调休：今日的课已移至 ${r.rule.toDate ? monthDayLabel(r.rule.toDate) : ''}`)
+  else if (r.shiftSources.length) parts.push(r.dayLabel)
+  const adjusted = r.blocks.filter((b) => b.source !== 'base').length
+  if (adjusted) parts.push(`${adjusted} 门课为调课/补课/调休`)
+  if (r.markers.length) parts.push(`${r.markers.length} 门课停课或调走`)
+  return parts.join(' · ')
+})
+
+/** 节次时间（按节次模板） */
+function periodTime(period: number): string {
+  const p = store.periods[period - 1]
+  return p ? `${p.startTime}–${p.endTime}` : ''
+}
+
+/** 滚动事件（rAF 节流）：中央格索引实时跟随，日期/标题/列表同步刷新；
+ *  同时调度「停止后自动回正」定时器（兼容不支持 scrollend 的环境） */
+function onWheelScroll(): void {
+  if (wheelSettling) return
+  cancelAnimationFrame(wheelScrollRaf)
+  if (wheelSettleTimer !== null) window.clearTimeout(wheelSettleTimer)
+  wheelSettleTimer = window.setTimeout(() => {
+    wheelSettleTimer = null
+    settleAlign()
+  }, 300)
+  wheelScrollRaf = requestAnimationFrame(() => {
+    const view = wheelRef.value
+    if (!view) return
+    const idx = Math.round(view.scrollLeft / WHEEL_ITEM_W)
+    const clamped = Math.min(wheelDates.value.length - 1, Math.max(0, idx))
+    if (clamped !== wheelIdx.value) {
+      const prev = wheelDates.value[wheelIdx.value]?.date
+      const next = wheelDates.value[clamped]?.date
+      if (prev && next && next.getTime() !== prev.getTime()) {
+        wheelDir.value = next.getTime() > prev.getTime() ? 'next' : 'prev'
+      }
+      wheelIdx.value = clamped
+    }
+  })
+}
+
+/** 指针按下 */
+function onWheelDown(e: PointerEvent): void {
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  wheelDragging.value = true
+  // 新一轮拖动：解除吸附中状态并取消回正调度，
+  // 否则残留 wheelSettling 会吞掉后续所有滚动事件（日期不跟、不回正）
+  wheelSettling = false
+  if (wheelSettleTimer !== null) {
+    window.clearTimeout(wheelSettleTimer)
+    wheelSettleTimer = null
+  }
+}
+
+/** 指针松开：吸附到最近整格（对齐格子，避免停在两格之间） */
+function onWheelUp(): void {
+  wheelDragging.value = false
+  settleAlign()
+}
+
+function onWheelCancel(): void {
+  wheelDragging.value = false
+}
+
+/** 吸附到最近整格（scrollTo 平滑），让格子始终对齐指示器正中 */
+function settleAlign(): void {
+  const view = wheelRef.value
+  if (!view) return
+  const idx = Math.round(view.scrollLeft / WHEEL_ITEM_W)
+  const target = idx * WHEEL_ITEM_W
+  if (Math.abs(view.scrollLeft - target) > 1.5) {
+    wheelSettling = true
+    view.scrollTo({ left: target, behavior: 'smooth' })
+    // 平滑滚动结束后再校验一次（防滚动回调未触发）
+    if (wheelSettleTimer !== null) window.clearTimeout(wheelSettleTimer)
+    wheelSettleTimer = window.setTimeout(() => {
+      wheelSettleTimer = null
+      wheelSettling = false
+      const now = view.scrollLeft
+      const cur = Math.round(now / WHEEL_ITEM_W)
+      if (Math.abs(now - cur * WHEEL_ITEM_W) > 1.5) {
+        settleAlign()
+      } else {
+        // 最终对齐后同步选中索引
+        wheelSettling = false
+        const clamped = Math.min(wheelDates.value.length - 1, Math.max(0, cur))
+        if (clamped !== wheelIdx.value) wheelIdx.value = clamped
+      }
+    }, 420)
+  }
+}
+
+/** 点击格子：平滑滚动到该格（滚动过程日期实时跟随，停止后对齐） */
+function onWheelPick(i: number): void {
+  if (i === wheelIdx.value) return
+  const view = wheelRef.value
+  if (!view) return
+  view.scrollTo({ left: i * WHEEL_ITEM_W, behavior: 'smooth' })
+}
+
+/** 回到今天：瞬时定位到轮盘中央（smooth 滚动过冲会与 settleAlign 二次吸附竞争，停在相邻格） */
+function goToday(): void {
+  const view = wheelRef.value
+  if (!view) return
+  view.scrollLeft = WHEEL_CENTER * WHEEL_ITEM_W
+}
+
+/** 轮盘切日跨周时同步展示周：周摘要/周徽章等随 weekContext 联动（不随轮盘漂移） */
+watch(activeDay, (d) => {
+  if (!isMobile.value) return
+  const monday = toMonday(d)
+  const target = Math.round((monday.getTime() - toMonday(store.today).getTime()) / 86400000 / 7)
+  if (target !== store.weekOffset) {
+    store.weekOffset = target
+    void store.refreshSchedule()
+  }
+})
+
+/** 移动端周选择器选中周：轮盘跳到该周周一（周摘要/徽章由 watch(activeDay) 联动）
+ * 用瞬时定位而非 smooth：平滑滚动过冲会与 settleAlign 的二次吸附竞争，最终停在相邻格。
+ * 基准用轮盘锚点（挂载时今天 00:00，wheelDates 序列同源）而非 store.today（含时分秒，
+ * 跨天取整会差 1 格）。 */
+function onMobileWeekSelect(week: number): void {
+  const sem = store.currentSemester
+  if (!sem) return
+  const firstMonday = toMonday(parseDate(sem.startDate))
+  const target = new Date(firstMonday)
+  target.setDate(firstMonday.getDate() + (week - 1) * 7)
+  const view = wheelRef.value
+  if (!view) return
+  const anchor = normalizeDay(new Date(store.today))
+  const idx = Math.round((target.getTime() - anchor.getTime()) / 86400000) + WHEEL_CENTER
+  const clamped = Math.min(wheelDates.value.length - 1, Math.max(0, idx))
+  view.scrollLeft = clamped * WHEEL_ITEM_W
+}
+
+/** 周选择器选中：移动端滚轮盘，桌面端走 weekOffset（模板内联三元不会调用函数，须用显式方法） */
+function onWeekSelect(week: number): void {
+  if (isMobile.value) onMobileWeekSelect(week)
+  else store.goToWeek(week)
+}
+
+/** 移动端轮盘初始化：今天居中 */
+onMounted(() => {
+  if (!isMobile.value) return
+  void nextTick(() => {
+    const view = wheelRef.value
+    if (view) {
+      view.scrollLeft = WHEEL_CENTER * WHEEL_ITEM_W
+      wheelIdx.value = WHEEL_CENTER
+    }
+  })
+})
+
+onBeforeUnmount(() => {
+  cancelAnimationFrame(wheelScrollRaf)
+  window.removeEventListener('resize', onResize)
+})
+
+function openCourse(courseId: number, block?: ResolvedBlock, date?: string): void {
+  selectedId.value = courseId
+  selectedOcc.value = block && date ? { block, date } : null
+}
+
+function closeModal(): void {
+  selectedId.value = null
+  selectedOcc.value = null
+}
+
+function editCourse(course: Course): void {
+  if (store.readonly) return
+  selectedId.value = null
+  editing.value = course
+  showEditor.value = true
+}
+
+function createFromSlot(slot: { weekday: Weekday; period: number }): void {
+  if (store.readonly) return
+  selectedId.value = null
+  editing.value = null
+  createSlot.value = slot
+  showEditor.value = true
+}
+
+function printWeek(): void {
+  window.print()
+}
+
+async function exportPng(): Promise<void> {
+  // 按稳定属性定位周课表网格（WeekGrid 根节点的 data-export-target）
+  const grid = document.querySelector('[data-export-target="week-grid"]')
+  if (!grid || !(grid instanceof HTMLElement)) {
+    toast('未找到课表网格', 'error')
+    return
+  }
+  exporting.value = true
+  try {
+    const date = new Date().toISOString().slice(0, 10)
+    await exportElementAsPng(grid, `classboard-week-${date}.png`)
+    toast('课表已导出为 PNG', 'success')
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '导出失败，请重试', 'error')
+  } finally {
+    exporting.value = false
+  }
+}
+</script>
+
+<template>
+  <div class="page week-view">
+    <div class="week-layout">
+      <!-- 主区：周导航与课表同宽对齐 -->
+      <div class="week-main">
+        <!-- 桌面/平板：周导航；移动端：单日视图（日期标题 + 周缩略条 + 课程列表） -->
+        <WeekNav v-if="!isMobile" class="reveal" />
+        <div v-else class="day-view-m">
+          <div class="dv-head reveal">
+            <!-- 周标题：点击弹出周选择器 + 单双周徽章（移动端选中后轮盘滚到该周） -->
+            <WeekPicker :current-week="store.weekNumber" @select="onWeekSelect">
+              <span class="dv-title num">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" /></svg>
+                {{ dayTitle }}
+                <span v-if="store.weekNumber !== null" class="dv-week-badge num">{{ store.weekNumber }}周·{{ store.isOdd ? '单' : '双' }}</span>
+              </span>
+            </WeekPicker>
+            <button class="dv-today" type="button" @click="goToday">今天</button>
+          </div>
+
+          <!-- 轮盘式日期选择：原生横向滚动；指示器固定在容器（不滚动） -->
+          <div class="dv-wheel-wrap reveal">
+            <!-- 常驻选中指示器：固定在 wrap（滚动容器外），轨道从框内流过 -->
+            <div class="dv-wheel__indicator"></div>
+            <div
+              ref="wheelRef"
+              class="dv-wheel"
+              :class="{ 'is-dragging': wheelDragging }"
+              @scroll.passive="onWheelScroll"
+              @pointerdown="onWheelDown"
+              @pointerup="onWheelUp"
+              @pointercancel="onWheelCancel"
+            >
+              <div class="dv-wheel__track">
+                <button
+                  v-for="(d, i) in wheelDates"
+                  :key="i"
+                  class="dv-wheel__day"
+                  :class="{
+                    active: isSameDate(d.date, activeDay),
+                    today: isSameDate(d.date, store.today),
+                  }"
+                  type="button"
+                  @click="onWheelPick(i)"
+                >
+                  <span>{{ d.wd }}</span>
+                  <b>{{ d.date.getDate() }}</b>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 单日课程列表（全宽卡片；切日时按方向滑入/滑出动画，拖动中不播） -->
+          <div class="dv-list reveal">
+            <Transition
+              :name="wheelDir === 'next' ? 'dv-next' : 'dv-prev'"
+              mode="out-in"
+              :duration="200"
+            >
+              <div :key="activeDay.getTime()" class="dv-list__inner">
+                <div v-if="dayNotice" class="dv-notice" :class="{ holiday: dayResolved.rule?.kind === 'holiday' }">
+                  {{ dayNotice }}
+                </div>
+                <button
+                  v-for="c in dayBlocks"
+                  :key="`${c.id}:${c.sessionId ?? c.adjustmentId ?? 'x'}`"
+                  class="dv-card"
+                  type="button"
+                  @click="c.chain?.length ? openBlockAdjust(c, formatDate(activeDay)) : openCourse(c.id, c, formatDate(activeDay))"
+                >
+                  <span class="dv-dot-color" :style="{ background: `var(--${c.color}-text)` }"></span>
+                  <span class="dv-time num">{{ periodTime(c.startPeriod).split('–')[0] }}<small>–{{ periodTime(c.endPeriod).split('–')[1] }}</small></span>
+                  <span class="dv-main">
+                    <span class="dv-name-row">
+                      <span class="dv-name">{{ c.name }}</span>
+                      <AdjustBadge :block="c" clickable @open="openBlockAdjust(c, formatDate(activeDay))" />
+                      <span
+                        v-if="c.type === 'lab'"
+                        class="dv-lab"
+                        :style="{ color: `var(--${c.color}-text)`, background: `var(--${c.color}-bg)`, borderColor: `var(--${c.color}-line)` }"
+                      >实验</span>
+                    </span>
+                    <span class="dv-loc">{{ c.location }} · {{ c.teacher }}</span>
+                  </span>
+                  <span class="dv-slot num">{{ periodsLabel(c.periods) }}</span>
+                </button>
+                <!-- 原位置淡显：这一天本有课但停课 / 调走了（点开同一张调整详情卡） -->
+                <button v-for="m in dayMarkers" :key="`marker:${m.adjustmentId}`" class="dv-card dv-card--marker" type="button" @click="openMarkerAdjust(m, formatDate(activeDay))">
+                  <span class="dv-dot-color dv-faint" :style="{ background: `var(--${m.color}-text)` }"></span>
+                  <span class="dv-time num dv-faint">{{ periodsLabel(m.periods) }}</span>
+                  <span class="dv-main">
+                    <span class="dv-name-row">
+                      <span class="dv-name dv-faint">{{ m.name }}</span>
+                    </span>
+                  </span>
+                  <span class="dv-slot num">{{ markerLabel(m) }}</span>
+                </button>
+                <div v-if="dayBlocks.length === 0 && dayMarkers.length === 0" class="dv-empty">
+                  {{ dayResolved.rule?.kind === 'holiday' ? '这一天放假' : '这一天没有排课' }}
+                </div>
+              </div>
+            </Transition>
+          </div>
+        </div>
+
+        <!-- 桌面/平板：周课表网格（移动端由上方单日列表替代） -->
+        <section v-if="!isMobile" class="schedule-card reveal">
+          <div class="sched-scroll">
+            <!-- 周数据拉取中显示网格骨架（UI 4.4）；公开只读页数据随页面一次取回，不显示骨架 -->
+            <Skeleton v-if="store.remote && !store.readonly && !store.weekContext" variant="grid" />
+            <WeekGrid
+              v-else
+              :days="undefined"
+              @open="openCourse"
+              @open-adjust="(block, dateStr) => openBlockAdjust(block, dateStr)"
+              @open-marker="(marker, dateStr) => openMarkerAdjust(marker, dateStr)"
+              @create="createFromSlot"
+            />
+          </div>
+        </section>
+
+        <!-- 课表底部操作条：打印 / 导出 PNG（UI 设计文档 4.7，操作对象仅限课表网格） -->
+        <div class="card-foot">
+          <div class="week-actions">
+            <button class="act-btn" type="button" @click="printWeek">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V2h12v7" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect width="12" height="8" x="6" y="14" rx="1" /></svg>
+              打印
+            </button>
+            <button class="act-btn" type="button" :disabled="exporting" @click="exportPng">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5" /><path d="M12 15V3" /></svg>
+              {{ exporting ? '导出中…' : '导出 PNG' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 信息面板（桌面右侧 / 平板下方两列） -->
+      <SidePanel @open-course="openCourse" />
+    </div>
+
+    <CourseModal :course-id="selectedId" :occurrence="selectedOcc" @close="closeModal" @edit="editCourse" />
+    <AdjustDetail :open="!!adjustChain" :chain="adjustChain" @close="adjustChain = null" />
+    <CourseEditor
+      :open="showEditor"
+      :course="editing"
+      :preset-weekday="createSlot?.weekday"
+      :preset-period="createSlot?.period"
+      @close="showEditor = false; createSlot = null"
+      @done="showEditor = false; createSlot = null"
+    />
+  </div>
+</template>
+
+<style scoped>
+.page {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 var(--spacing-lg) var(--spacing-xl);
+}
+
+.week-layout {
+  display: block;
+}
+
+.week-main {
+  min-width: 0;
+}
+
+/* ============ 移动端单日视图（方案 B） ============ */
+.day-view-m {
+  margin: var(--spacing-lg) 0;
+}
+
+.dv-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.dv-title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.dv-title svg {
+  width: 18px;
+  height: 18px;
+  color: var(--color-brand);
+  flex: none;
+}
+
+/* 移动端周徽章：「第 N 周 · 单/双」 */
+.dv-week-badge {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-brand);
+  background: var(--color-brand-subtle);
+  border-radius: var(--radius-full);
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.dv-today {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 var(--spacing-md);
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--color-brand);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-inverse);
+  box-shadow: var(--shadow-btn);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.dv-today:hover {
+  background: var(--color-brand-hover);
+}
+
+/* ============ 轮盘式日期选择 ============ */
+.dv-wheel-wrap {
+  position: relative;
+  margin-bottom: var(--spacing-lg);
+  padding: 4px 0;
+}
+
+/* 窗口：原生横向滚动容器；吸附由 JS snapAndSettle 负责（不开 scroll-snap，
+   避免浏览器与 JS 双重吸附打架导致回弹） */
+.dv-wheel {
+  position: relative;
+  height: 52px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.dv-wheel::-webkit-scrollbar {
+  display: none;
+}
+
+.dv-wheel.is-dragging {
+  cursor: grabbing;
+}
+
+/* 轨道：flex 一排，格子带两侧 padding 使首尾也能滚到中央 */
+.dv-wheel__track {
+  display: flex;
+  height: 100%;
+  padding: 0 calc(50% - 28px);
+}
+
+.dv-wheel__day {
+  flex: 0 0 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--color-text-secondary);
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.dv-wheel__day span {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.dv-wheel__day b {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 今天：品牌色 */
+.dv-wheel__day.today b {
+  color: var(--color-brand);
+  font-weight: var(--font-weight-bold);
+}
+
+/* 选中格：仅文字品牌色（高亮框由固定指示器提供，格子本身不亮，
+   拖动时不会出现"高亮跟着格子跑"的错位感） */
+.dv-wheel__day.active b,
+.dv-wheel__day.active span {
+  color: var(--color-brand);
+  font-weight: var(--font-weight-bold);
+}
+
+/* 常驻选中指示器：固定在 wrap（滚动容器外），对准滚动容器视口中央 */
+.dv-wheel__indicator {
+  position: absolute;
+  left: 50%;
+  top: 4px; /* 对齐 .dv-wheel 滚动容器（wrap 上下 padding 4px） */
+  transform: translateX(-50%);
+  width: 56px;
+  height: 52px;
+  border: 1.5px solid var(--color-brand);
+  border-radius: var(--radius-lg);
+  background: transparent;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* 单日课程列表：全宽卡片 */
+.dv-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+/* 切日动画：旧列表淡出+位移，新列表按方向滑入（200ms，ease-out） */
+.dv-list__inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.dv-next-enter-active,
+.dv-next-leave-active,
+.dv-prev-enter-active,
+.dv-prev-leave-active {
+  transition: opacity 200ms ease-out, transform 200ms ease-out;
+}
+
+/* 左滑（下一日）：新列表从右滑入 */
+.dv-next-enter-from {
+  opacity: 0;
+  transform: translateX(28px);
+}
+
+.dv-next-leave-to {
+  opacity: 0;
+  transform: translateX(-28px);
+}
+
+/* 右滑（上一日）：新列表从左滑入 */
+.dv-prev-enter-from {
+  opacity: 0;
+  transform: translateX(-28px);
+}
+
+.dv-prev-leave-to {
+  opacity: 0;
+  transform: translateX(28px);
+}
+
+.dv-card {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  text-align: left;
+  transition: box-shadow var(--motion-duration-normal) var(--motion-easing-standard),
+    transform var(--motion-duration-normal) var(--motion-easing-standard);
+}
+
+.dv-card:hover {
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-1px);
+}
+
+.dv-dot-color {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-sm);
+  flex: none;
+}
+
+.dv-time {
+  min-width: 88px;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  line-height: 1.2;
+  flex: none;
+}
+
+.dv-time small {
+  display: block;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-regular);
+  color: var(--color-text-tertiary);
+}
+
+.dv-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.dv-name {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 课程名行：名称 + 实验课标签同行 */
+.dv-name-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap; /* 「调课 + 多次调整」两个角标在窄屏换行，不把课名挤成「微…」 */
+  gap: 6px;
+  min-width: 0;
+}
+
+.dv-name-row .dv-name {
+  flex: 1;
+  /* 保底可读宽度：角标放不下就整体换行，而不是把课名压成「微…」 */
+  min-width: 7.5em;
+}
+
+/* 实验课标签（随课程色板，与桌面 CourseBlock.lab-tag 一致） */
+.dv-lab {
+  flex: none;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  line-height: 1.6;
+  border: 1px solid;
+  border-radius: var(--radius-full);
+  padding: 0 6px;
+}
+
+.dv-loc {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dv-slot {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  flex: none;
+}
+
+.dv-empty {
+  padding: var(--spacing-2xl);
+  text-align: center;
+  color: var(--color-text-tertiary);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  font-size: var(--font-size-sm);
+}
+
+/* 单日提示条（假期 / 按周几课表 / 有调整） */
+.dv-notice {
+  margin-bottom: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-default);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.dv-notice.holiday {
+  border-style: dashed;
+  color: var(--color-text-tertiary);
+}
+
+/* 原位置淡显（停课 / 已调走） */
+.dv-card--marker {
+  border-style: dashed;
+  border-color: var(--color-border-strong);
+  box-shadow: none;
+  background: transparent;
+}
+
+.dv-faint {
+  opacity: 0.55;
+}
+
+/* 打印 / 导出操作条（文档 4.7：操作对象仅限课表网格） */
+.week-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+  padding-bottom: var(--spacing-sm);
+}
+
+.act-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 var(--spacing-md);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-surface);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard),
+    background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.act-btn:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-hover);
+}
+
+.act-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.act-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 打印：仅输出课表网格 + 周导航条（A4 横向），隐藏应用外壳 */
+@media print {
+  :global(.topbar),
+  :global(.tabbar),
+  :global(.side-panel),
+  .card-foot {
+    display: none !important;
+  }
+
+  .page {
+    max-width: none;
+    padding: 0;
+  }
+
+  .week-main {
+    width: 100%;
+  }
+
+  .sched-scroll {
+    overflow: visible;
+  }
+
+  @page {
+    size: A4 landscape;
+    margin: 12mm;
+  }
+}
+
+.schedule-card {
+  background: transparent;
+}
+
+/* 课表底部操作条（原卡片头部移至此）：打印/导出右对齐 */
+.card-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-top: none;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+/* 移动端：无课表网格衔接，操作条独立成卡（四角圆角 + 完整边框），与课程卡片协调 */
+@media (max-width: 767px) {
+  .card-foot {
+    border-top: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
+  }
+}
+
+/* 打印 / 导出操作条（文档 4.7：操作对象仅限课表网格） */
+.week-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.sched-scroll {
+  /* position: relative：滑动动画 enter 元素（absolute inset:0）以此为定位包含块，
+     否则相对视口定位导致布局错乱（只显示左半边/缩放感） */
+  position: relative;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.sched-scroll::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.sched-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-full);
+}
+
+.sched-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (min-width: 1280px) {
+  .week-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--side-panel-w);
+    gap: var(--spacing-xl);
+    align-items: start;
+  }
+}
+</style>

@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>ClassBoard · 周课表（活力多彩）</title>
+<style>
+/* ============================================================
+   ClassBoard · 风格 04「活力多彩」
+   高饱和糖果色 / 超大圆角 / 粗描边 / 厚实彩色投影 / 元气错落
+   ============================================================ */
+:root{
+  --ink:#1d1d3d;          /* 深墨蓝（正文/描边） */
+  --ink-soft:#4a4a6e;     /* 次级文字（≥4.5:1） */
+  --bg:#fff8ef;
+  --coral:#ff6b4a;
+  --lemon:#ffd23f;
+  --mint:#2ee6a8;
+  --blue:#4d8dff;
+  --purple:#b180ff;
+  --rose:#ff4d7d;
+  --cyan:#00c2d1;
+  --indigo:#8b85ff;
+  --amber:#ff9f1c;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  font-family:"Yuanti SC","YouYuan","PingFang SC","Hiragino Sans GB","Microsoft YaHei","微软雅黑",sans-serif;
+  color:var(--ink);
+  background:var(--bg);
+  min-height:100vh;
+  line-height:1.5;
+}
+body::before{                 /* 背景糖果色块 */
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(620px 620px at 88% -6%, rgba(255,107,74,.16), transparent 62%),
+    radial-gradient(720px 720px at -8% 26%, rgba(255,210,63,.17), transparent 60%),
+    radial-gradient(820px 820px at 108% 86%, rgba(46,230,168,.13), transparent 62%),
+    radial-gradient(720px 720px at 12% 108%, rgba(77,141,255,.12), transparent 60%);
+}
+.ic{fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;width:18px;height:18px;flex:none}
+svg{display:block}
+
+/* ---------- 顶部导航 ---------- */
+.topbar{
+  position:sticky;top:12px;z-index:40;
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  margin:16px 18px 0;
+  padding:12px 18px;
+  background:#fff;
+  border:3px solid var(--ink);border-radius:22px;
+  box-shadow:6px 6px 0 var(--lemon);
+}
+.brand{display:flex;align-items:center;gap:10px;font-size:21px;font-weight:900;letter-spacing:.5px}
+.brand .logo{
+  width:32px;height:32px;border-radius:10px;
+  background:var(--ink);color:#fff;
+  display:grid;place-items:center;
+  transform:rotate(-6deg);
+}
+.brand .logo .ic{width:19px;height:19px}
+.seg{
+  display:flex;gap:4px;margin:0 auto;
+  background:#fff;border:3px solid var(--ink);border-radius:999px;padding:4px;
+}
+.seg-btn{
+  font-family:inherit;font-size:15px;font-weight:900;color:var(--ink);
+  background:transparent;border:0;border-radius:999px;
+  padding:8px 22px;cursor:pointer;letter-spacing:1px;
+  transition:background .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+.seg-btn:hover{background:rgba(255,210,63,.35)}
+.seg-btn.is-active{background:var(--lemon);box-shadow:3px 3px 0 rgba(29,29,61,.85)}
+.top-actions{display:flex;align-items:center;gap:10px}
+.btn-import{
+  font-family:inherit;font-size:15px;font-weight:900;letter-spacing:1px;
+  color:#fff;background:var(--ink);
+  border:3px solid var(--ink);border-radius:999px;
+  padding:9px 20px;cursor:pointer;
+  display:inline-flex;align-items:center;gap:7px;
+  box-shadow:4px 4px 0 var(--coral);
+  transition:transform .15s ease, box-shadow .15s ease;
+}
+.btn-import .ic{width:16px;height:16px}
+.btn-import:hover{transform:translate(-2px,-2px);box-shadow:7px 7px 0 var(--lemon)}
+.icon-btn{
+  width:44px;height:44px;border-radius:50%;cursor:pointer;
+  display:grid;place-items:center;
+  background:#fff;border:3px solid var(--ink);color:var(--ink);
+  box-shadow:3px 3px 0 var(--mint);
+  transition:transform .18s ease, box-shadow .18s ease;
+}
+.icon-btn:hover{transform:rotate(30deg) translate(1px,-1px);box-shadow:4px 4px 0 var(--rose)}
+
+/* ---------- 周导航条 ---------- */
+.weeknav{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:18px 18px 6px;
+}
+.wn-btn{
+  font-family:inherit;font-size:14px;font-weight:900;color:var(--ink);
+  background:#fff;border:3px solid var(--ink);border-radius:14px;
+  padding:8px 14px;cursor:pointer;
+  display:inline-flex;align-items:center;gap:5px;
+  box-shadow:4px 4px 0 rgba(29,29,61,.85);
+  transition:transform .15s ease, box-shadow .15s ease;
+}
+.wn-btn .ic{width:15px;height:15px}
+.wn-btn:hover{transform:translate(-2px,-2px);box-shadow:6px 6px 0 var(--purple)}
+.wn-title{flex:1;text-align:center;display:flex;justify-content:center}
+.wn-title .sticker{
+  display:inline-block;
+  background:var(--lemon);
+  border:3px solid var(--ink);border-radius:999px;
+  padding:7px 22px;
+  font-size:16px;font-weight:900;letter-spacing:.5px;
+  box-shadow:4px 4px 0 var(--mint);
+  transform:rotate(-.6deg);
+}
+
+/* ---------- 布局 ---------- */
+.layout{
+  max-width:1280px;margin:0 auto;padding:16px 18px 48px;
+  display:flex;flex-direction:column;gap:20px;align-items:stretch;
+}
+@media (min-width:1280px){
+  .layout{flex-direction:row;align-items:flex-start}
+}
+
+/* ---------- 课表网格 ---------- */
+.grid-scroll{
+  position:relative;
+  background:#fff;
+  border:3px solid var(--ink);border-radius:24px;
+  box-shadow:8px 8px 0 var(--purple);
+  padding:12px;
+}
+.weekgrid{
+  display:grid;
+  grid-template-columns:72px repeat(7,1fr);
+  grid-auto-rows:62px;
+}
+@media (min-width:1280px){ .weekgrid{grid-auto-rows:80px} }
+.cell{
+  min-width:0;
+  border-right:2px dashed rgba(29,29,61,.12);
+  border-bottom:2px dashed rgba(29,29,61,.12);
+}
+.cell:last-child{border-right:0}
+.head{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  background:#fff;
+  border-bottom:3px solid var(--ink);
+}
+.head-day{font-size:16px;font-weight:900;letter-spacing:1px}
+.head-date{font-size:12px;color:var(--ink-soft)}
+.head--today{
+  background:var(--lemon);
+  border:3px solid var(--ink);border-radius:16px;
+  box-shadow:3px 3px 0 rgba(29,29,61,.85);
+  margin:4px 6px;
+  transform:rotate(.6deg);
+}
+.head--today .head-date{color:var(--ink)}
+.time{
+  display:flex;flex-direction:column;align-items:flex-end;justify-content:center;
+  padding-right:9px;
+  background:#fff8ef;
+  border-right:3px solid var(--ink);
+}
+.time .t-no{font-size:17px;font-weight:900;line-height:1.15}
+.time .t-time{font-size:9px;color:var(--ink-soft);letter-spacing:.2px}
+.empty{background-image:radial-gradient(rgba(29,29,61,.10) 1.4px, transparent 1.4px);background-size:15px 15px;background-position:8px 8px}
+.empty--today{background-color:rgba(255,210,63,.16)}
+.corner{border-bottom:3px solid var(--ink)}
+
+/* ---------- 课程色块 ---------- */
+.course-block{
+  position:relative;z-index:2;
+  font-family:inherit;text-align:left;cursor:pointer;
+  border:3px solid var(--ink);border-radius:20px;
+  margin:7px 8px;
+  padding:9px 12px;
+  box-shadow:5px 5px 0 var(--sh);
+  display:flex;flex-direction:column;justify-content:center;gap:6px;
+  transition:transform .16s ease, box-shadow .16s ease;
+}
+.course-block:hover{transform:translate(-3px,-3px) rotate(0deg);box-shadow:8px 8px 0 var(--sh)}
+.cb-name{font-size:16px;font-weight:900;color:var(--ink);line-height:1.25;letter-spacing:.5px}
+.cb-loc{
+  display:inline-flex;align-items:center;gap:4px;width:fit-content;
+  background:rgba(255,255,255,.92);
+  border:2px solid var(--ink);border-radius:999px;
+  padding:2px 9px;font-size:10.5px;font-weight:800;color:var(--ink);
+}
+.cb--blue{background:#4d8dff;--sh:#2a5cb8}
+.cb--green{background:#2ee6a8;--sh:#1fa97c}
+.cb--purple{background:#b180ff;--sh:#8a5ce0}
+.cb--orange{background:#ff9f1c;--sh:#d97e0a}
+.cb--cyan{background:#00c2d1;--sh:#0093a3}
+.cb--rose{background:#ff4d7d;--sh:#e02a5f}
+.cb--indigo{background:#8b85ff;--sh:#5b54d8}
+.cb--yellow{background:#ffd23f;--sh:#d4a90e}
+.cb--c1{transform:rotate(-.8deg)} .cb--c3{transform:rotate(.7deg)}
+.cb--c5{transform:rotate(-.6deg)} .cb--c7{transform:rotate(.6deg)}
+
+/* ---------- 今天视图 ---------- */
+.view{flex:1;min-width:0}
+.is-hidden{display:none}
+.today-head{
+  display:flex;align-items:center;gap:10px;
+  font-size:18px;font-weight:900;color:var(--ink);
+  margin:2px 2px 14px;
+}
+.today-head .ic{width:20px;height:20px;color:var(--coral)}
+.today-head .tt{
+  background:var(--lemon);border:3px solid var(--ink);border-radius:999px;
+  padding:5px 16px;box-shadow:3px 3px 0 rgba(29,29,61,.85);transform:rotate(-.6deg);
+}
+.today-head span:not(.tt){font-size:13px;color:var(--ink-soft)}
+.today-cards{display:flex;flex-direction:column;gap:16px}
+.t-card{
+  position:relative;
+  background:#fff;border:3px solid var(--ink);border-radius:22px;
+  padding:16px 18px 15px;cursor:pointer;
+  box-shadow:6px 6px 0 var(--sh);
+  transition:transform .16s ease, box-shadow .16s ease;
+}
+.t-card:hover{transform:translate(-2px,-3px);box-shadow:9px 9px 0 var(--sh)}
+.tc--blue{--c:#4d8dff;--sh:#4d8dff} .tc--green{--c:#2ee6a8;--sh:#2ee6a8}
+.tc--purple{--c:#b180ff;--sh:#b180ff} .tc--orange{--c:#ff9f1c;--sh:#ff9f1c}
+.tc--cyan{--c:#00c2d1;--sh:#00c2d1} .tc--rose{--c:#ff4d7d;--sh:#ff4d7d}
+.tc--indigo{--c:#8b85ff;--sh:#8b85ff} .tc--yellow{--c:#ffd23f;--sh:#ffd23f}
+.tc-top{display:flex;align-items:center;gap:10px;margin-bottom:9px;flex-wrap:wrap}
+.tc-chip{
+  font-size:12px;font-weight:900;color:var(--ink);
+  background:var(--c);
+  border:2px solid var(--ink);border-radius:999px;
+  padding:3px 11px;
+  box-shadow:2px 2px 0 rgba(29,29,61,.85);
+}
+.tc-time{font-size:12.5px;font-weight:800;color:var(--ink-soft)}
+.tc-name{font-size:18px;font-weight:900;color:var(--ink);letter-spacing:.5px;margin-bottom:6px}
+.tc-meta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;font-size:13px;font-weight:700;color:var(--ink-soft);margin-bottom:9px}
+.tc-meta .ic{width:14px;height:14px;color:var(--coral)}
+.tc-meta .sep{opacity:.5;margin:0 2px}
+.tc-note{
+  font-size:13px;font-weight:700;color:var(--ink);line-height:1.7;
+  background:#fff8ef;border:2.5px dashed rgba(29,29,61,.4);border-radius:14px;
+  padding:9px 12px;
+}
+
+/* ---------- 右侧信息面板 ---------- */
+.sidepanel{display:flex;flex-direction:column;gap:16px}
+@media (min-width:1280px){ .sidepanel{width:258px;flex:none;position:sticky;top:96px} }
+.panel-card{
+  background:#fff;border:3px solid var(--ink);border-radius:20px;
+  padding:14px 16px;
+}
+.pc--1{box-shadow:5px 5px 0 var(--lemon)}
+.pc--2{box-shadow:5px 5px 0 var(--coral)}
+.pc--3{box-shadow:5px 5px 0 var(--mint)}
+.panel-title{
+  display:flex;align-items:center;gap:8px;
+  font-size:15px;font-weight:900;letter-spacing:1px;
+  border-bottom:3px solid var(--ink);
+  padding-bottom:9px;margin-bottom:11px;
+}
+.panel-title .ic{width:16px;height:16px;color:var(--coral)}
+.stats{display:flex;gap:12px}
+.stat{
+  flex:1;text-align:center;
+  background:#fff8ef;border:2.5px solid var(--ink);border-radius:14px;
+  padding:9px 4px 7px;
+}
+.stat:nth-child(1){background:var(--lemon)}
+.stat:nth-child(2){background:var(--mint)}
+.stat b{display:block;font-size:23px;font-weight:900;line-height:1.15}
+.stat span{font-size:11.5px;font-weight:800;color:var(--ink)}
+.panel-item{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;line-height:1.55}
+.panel-item .ic{width:17px;height:17px;color:var(--coral);margin-top:2px}
+.panel-item .pi-date{display:block;font-weight:900;color:var(--ink);font-size:14px}
+.panel-item .pi-desc{display:block;font-weight:700;color:var(--ink-soft)}
+
+/* ---------- 弹层 ---------- */
+.modal{position:fixed;inset:0;z-index:100;display:none}
+.modal.is-open{display:block}
+.modal-mask{position:absolute;inset:0;background:rgba(29,29,61,.45)}
+.modal-card{
+  position:absolute;left:50%;top:50%;
+  transform:translate(-50%,-50%);
+  width:min(440px, calc(100vw - 32px));
+  background:#fff;
+  border:3px solid var(--ink);border-radius:26px;
+  box-shadow:10px 10px 0 var(--mc,var(--lemon));
+  padding:28px 26px 24px;
+  max-height:calc(100vh - 40px);overflow:auto;
+}
+.modal-close{
+  position:absolute;top:14px;right:14px;
+  width:36px;height:36px;border-radius:50%;cursor:pointer;
+  display:grid;place-items:center;
+  background:#fff;border:3px solid var(--ink);color:var(--ink);
+  box-shadow:2.5px 2.5px 0 rgba(29,29,61,.85);
+  transition:transform .15s ease;
+}
+.modal-close:hover{transform:rotate(90deg)}
+.modal-close .ic{width:15px;height:15px}
+.modal-head{display:flex;align-items:center;gap:11px;margin-bottom:16px}
+.m-dot{width:16px;height:16px;border-radius:6px;background:var(--mc,#4d8dff);border:2.5px solid var(--ink);transform:rotate(8deg)}
+.modal-name{font-size:21px;font-weight:900;letter-spacing:1px}
+.modal-body{display:flex;flex-direction:column;gap:10px}
+.info-row{
+  display:flex;gap:10px;align-items:center;
+  padding:8px 10px;font-size:14px;font-weight:800;
+  background:#fff8ef;border:2.5px solid var(--ink);border-radius:14px;
+}
+.info-row .ic{width:16px;height:16px;color:var(--coral)}
+.info-label{
+  flex:none;padding:1px 9px;font-size:12px;font-weight:900;
+  background:#fff;border:2px solid var(--ink);border-radius:9px;
+}
+.info-row .iv{color:var(--ink);font-weight:900}
+.note-row{padding:2px 0}
+.note{
+  font-size:13.5px;font-weight:700;color:var(--ink);line-height:1.7;
+  background:#fff8ef;border:2.5px dashed rgba(29,29,61,.45);border-radius:14px;
+  padding:11px 14px;
+}
+
+/* ---------- 响应式 ---------- */
+@media (min-width:768px) and (max-width:1279px){
+  .weekgrid{grid-auto-rows:60px}
+  .sidepanel{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .sidepanel .panel-card{display:flex;flex-direction:column}
+  .sidepanel .panel-title{margin-bottom:8px}
+}
+@media (max-width:767px){
+  .topbar{margin:10px 12px 0;padding-top:max(12px, env(safe-area-inset-top))}
+  .brand{order:1}.top-actions{order:2}
+  .seg{order:3;flex-basis:100%;justify-content:center;margin:2px 0 2px}
+  .weeknav{padding:14px 12px 4px;gap:8px}
+  .wn-btn{padding:7px 11px}
+  .wn-title{order:2;flex-basis:100%;margin:4px 0}
+  .layout{padding:12px 12px 40px}
+  .grid-scroll{
+    overflow:auto;-webkit-overflow-scrolling:touch;
+    max-height:74vh;overscroll-behavior:contain;
+    border-radius:18px;padding:8px;
+  }
+  .weekgrid{min-width:800px;grid-auto-rows:68px}
+  .head{position:sticky;top:0;z-index:6}
+  .time{position:sticky;left:0;z-index:5}
+  .corner{position:sticky;top:0;left:0;z-index:7}
+}
+button:focus-visible,.course-block:focus-visible,.t-card:focus-visible{
+  outline:3px solid var(--coral);outline-offset:2px;
+}
+</style>
+</head>
+<body>
+
+<!-- 内联 SVG 图标库 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3.5"/><path d="M3 10.5h18M8 3v4M16 3v4"/></symbol>
+  <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="M14.5 6 9 12l5.5 6"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="M9.5 6 15 12l-5.5 6"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.4"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.4 5.4l2.1 2.1M16.5 16.5l2.1 2.1M18.6 5.4l-2.1 2.1M7.5 16.5l-2.1 2.1"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2.2"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21.5S5.5 15.9 5.5 11a6.5 6.5 0 0 1 13 0c0 4.9-6.5 10.5-6.5 10.5z"/><circle cx="12" cy="10.8" r="2.5"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c1.3-3.5 4-5.1 7-5.1s5.7 1.6 7 5.1"/></symbol>
+  <symbol id="i-week" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3.5"/><path d="M3 10.5h18M8 3v4M16 3v4"/><path d="M8.5 15h3"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M4.5 20 5.8 15.5 16.4 4.9a2 2 0 0 1 2.8 0l.4.4a2 2 0 0 1 0 2.8L9 18.7 4.5 20z"/><path d="M14.5 7l2.6 2.6"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M6 21.5V4"/><path d="M6 4.5h12l-3 4 3 4H6"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20.5 11.5A8.5 8.5 0 1 0 19 17.5"/><path d="M20.5 5.5v6h-6"/></symbol>
+</svg>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo"><svg class="ic" aria-hidden="true"><use href="#i-cal"/></svg></span>
+    ClassBoard
+  </div>
+  <div class="seg" role="tablist" aria-label="视图切换">
+    <button class="seg-btn is-active" data-view="week" role="tab" aria-selected="true">周课表</button>
+    <button class="seg-btn" data-view="today" role="tab" aria-selected="false">今天</button>
+  </div>
+  <div class="top-actions">
+    <button class="btn-import"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>导入课程</button>
+    <button class="icon-btn" aria-label="设置"><svg class="ic" aria-hidden="true"><use href="#i-gear"/></svg></button>
+  </div>
+</header>
+
+<nav class="weeknav" aria-label="周导航">
+  <button class="wn-btn" id="prevWeek"><svg class="ic" aria-hidden="true"><use href="#i-chev-l"/></svg>上一周</button>
+  <div class="wn-title"><span class="sticker" id="weekTitle">第 5 周 · 9月2日–9月8日</span></div>
+  <button class="wn-btn" id="nextWeek">下一周<svg class="ic" aria-hidden="true"><use href="#i-chev-r"/></svg></button>
+  <button class="wn-btn" id="backWeek"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg>回到本周</button>
+</nav>
+
+<main class="layout">
+  <!-- 周课表视图 -->
+  <section class="view" id="weekView">
+    <div class="grid-scroll">
+      <div class="weekgrid" id="weekgrid"></div>
+    </div>
+  </section>
+
+  <!-- 今天视图 -->
+  <section class="view is-hidden" id="todayView">
+    <div class="today-head">
+      <svg class="ic" aria-hidden="true"><use href="#i-week"/></svg>
+      <span class="tt" id="todayTitle">今天 · 周三 9/4</span>
+      <span>共 2 节课</span>
+    </div>
+    <div class="today-cards" id="todayCards"></div>
+  </section>
+
+  <!-- 右侧信息面板 -->
+  <aside class="sidepanel">
+    <div class="panel-card pc--1">
+      <h3 class="panel-title"><svg class="ic" aria-hidden="true"><use href="#i-week"/></svg>本周摘要</h3>
+      <div class="stats">
+        <div class="stat"><b>8</b><span>课程 门数</span></div>
+        <div class="stat"><b>4</b><span>已上 门数</span></div>
+      </div>
+    </div>
+    <div class="panel-card pc--2">
+      <h3 class="panel-title"><svg class="ic" aria-hidden="true"><use href="#i-flag"/></svg>考试</h3>
+      <div class="panel-item">
+        <svg class="ic" aria-hidden="true"><use href="#i-flag"/></svg>
+        <div><span class="pi-date">9月20日</span><span class="pi-desc">高等数学 期中考试</span></div>
+      </div>
+    </div>
+    <div class="panel-card pc--3">
+      <h3 class="panel-title"><svg class="ic" aria-hidden="true"><use href="#i-note"/></svg>作业</h3>
+      <div class="panel-item">
+        <svg class="ic" aria-hidden="true"><use href="#i-note"/></svg>
+        <div><span class="pi-date">9月15日</span><span class="pi-desc">程序设计 实验报告 截止</span></div>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<!-- 课程详情弹层 -->
+<div class="modal" id="modal" aria-hidden="true">
+  <div class="modal-mask" data-close></div>
+  <div class="modal-card" id="modalCard" role="dialog" aria-modal="true" aria-labelledby="modalName">
+    <button class="modal-close" data-close aria-label="关闭"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button>
+    <div class="modal-head">
+      <span class="m-dot" id="mDot"></span>
+      <h3 class="modal-name" id="modalName">课程</h3>
+    </div>
+    <div class="modal-body">
+      <div class="info-row">
+        <svg class="ic" aria-hidden="true"><use href="#i-user"/></svg>
+        <span class="info-label">教师</span><span class="iv" id="mTeacher"></span>
+      </div>
+      <div class="info-row">
+        <svg class="ic" aria-hidden="true"><use href="#i-pin"/></svg>
+        <span class="info-label">地点</span><span class="iv" id="mLoc"></span>
+      </div>
+      <div class="info-row">
+        <svg class="ic" aria-hidden="true"><use href="#i-week"/></svg>
+        <span class="info-label">周次</span><span class="iv" id="mWeeks"></span>
+      </div>
+      <div class="info-row">
+        <svg class="ic" aria-hidden="true"><use href="#i-clock"/></svg>
+        <span class="info-label">时间</span><span class="iv" id="mTime"></span>
+      </div>
+      <div class="note-row">
+        <div class="note" id="mNote"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ================= 数据契约（两个风格页面完全一致） ================= */
+var DAYS = [
+  { label: '周一', date: '9/2' },
+  { label: '周二', date: '9/3' },
+  { label: '周三', date: '9/4', today: true },
+  { label: '周四', date: '9/5' },
+  { label: '周五', date: '9/6' },
+  { label: '周六', date: '9/7' },
+  { label: '周日', date: '9/8' }
+];
+var PERIODS = [
+  { start: '08:00', end: '08:45' },
+  { start: '08:55', end: '09:40' },
+  { start: '10:00', end: '10:45' },
+  { start: '10:55', end: '11:40' },
+  { start: '14:00', end: '14:45' },
+  { start: '14:55', end: '15:40' },
+  { start: '16:00', end: '16:45' },
+  { start: '16:55', end: '17:40' }
+];
+var COURSES = [
+  { id: 'c1', name: '高等数学',     loc: '博学楼 A101',   teacher: '王立群', day: 0, start: 1, span: 2, weeks: '第 1-16 周', note: '第 3 章 微分中值定理；记得带教材与作业本。',       color: 'blue' },
+  { id: 'c2', name: '大学英语',     loc: '外语楼 B203',   teacher: '林青',   day: 0, start: 3, span: 2, weeks: '第 1-16 周', note: 'Unit 3 精读，预习课文并完成单词听写。',             color: 'green' },
+  { id: 'c3', name: '线性代数',     loc: '博学楼 A305',   teacher: '陈慧敏', day: 1, start: 1, span: 2, weeks: '第 1-16 周', note: '行列式复习；完成作业 2.3–2.6。',                   color: 'purple' },
+  { id: 'c4', name: '马克思主义原理', loc: '博学楼 B102', teacher: '刘建国', day: 2, start: 1, span: 2, weeks: '单周',      note: '小组展示：唯物辩证法，请提前拷贝 PPT。',           color: 'orange' },
+  { id: 'c5', name: '大学物理',     loc: '理学楼 C101',   teacher: '赵航',   day: 2, start: 3, span: 2, weeks: '第 1-16 周', note: '力学部分 · 牛顿定律应用，带上计算器。',             color: 'cyan' },
+  { id: 'c6', name: '程序设计',     loc: '计算机楼 D402', teacher: '吴桐',   day: 3, start: 1, span: 2, weeks: '第 1-16 周', note: '实验报告 9 月 15 日截止，请先提交到学习平台。',     color: 'rose' },
+  { id: 'c7', name: '数据结构',     loc: '计算机楼 D408', teacher: '孙明远', day: 3, start: 5, span: 2, weeks: '第 1-16 周', note: '栈与队列章节练习；上机验证程序结果。',             color: 'indigo' },
+  { id: 'c8', name: '体育',         loc: '田径场',       teacher: '周凯',   day: 4, start: 7, span: 2, weeks: '每周',      note: '着运动装，遇雨改室内羽毛球馆。',                   color: 'yellow' }
+];
+var MODAL_COLOR = {
+  blue:'#4d8dff', green:'#2ee6a8', purple:'#b180ff', orange:'#ff9f1c',
+  cyan:'#00c2d1', rose:'#ff4d7d', indigo:'#8b85ff', yellow:'#ffd23f'
+};
+
+/* ================= 渲染周课表 ================= */
+var grid = document.getElementById('weekgrid');
+var html = '<div class="cell corner"></div>';
+DAYS.forEach(function(d){
+  html += '<div class="cell head' + (d.today ? ' head--today' : '') + '">' +
+          '<span class="head-day">' + d.label + '</span>' +
+          '<span class="head-date">' + d.date + '</span></div>';
+});
+PERIODS.forEach(function(p, pi){
+  html += '<div class="cell time"><span class="t-no">' + (pi + 1) + '</span>' +
+          '<span class="t-time">' + p.start + '–' + p.end + '</span></div>';
+  for (var i = 0; i < 7; i++){
+    html += '<div class="cell empty' + (DAYS[i].today ? ' empty--today' : '') + '"></div>';
+  }
+});
+grid.innerHTML = html;
+
+COURSES.forEach(function(c){
+  var b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'course-block cb--' + c.color + ' cb--' + c.id;
+  b.style.gridRow = (c.start + 1) + ' / span ' + c.span;
+  b.style.gridColumn = (c.day + 2);
+  b.setAttribute('aria-label', c.name + '，' + c.loc + '，第 ' + c.start + '-' + (c.start + c.span - 1) + ' 节');
+  b.innerHTML = '<span class="cb-name">' + c.name + '</span><span class="cb-loc">' + c.loc + '</span>';
+  b.addEventListener('click', function(){ openModal(c); });
+  grid.appendChild(b);
+});
+
+/* ================= 渲染今天视图 ================= */
+var todayCards = document.getElementById('todayCards');
+var todayList = COURSES.filter(function(c){ return DAYS[c.day].today; });
+todayList.forEach(function(c){
+  var p1 = PERIODS[c.start - 1];
+  var p2 = PERIODS[c.start + c.span - 2];
+  var card = document.createElement('article');
+  card.className = 't-card tc--' + c.color;
+  card.tabIndex = 0;
+  card.innerHTML =
+    '<div class="tc-top">' +
+      '<span class="tc-chip">第 ' + c.start + '-' + (c.start + c.span - 1) + ' 节</span>' +
+      '<span class="tc-time">' + p1.start + '–' + p2.end + '</span>' +
+    '</div>' +
+    '<h4 class="tc-name">' + c.name + '</h4>' +
+    '<p class="tc-meta">' +
+      '<svg class="ic" aria-hidden="true"><use href="#i-pin"/></svg>' + c.loc +
+      '<span class="sep">·</span>' +
+      '<svg class="ic" aria-hidden="true"><use href="#i-user"/></svg>' + c.teacher +
+      '<span class="sep">·</span>' +
+      '<svg class="ic" aria-hidden="true"><use href="#i-week"/></svg>' + c.weeks +
+    '</p>' +
+    '<p class="tc-note">' + c.note + '</p>';
+  card.addEventListener('click', function(){ openModal(c); });
+  card.addEventListener('keydown', function(e){
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openModal(c); }
+  });
+  todayCards.appendChild(card);
+});
+
+/* ================= 视图切换 ================= */
+var weekView = document.getElementById('weekView');
+var todayView = document.getElementById('todayView');
+document.querySelectorAll('.seg-btn').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    document.querySelectorAll('.seg-btn').forEach(function(b){
+      b.classList.toggle('is-active', b === btn);
+      b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
+    });
+    var isToday = btn.getAttribute('data-view') === 'today';
+    weekView.classList.toggle('is-hidden', isToday);
+    todayView.classList.toggle('is-hidden', !isToday);
+  });
+});
+
+/* ================= 周导航 ================= */
+var weekOffset = 0;
+var weekTitle = document.getElementById('weekTitle');
+var BASE = new Date(2026, 8, 2); /* 第 5 周起点 9/2 */
+function fmt(d){ return (d.getMonth() + 1) + '月' + d.getDate() + '日'; }
+function renderWeek(){
+  var s = new Date(BASE); s.setDate(s.getDate() + weekOffset * 7);
+  var e = new Date(s); e.setDate(e.getDate() + 6);
+  weekTitle.textContent = '第 ' + (5 + weekOffset) + ' 周 · ' + fmt(s) + '–' + fmt(e);
+}
+document.getElementById('prevWeek').addEventListener('click', function(){ weekOffset--; renderWeek(); });
+document.getElementById('nextWeek').addEventListener('click', function(){ weekOffset++; renderWeek(); });
+document.getElementById('backWeek').addEventListener('click', function(){ weekOffset = 0; renderWeek(); });
+
+/* ================= 课程详情弹层 ================= */
+var modal = document.getElementById('modal');
+function openModal(c){
+  var p1 = PERIODS[c.start - 1];
+  var p2 = PERIODS[c.start + c.span - 2];
+  document.getElementById('modalName').textContent = c.name;
+  document.getElementById('mTeacher').textContent = c.teacher;
+  document.getElementById('mLoc').textContent = c.loc;
+  document.getElementById('mWeeks').textContent = c.weeks;
+  document.getElementById('mTime').textContent =
+    DAYS[c.day].label + ' 第 ' + c.start + '-' + (c.start + c.span - 1) + ' 节 · ' + p1.start + '–' + p2.end;
+  document.getElementById('mNote').textContent = c.note;
+  document.getElementById('mDot').style.background = MODAL_COLOR[c.color];
+  document.getElementById('modalCard').style.setProperty('--mc', MODAL_COLOR[c.color]);
+  modal.classList.add('is-open');
+  modal.setAttribute('aria-hidden', 'false');
+}
+function closeModal(){
+  modal.classList.remove('is-open');
+  modal.setAttribute('aria-hidden', 'true');
+}
+modal.querySelectorAll('[data-close]').forEach(function(el){
+  el.addEventListener('click', closeModal);
+});
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape' && modal.classList.contains('is-open')) closeModal();
+});
+</script>
+</body>
+</html>

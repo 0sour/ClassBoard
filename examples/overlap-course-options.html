@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>冲突课程重叠视图方案对比</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f7fa; padding: 32px; color: #1F2933; }
+  h1 { font-size: 20px; margin-bottom: 8px; }
+  .sub { color: #7B8794; font-size: 13px; margin-bottom: 28px; }
+
+  .scheme { margin-bottom: 40px; }
+  .scheme-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .scheme-head h2 { font-size: 15px; }
+  .scheme-head .tag { font-size: 12px; color: #2563EB; background: #EFF6FF; border-radius: 20px; padding: 2px 10px; }
+  .scheme-head .desc { font-size: 12px; color: #7B8794; }
+
+  .grid-wrap { display: flex; gap: 16px; align-items: flex-start; }
+  .grid {
+    width: 132px;
+    display: grid;
+    grid-template-columns: 66px 66px;
+    grid-auto-rows: 52px;
+    background: #fff;
+    border: 1px solid #E4E7EB;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(15,23,42,.06);
+  }
+  .grid.single { grid-template-columns: 1fr; }
+  .row-num {
+    grid-column: 1 / -1;
+    background: #FBFCFE;
+    border-bottom: 1px solid #E4E7EB;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    font-size: 11px;
+    color: #7B8794;
+  }
+  .slot { border-bottom: 1px solid #F0F2F5; }
+
+  /* 课程卡 */
+  .course {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    margin: 2px;
+    padding: 4px 6px;
+    border-radius: 5px;
+    border: 1px solid;
+    font-size: 11px;
+    line-height: 1.3;
+    text-align: left;
+    overflow: hidden;
+  }
+  .course .nm { font-weight: 700; }
+  .course .lc { font-size: 10px; opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .c2 { background: #ECF8F0; border-color: #BFE6CF; color: #11703F; }
+  .c3 { background: #F3EFFF; border-color: #D8CCF5; color: #5B3FC9; }
+
+  /* 方案1：左右并排（当前默认） */
+  .course.left { grid-column: 1; grid-row: 1 / 3; }
+  .course.right { grid-column: 2; grid-row: 1 / 3; }
+
+  /* 方案2：上下堆叠，各占整行宽 */
+  .course.top { grid-column: 1 / -1; grid-row: 1 / 2; }
+  .course.bottom { grid-column: 1 / -1; grid-row: 2 / 3; }
+
+  /* 方案3：主次显示（6 行高度演示完整信息 vs 角标） */
+  .grid.tall { grid-auto-rows: 36px; width: 152px; grid-template-columns: 1fr; }
+  .course.full { grid-row: 1 / 5; }
+  .course.covered {
+    grid-row: 1 / 5;
+    position: relative;
+    top: 58%;
+    left: 22%;
+    width: 60%;
+    height: 36%;
+    margin: 0;
+    box-shadow: 0 4px 10px rgba(15,23,42,.18);
+    z-index: 2;
+    justify-content: flex-start;
+  }
+  .course.covered:hover { top: 0; left: 0; width: 100%; height: 100%; z-index: 3; transition: all .15s; }
+
+  /* 方案4：左右并排 + 色条 + 只显示名称 */
+  .course.strip.left { grid-column: 1; grid-row: 1 / 3; }
+  .course.strip.right { grid-column: 2; grid-row: 1 / 3; }
+  .course.strip .lc { display: none; }
+  .course.strip .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+  .c2 .dot { background: #11703F; }
+  .c3 .dot { background: #5B3FC9; }
+
+  .legend { font-size: 12px; color: #52606D; margin-top: 8px; max-width: 480px; line-height: 1.6; }
+  .legend b { color: #1F2933; }
+</style>
+</head>
+<body>
+  <h1>冲突课程重叠视图 · 方案对比</h1>
+  <div class="sub">示例数据：大学英语（绿）/ 概率论与数理统计（紫），周二 3-4 节重叠，列宽约 132px</div>
+
+  <!-- 方案1：当前左右并排 -->
+  <div class="scheme">
+    <div class="scheme-head">
+      <h2>方案 1 · 左右并排（当前）</h2>
+      <span class="tag">现状</span>
+      <span class="desc">两门课各占半列，时间轴完全对齐，一眼看出同时段冲突</span>
+    </div>
+    <div class="grid-wrap">
+      <div class="grid">
+        <div class="row-num">第3-4节</div>
+        <button class="course c3 left"><span class="nm">概率论与数理统计</span><span class="lc">B203</span></button>
+        <button class="course c2 right"><span class="nm">大学英语</span><span class="lc">B202</span></button>
+        <div class="slot"></div>
+      </div>
+    </div>
+    <div class="legend">每门课只有半列宽（~64px），长名称会换行挤压，视觉上显得拥挤。</div>
+  </div>
+
+  <!-- 方案2：上下堆叠 -->
+  <div class="scheme">
+    <div class="scheme-head">
+      <h2>方案 2 · 上下堆叠</h2>
+      <span class="tag">全宽</span>
+      <span class="desc">重叠区域内每门课占整列宽度，上下各占一行，名称完整显示</span>
+    </div>
+    <div class="grid-wrap">
+      <div class="grid">
+        <div class="row-num">第3-4节</div>
+        <button class="course c3 top"><span class="nm">概率论与数理统计</span><span class="lc">B203</span></button>
+        <button class="course c2 bottom"><span class="nm">大学英语</span><span class="lc">B202</span></button>
+        <div class="slot"></div>
+      </div>
+    </div>
+    <div class="legend">每门课整列宽（~128px），信息完整；代价是高度减半（~1 行），若冲突课跨度仅 1 节时会显得很矮。</div>
+  </div>
+
+  <!-- 方案3：主次显示 + hover 展开 -->
+  <div class="scheme">
+    <div class="scheme-head">
+      <h2>方案 3 · 层叠卡片（hover 展开）</h2>
+      <span class="tag">信息完整</span>
+      <span class="desc">主课全宽显示；冲突课以小卡片叠在上方，悬停放大展开</span>
+    </div>
+    <div class="grid-wrap">
+      <div class="grid tall single">
+        <div class="row-num">第3-4节</div>
+        <button class="course c2 full"><span class="nm">大学英语</span><span class="lc">B202 · 李娜</span></button>
+        <button class="course c3 covered"><span class="nm">概率论与数理统计</span><span class="lc">B203 · 王强</span></button>
+        <div class="slot"></div>
+      </div>
+    </div>
+    <div class="legend">主课信息完整；冲突课以小卡叠置（带投影），<b>悬停展开盖住主课</b>，点击可打开详情。适合冲突较少的情况。</div>
+  </div>
+
+  <!-- 方案4：左右并排精简 -->
+  <div class="scheme">
+    <div class="scheme-head">
+      <h2>方案 4 · 左右并排精简（名称 + 色点）</h2>
+      <span class="tag">极简</span>
+      <span class="desc">半列内只放课程名 + 小色点，地点省略，名称一行放下</span>
+    </div>
+    <div class="grid-wrap">
+      <div class="grid">
+        <div class="row-num">第3-4节</div>
+        <button class="course c3 strip left"><span class="nm"><i class="dot"></i>概率论</span></button>
+        <button class="course c2 strip right"><span class="nm"><i class="dot"></i>大学英语</span></button>
+        <div class="slot"></div>
+      </div>
+    </div>
+    <div class="legend">半列内只放课程名（可截断），地点省略或悬停 title 提示；排版最干净，但信息量最少。</div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,20 @@
+# 构建上下文裁剪：仅前后端源码与构建所需文件进入镜像上下文
+.git
+.zcode
+.aionrs
+.freebuff
+docs
+examples
+*.log
+**/node_modules
+frontend/dist
+frontend/scripts
+
+# 本地数据与快照。只排除真正的数据目录，勿用 `**/data`：
+# 那会连同 frontend/src/data/pdf-fixture.json（vue-tsc 类型检查的测试夹具）
+# 一起排除，导致 Docker 构建在前端 `npm run build` 阶段报 TS2307。
+data
+server/lib/data
+backups
+**/*.db
+**/*.db-*

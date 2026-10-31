@@ -1,0 +1,1021 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useScheduleStore } from '@/stores/schedule'
+import CourseBlock from './CourseBlock.vue'
+import { blockKey, computeBlockOverlapGroups, isOverlap } from '@/utils/course'
+import { periodRange } from '@/utils/session'
+import { dateWithWeekdayLabel, markerLabel } from '@/utils/calendar'
+import { formatDate } from '@/utils/week'
+import type { CourseBlock as CourseBlockModel, DayMarker, ResolvedBlock, ResolvedDay, Weekday } from '@/types'
+
+const store = useScheduleStore()
+
+const props = withDefaults(
+  defineProps<{
+    /** 双日视图（移动端）：传入要显示的日期列表（1-2 天）；缺省为桌面 7 天模式 */
+    days?: Date[]
+  }>(),
+  { days: undefined },
+)
+
+const emit = defineEmits<{
+  (e: 'open', courseId: number, block?: ResolvedBlock, date?: string): void
+  (e: 'create', slot: { weekday: Weekday; period: number }): void
+  /** 点调整角标：打开统一详情卡（日期 = 所在列） */
+  (e: 'open-adjust', block: ResolvedBlock, dateStr: string): void
+  /** 点原位置 / 中间站标记：同一张详情卡 */
+  (e: 'open-marker', marker: DayMarker, dateStr: string): void
+  /** 移动端滑动切日：next=左滑（更晚一天），prev=右滑（更早一天） */
+  (e: 'swipe', dir: 'next' | 'prev'): void
+}>()
+
+const DAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] as const
+
+const todayWeekday = computed<Weekday>(() => ((store.today.getDay() + 6) % 7 + 1) as Weekday)
+
+/** 仅在当前周（weekOffset=0）时高亮今天列 */
+const isCurrentWeek = computed(() => store.weekOffset === 0)
+
+/** 今天列高亮（仅当前周生效） */
+const highlightedWeekday = computed<Weekday | null>(() => (isCurrentWeek.value ? todayWeekday.value : null))
+
+/** 最后停留的冲突课程键（不随 mouseleave 清空）；null = 从未 hover 过（均分） */
+const hovered = ref<string | null>(null)
+
+/** 动画后的 flex-grow 实时值，驱动模板 style 绑定 */
+const growValues = ref<Record<string, number>>({})
+let animRaf = 0
+
+/** 缓动函数：easeOutCubic */
+function ease(t: number): number {
+  return t < 1 ? 1 - (1 - t) * (1 - t) * (1 - t) : 1
+}
+
+/** 对当前所有冲突课程执行 rAF 补间动画 */
+function animateGrow(targetGrow: Record<string, number>, duration = 200): void {
+  cancelAnimationFrame(animRaf)
+  const from: Record<string, number> = {}
+  for (const key of Object.keys(targetGrow)) {
+    from[key] = growValues.value[key] ?? 1
+  }
+  const t0 = performance.now()
+  const tick = (now: number): void => {
+    const p = Math.min(1, (now - t0) / duration)
+    const e = ease(p)
+    for (const key of Object.keys(targetGrow)) {
+      const f = from[key] ?? 1
+      const t = targetGrow[key]
+      growValues.value[key] = f + (t - f) * e
+    }
+    if (p < 1) animRaf = requestAnimationFrame(tick)
+  }
+  animRaf = requestAnimationFrame(tick)
+}
+
+function handleHoverEnter(key: string): void {
+  hovered.value = key
+  const targets: Record<string, number> = {}
+  for (const g of allConflictGroupsFlat.value) {
+    targets[g] = g === key ? 2 : 1
+  }
+  animateGrow(targets)
+}
+
+function handleHoverLeave(): void {
+  // 不清空 hovered——保留最后停留的课程为 2/3
+}
+
+/** 所有冲突课程键列表（供动画目标计算用） */
+const allConflictGroupsFlat = computed(() => {
+  const result: string[] = []
+  const seen = new Set<string>()
+  for (const col of columns.value) {
+    for (const item of col) {
+      const k = blockKey(item.block)
+      if (item.conflict && !seen.has(k)) {
+        result.push(k)
+        seen.add(k)
+      }
+    }
+  }
+  return result
+})
+
+/** 获取某块的 flex-grow 值（动画补间驱动） */
+function getGrow(key: string): number {
+  return growValues.value[key] ?? 1
+}
+
+type ColItem = { block: ResolvedBlock; offset: boolean; conflict: boolean }
+
+/**
+ * 每列的解析结果：桌面 7 天走 store.resolvedWeek（含学期日历与单课调整），
+ * 双日视图按传入日期逐日解析。列 = 日期，不再按「星期」索引。
+ */
+const resolvedCols = computed(() => (props.days ? props.days.map((d) => store.resolvedDay(d)) : store.resolvedWeek))
+
+/** 每列课程块（仅标注是否冲突；错位布局已改为 flex 分栏） */
+const columns = computed<ColItem[][]>(() =>
+  resolvedCols.value.map((day) => {
+    const list = day.blocks
+    const groups = computeBlockOverlapGroups(list)
+    return list.map((b) => {
+      const conflicts = groups.get(b) ?? []
+      return {
+        block: b,
+        offset: conflicts.length > 0 && conflicts.some((o) => blockKey(o) > blockKey(b)),
+        conflict: conflicts.length > 0,
+      }
+    })
+  }),
+)
+
+/** 实际渲染的列（列 = 日期） */
+const displayColumns = computed(() => columns.value)
+
+/** 非冲突课程（单独渲染，跨全列） */
+const soloItems = (idx: number): ColItem[] => columns.value[idx].filter((i) => !i.conflict)
+
+/** 该列的原位置淡显标记（停课 / 已调走） */
+function markersOf(idx: number): DayMarker[] {
+  return resolvedCols.value[idx]?.markers ?? []
+}
+
+/** 该列的日历规则（放假 / 调休；调休目标日的文案由 dayLabel 给出） */
+function dayRuleOf(idx: number): ResolvedDay | null {
+  return resolvedCols.value[idx] ?? null
+}
+
+/** 第 idx 列对应的日期（双日视图用传入日期，桌面用周内日期） */
+function dayOf(idx: number): Date {
+  return props.days ? props.days[idx] : store.weekDays[idx]
+}
+
+/** 第 idx 列对应的星期（1=周一 … 7=周日） */
+function weekdayOf(idx: number): Weekday {
+  const d = dayOf(idx)
+  return ((d.getDay() + 6) % 7 + 1) as Weekday
+}
+
+/** 第 idx 列是否为今天（双日视图按日期判断；桌面沿用周内高亮） */
+function isTodayCol(idx: number): boolean {
+  if (props.days) {
+    const d = dayOf(idx)
+    const t = store.today
+    return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate()
+  }
+  return idx + 1 === highlightedWeekday.value
+}
+
+/** 冲突课程按重叠关系分组成连通分量：每组渲染为一个 flex 分栏容器 */
+const conflictGroups = computed(() => {
+  return displayColumns.value.map((col) => {
+    const used = new Set<string>()
+    const groups: { block: ResolvedBlock }[][] = []
+    for (const item of col) {
+      const itemKey = blockKey(item.block)
+      if (!item.conflict || used.has(itemKey)) continue
+      const group: { block: ResolvedBlock }[] = []
+      let frontier: ColItem[] = [item]
+      used.add(itemKey)
+      while (frontier.length) {
+        const next: ColItem[] = []
+        for (const cur of frontier) {
+          group.push(cur)
+          for (const other of col) {
+            const otherKey = blockKey(other.block)
+            if (!other.conflict || used.has(otherKey)) continue
+            if (isOverlap(cur.block, other.block)) {
+              next.push(other)
+              used.add(otherKey)
+            }
+          }
+        }
+        frontier = next
+      }
+      // 无 hover 时按节次与课程 id 排序保证稳定
+      group.sort((a, b) => a.block.startPeriod - b.block.startPeriod || a.block.id - b.block.id)
+      groups.push(group)
+    }
+    return groups
+  })
+})
+
+onMounted(() => {
+  window.addEventListener('resize', onResize)
+  window.addEventListener('pointerup', onSwipePointerUp)
+  window.addEventListener('pointercancel', onSwipePointerCancel)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
+  window.removeEventListener('pointerup', onSwipePointerUp)
+  window.removeEventListener('pointercancel', onSwipePointerCancel)
+  cancelAnimationFrame(animRaf)
+  window.removeEventListener('pointermove', onWindowPointerMove)
+  window.removeEventListener('pointerup', onWindowPointerUp)
+  window.removeEventListener('keydown', onWindowKeyDown)
+  if (longPressTimer !== null) window.clearTimeout(longPressTimer)
+})
+
+// ============================================================
+// 长按拖拽调课：按下 ~400ms 不移动进入拖动模式，松手落格
+// 保持原跨节宽度，允许与已有课程重叠（沿用冲突分栏约定）
+// ============================================================
+const gridEl = ref<HTMLElement | null>(null)
+const draggingBlock = ref<ResolvedBlock | null>(null)
+const dragSource = ref<{ startPeriod: number; endPeriod: number } | null>(null)
+/** 被拖动块所在列的日期（原上课日，落库时写进调整记录） */
+const dragSourceDate = ref<string>('')
+const dragPos = ref<{ x: number; y: number } | null>(null)
+const dragTarget = ref<{ colIndex: number; weekday: Weekday; startPeriod: number; endPeriod: number } | null>(null)
+const suppressClickUntil = ref(0)
+
+/** 目标格在 grid 内的绝对定位框（高亮预览） */
+const targetBox = computed(() => {
+  const t = dragTarget.value
+  const grid = gridEl.value
+  if (!t || !grid) return null
+  const dayCols = Array.from(grid.querySelectorAll('.day-col'))
+  const col = dayCols[t.colIndex >= 0 ? t.colIndex : t.weekday - 1]
+  if (!col) return null
+  const gridRect = grid.getBoundingClientRect()
+  const colRect = col.getBoundingClientRect()
+  const rowH = getRowHeight()
+  const span = t.endPeriod - t.startPeriod + 1
+  return {
+    left: colRect.left - gridRect.left + 3,
+    width: colRect.width - 6,
+    top: HEADER_H + (t.startPeriod - 1) * rowH,
+    height: span * rowH,
+  }
+})
+
+let longPressTimer: number | null = null
+let dragAnchor = { x: 0, y: 0, active: false }
+let dragMoved = false
+
+const LONG_PRESS_MS = 400
+const MOVE_THRESHOLD_PX = 8
+const HEADER_H = 44 // day-head 高度（网格首行）
+
+/** 课程卡 pointerdown：启动长按计时，进入潜在拖拽（双日视图禁用拖拽，避免与滑动冲突） */
+function onBlockPointerDown(block: CourseBlockModel, e: PointerEvent, sourceDate: Date): void {
+  if (props.days) return
+  if (store.readonly) return // 公开只读页面：不提供拖拽调课
+  if (!block.periods.length) return
+  dragAnchor = { x: e.clientX, y: e.clientY, active: true }
+  dragSourceDate.value = formatDate(sourceDate)
+  suppressClickUntil.value = 0
+  if (longPressTimer !== null) window.clearTimeout(longPressTimer)
+  longPressTimer = window.setTimeout(() => beginDrag(block), LONG_PRESS_MS)
+  window.addEventListener('pointermove', onWindowPointerMove)
+  window.addEventListener('pointerup', onWindowPointerUp)
+  window.addEventListener('keydown', onWindowKeyDown)
+}
+
+/** 长按达成：进入拖拽模式（原卡半透明占位 + 幽灵卡跟随） */
+function beginDrag(block: CourseBlockModel): void {
+  if (!dragAnchor.active) return
+  draggingBlock.value = block as ResolvedBlock
+  dragSource.value = { startPeriod: block.startPeriod, endPeriod: block.endPeriod }
+  dragPos.value = { x: dragAnchor.x, y: dragAnchor.y }
+  dragTarget.value = {
+    colIndex: -1,
+    weekday: block.weekday,
+    startPeriod: block.startPeriod,
+    endPeriod: block.endPeriod,
+  }
+  dragMoved = false
+  suppressClickUntil.value = Date.now() + 300
+}
+
+function onWindowPointerMove(e: PointerEvent): void {
+  if (!dragAnchor.active) return
+  const dx = e.clientX - dragAnchor.x
+  const dy = e.clientY - dragAnchor.y
+  // 未进入长按前移动超阈值：取消长按（视为点击/滚动）
+  if (!draggingBlock.value && longPressTimer !== null && Math.hypot(dx, dy) > MOVE_THRESHOLD_PX) {
+    window.clearTimeout(longPressTimer)
+    longPressTimer = null
+    dragAnchor.active = false
+    cleanupDrag()
+    return
+  }
+  if (!draggingBlock.value) return
+  dragMoved = true
+  dragPos.value = { x: e.clientX, y: e.clientY }
+  dragTarget.value = findTargetCell(e.clientX, e.clientY)
+}
+
+function onWindowPointerUp(): void {
+  const block = draggingBlock.value
+  const target = dragTarget.value
+  // 长按后原地松手（无移动）视为误触，不落库
+  const didMove = dragMoved
+  cleanupDrag()
+  if (block && target && didMove) {
+    void applyDrag(block, target)
+  }
+}
+
+function onWindowKeyDown(e: KeyboardEvent): void {
+  if (e.key === 'Escape') cleanupDrag()
+}
+
+/** 结束拖拽：清 ghost/目标，恢复原卡 */
+function cleanupDrag(): void {
+  draggingBlock.value = null
+  dragSource.value = null
+  dragPos.value = null
+  dragTarget.value = null
+  dragAnchor.active = false
+  if (longPressTimer !== null) {
+    window.clearTimeout(longPressTimer)
+    longPressTimer = null
+  }
+  window.removeEventListener('pointermove', onWindowPointerMove)
+  window.removeEventListener('pointerup', onWindowPointerUp)
+  window.removeEventListener('keydown', onWindowKeyDown)
+}
+
+// ============================================================
+// 移动端滑动切日（双日视图）：水平位移 > 50px 且 |dx| > |dy| 判定滑动
+// 用 pointer 事件（同时覆盖触摸与鼠标）；垂直滚动不干扰；
+// 仅双日视图（props.days）启用，且与长按拖拽互斥（拖拽已禁用）
+// ============================================================
+const SWIPE_THRESHOLD_PX = 50
+let swipeStart: { x: number; y: number } | null = null
+
+function onSwipePointerDown(e: PointerEvent): void {
+  if (!props.days) return
+  swipeStart = { x: e.clientX, y: e.clientY }
+}
+
+/** pointerup 挂 window：pointer capture 或滑动中断（pointercancel）也能正确收尾 */
+function onSwipePointerUp(e: PointerEvent): void {
+  if (!props.days || !swipeStart) return
+  const dx = e.clientX - swipeStart.x
+  const dy = e.clientY - swipeStart.y
+  swipeStart = null
+  if (Math.abs(dx) < SWIPE_THRESHOLD_PX || Math.abs(dx) <= Math.abs(dy)) return
+  emit('swipe', dx < 0 ? 'next' : 'prev')
+}
+
+function onSwipePointerCancel(): void {
+  swipeStart = null
+}
+
+/** 学期实际节次数（拖拽落位与行高计算的上限，随用户自定义节次变化） */
+const periodCount = computed(() => (store.periods.length > 0 ? store.periods.length : 12))
+
+/**
+ * 指针坐标 → 目标格子（保持跨节宽度，clamp 到 1..periodCount）。
+ * 列索引一并返回：列 = 日期，落库时要把「拖到哪一天」写进调整记录。
+ */
+function findTargetCell(
+  clientX: number,
+  clientY: number,
+): { colIndex: number; weekday: Weekday; startPeriod: number; endPeriod: number } | null {
+  const grid = gridEl.value
+  if (!grid) return null
+  const dayCols = Array.from(grid.querySelectorAll('.day-col'))
+  let colIndex = -1
+  for (let i = 0; i < dayCols.length; i++) {
+    const r = dayCols[i].getBoundingClientRect()
+    if (clientX >= r.left && clientX < r.right) {
+      colIndex = i
+      break
+    }
+  }
+  if (colIndex < 0 || !dragSource.value) return null
+  const gridRect = grid.getBoundingClientRect()
+  const relY = clientY - gridRect.top
+  const rowH = getRowHeight()
+  const maxPeriod = periodCount.value
+  const startPeriod = Math.min(maxPeriod, Math.max(1, Math.floor((relY - HEADER_H) / rowH) + 1))
+  const span = dragSource.value.endPeriod - dragSource.value.startPeriod + 1
+  let end = startPeriod + span - 1
+  let start = startPeriod
+  if (end > maxPeriod) {
+    start = Math.max(1, maxPeriod - span + 1)
+    end = maxPeriod
+  }
+  return { colIndex, weekday: weekdayOf(colIndex), startPeriod: start, endPeriod: end }
+}
+
+/** 实测行高（像素），回退 52 */
+function getRowHeight(): number {
+  const cell = gridEl.value?.querySelector('.time-cell')
+  if (cell) {
+    const h = cell.getBoundingClientRect().height
+    if (h > 0) return h
+  }
+  return 52
+}
+
+/** 点击课程：拖拽刚落格后 300ms 内抑制 click（避免误开详情） */
+function handleOpen(block: ResolvedBlock, date: string): void {
+  if (Date.now() < suppressClickUntil.value) return
+  // 带上「点的是哪一块、在哪一天」：详情里要显示这一次的实际时间（调休 / 调课后的）
+  emit('open', block.id, block, date)
+}
+
+/** 拖动落点换算的节次集合（保留原块节数，clamp 到 1..12） */
+function targetPeriods(target: { startPeriod: number; endPeriod: number }): number[] {
+  return periodRange(target.startPeriod, target.endPeriod)
+}
+
+/**
+ * 落库：不再改写基准课表，而是写一条「调课」调整记录（可撤销）。
+ * - 基础块：原日 = 所在列日期，原时间组 =（星期 + 完整节次），目标 = 落点日期 + 节次
+ * - 已经是「调来 / 补课」的块：改这条调整记录的目标（补课块只改时间，不改来源）
+ * 基准课表（course_slot）只读不动，因此原课表永远保留，撤销即恢复。
+ */
+async function applyDrag(
+  block: ResolvedBlock,
+  target: { colIndex: number; weekday: Weekday; startPeriod: number; endPeriod: number },
+): Promise<void> {
+  const slot = target.endPeriod > target.startPeriod ? `第 ${target.startPeriod}–${target.endPeriod} 节` : `第 ${target.startPeriod} 节`
+  let step = '准备调整'
+  try {
+    if (!Number.isInteger(target.startPeriod) || !Number.isInteger(target.endPeriod)) {
+      throw new Error('目标节次无效，请重新拖到课表格内')
+    }
+    const course = store.courses.find((c) => c.id === block.id)
+    if (!course) throw new Error('课程不存在，请刷新后重试')
+
+    const newPeriods = targetPeriods(target)
+    if (!newPeriods.length) throw new Error('目标节次无效')
+
+    const targetDate = target.colIndex >= 0 ? formatDate(dayOf(target.colIndex)) : dragSourceDate.value
+    const targetLabel = dateWithWeekdayLabel(targetDate)
+
+    // 已经由调整而来的块：改这条调整的目标（不再新增）
+    if (block.adjustmentId) {
+      step = '更新调整'
+      if (block.source === 'moved') {
+        await store.updateAdjustment(block.adjustmentId, {
+          kind: 'move',
+          date: block.fromDate ?? dragSourceDate.value,
+          fromWeekday: block.fromWeekday ?? block.weekday,
+          fromPeriods: block.fromPeriods ?? [],
+          toDate: targetDate,
+          periods: newPeriods,
+          location: block.location,
+          note: block.adjustmentNote ?? '',
+        })
+        void import('@/utils/ui').then(({ toast }) => toast(`已改为 ${targetLabel} ${slot}`, 'success'))
+      } else {
+        await store.updateAdjustment(block.adjustmentId, {
+          kind: 'extra',
+          date: targetDate,
+          periods: newPeriods,
+          location: block.location,
+          note: block.adjustmentNote ?? '',
+        })
+        void import('@/utils/ui').then(({ toast }) => toast(`补课时间已改为 ${targetLabel} ${slot}`, 'success'))
+      }
+      return
+    }
+
+    if (targetDate === dragSourceDate.value) {
+      void import('@/utils/ui').then(({ toast }) => toast('位置没有变化', 'info'))
+      return
+    }
+
+    // 基础块：写一条调课记录（原位置自动淡显「已调至 …」，可在课程详情里撤销）
+    step = '登记调课'
+    await store.addAdjustment({
+      courseId: course.id,
+      date: dragSourceDate.value,
+      kind: 'move',
+      fromWeekday: block.weekday,
+      fromPeriods: block.allPeriods,
+      toDate: targetDate,
+      periods: newPeriods,
+      location: block.location,
+      note: '',
+    })
+    const fromLabel = dateWithWeekdayLabel(dragSourceDate.value)
+    void import('@/utils/ui').then(({ toast }) =>
+      toast(`已调课：${fromLabel} → ${targetLabel} ${slot}（可在课程详情撤销）`, 'success'),
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    console.error('[WeekGrid] 调整课程失败', { step, courseId: block.id, target, error })
+    void import('@/utils/ui').then(({ toast }) => toast(`${step}失败：${message}`, 'error'))
+  }
+}
+
+// ============================================================
+// 桌面端动态行高：让 12 节课表在常见分辨率（1280×720 / 1920×1080）下
+// 一屏完整显示、无需滚动页面。
+// ============================================================
+const isDesktop = ref(window.innerWidth >= 1280)
+const viewportH = ref(window.innerHeight)
+
+function onResize(): void {
+  isDesktop.value = window.innerWidth >= 1280
+  viewportH.value = window.innerHeight
+}
+
+const rowHeight = computed(() => {
+  if (!isDesktop.value) return null
+  // 按学期实际节次数均分行高，保证一屏完整显示
+  const h = Math.floor((viewportH.value - 244) / periodCount.value)
+  return Math.min(64, Math.max(36, h))
+})
+</script>
+
+<template>
+  <div ref="gridEl" class="weekgrid" data-export-target="week-grid" :class="{ 'is-dragging': draggingBlock, 'is-days': props.days }" :style="rowHeight ? { '--ph-row-dyn': rowHeight + 'px' } : undefined" @pointerdown="onSwipePointerDown">
+    <!-- 时间列 -->
+    <div class="col time-col" aria-hidden="true">
+      <div class="day-head corner"></div>
+      <div v-for="p in store.periods" :key="p.id" class="time-cell">
+        <b>第{{ p.index }}节</b>
+        <span>{{ p.startTime }}–{{ p.endTime }}</span>
+      </div>
+    </div>
+
+    <!-- 日期列（桌面 7 天 / 移动端双日） -->
+    <div
+      v-for="(_, idx) in displayColumns"
+      :key="idx"
+      class="col day-col"
+      :class="{ today: isTodayCol(idx) }"
+    >
+      <div class="day-head">
+        <!-- 第一行：星期 + 今天 + 日期；第二行：学期日历角标（假期 / 调休 / 补 X 月 X 日）。
+             角标单独占一行：一行里塞「周六 + 补 10月6日 + 10/24」会把「周六」挤成竖排。 -->
+        <div class="hd-line">
+          <span class="wd">{{ DAY_LABELS[dayOf(idx).getDay() === 0 ? 6 : dayOf(idx).getDay() - 1] }}</span>
+          <span v-if="isTodayCol(idx)" class="pill">今天</span>
+          <span class="dt num">{{ dayOf(idx).getMonth() + 1 }}/{{ dayOf(idx).getDate() }}</span>
+        </div>
+        <div v-if="dayRuleOf(idx)?.dayLabel" class="hd-line">
+          <span
+            class="pill rule"
+            :class="{
+              holiday: dayRuleOf(idx)?.rule?.kind === 'holiday',
+              makeup: !dayRuleOf(idx)?.rule?.kind && (dayRuleOf(idx)?.shiftSources.length ?? 0) > 0,
+            }"
+          >{{ dayRuleOf(idx)?.dayLabel }}</span>
+        </div>
+      </div>
+
+      <!-- 空白槽：点击快捷新增课程（预填星期与节次，PRD 5.2 / UI 3.1）；公开只读页不渲染 -->
+      <template v-if="!store.readonly">
+        <button
+          v-for="p in store.periods"
+          :key="'slot-' + p.id"
+          class="slot"
+          type="button"
+          :style="{
+            gridRow: `${p.index + 1} / ${p.index + 2}`,
+            gridColumn: '1',
+          }"
+          :aria-label="`新增课程：周${DAY_LABELS[dayOf(idx).getDay() === 0 ? 6 : dayOf(idx).getDay() - 1]} 第${p.index}节`"
+          @click="emit('create', { weekday: weekdayOf(idx), period: p.index })"
+        ></button>
+      </template>
+
+      <!-- 原位置淡显标记：这一天本有课但停课 / 调走 / 中途经此（不参与冲突检测与统计） -->
+      <button
+        v-for="m in markersOf(idx)"
+        v-show="m.periods.length"
+        :key="'m-' + m.adjustmentId + '-' + m.kind"
+        class="slot-marker"
+        :class="`marker-${m.kind}`"
+        type="button"
+        :style="{
+          gridRow: `${m.periods[0] + 1} / ${m.periods[m.periods.length - 1] + 2}`,
+          gridColumn: '1',
+        }"
+        :title="markerLabel(m)"
+        @click="emit('open-marker', m, formatDate(dayOf(idx)))"
+      >
+        <span class="marker-name">{{ m.name }}</span>
+        <span class="marker-label">{{ markerLabel(m) }}</span>
+      </button>
+
+      <!-- 非冲突课程：跨全列 -->
+      <CourseBlock
+        v-for="item in soloItems(idx)"
+        :key="'c-' + blockKey(item.block)"
+        :style="{
+          gridRow: `${item.block.startPeriod + 1} / ${item.block.endPeriod + 2}`,
+          gridColumn: '1',
+        }"
+        :course="item.block"
+        :dragging="draggingBlock ? blockKey(draggingBlock) === blockKey(item.block) : false"
+        @pointerdown="(e: PointerEvent) => onBlockPointerDown(item.block, e, dayOf(idx))"
+        @open="handleOpen(item.block, formatDate(dayOf(idx)))"
+        @open-adjust="emit('open-adjust', item.block, formatDate(dayOf(idx)))"
+      />
+
+      <!-- 冲突课程组：flex 分栏，hover 展开 2/3（1/3 只显示名称） -->
+      <div
+        v-for="(group, gi) in conflictGroups[idx]"
+        :key="'grp-' + gi"
+        class="overlap"
+        :style="{
+          gridRow: `${group[0].block.startPeriod + 1} / ${group[0].block.endPeriod + 2}`,
+          gridColumn: '1',
+        }"
+        @mouseleave="handleHoverLeave"
+      >
+        <CourseBlock
+          v-for="item in group"
+          :key="'g-' + blockKey(item.block)"
+          :style="{ flexGrow: getGrow(blockKey(item.block)), flexBasis: '0%' }"
+          :collapsed="getGrow(blockKey(item.block)) < Math.max(...group.map((c) => getGrow(blockKey(c.block)))) - 0.01"
+          :course="item.block"
+          :dragging="draggingBlock ? blockKey(draggingBlock) === blockKey(item.block) : false"
+          @pointerdown="(e: PointerEvent) => onBlockPointerDown(item.block, e, dayOf(idx))"
+          @mouseenter="handleHoverEnter(blockKey(item.block))"
+          @open="handleOpen(item.block, formatDate(dayOf(idx)))"
+          @open-adjust="emit('open-adjust', item.block, formatDate(dayOf(idx)))"
+        />
+      </div>
+    </div>
+
+    <!-- 拖拽目标格高亮框（weekday/节次换算后绝对定位） -->
+    <div
+      v-if="targetBox"
+      class="drag-target-overlay"
+      :style="{ left: targetBox.left + 'px', top: targetBox.top + 'px', width: targetBox.width + 'px', height: targetBox.height + 'px' }"
+    ></div>
+
+    <!-- 拖拽幽灵卡（body 顶层，跟手半透明） -->
+    <Teleport to="body">
+      <div
+        v-if="draggingBlock && dragPos"
+        class="course-ghost"
+        :style="{ left: dragPos.x + 'px', top: dragPos.y + 'px' }"
+      >
+        <span class="ghost-name">{{ draggingBlock.name }}</span>
+        <span class="ghost-slot" v-if="dragTarget">
+          {{ DAY_LABELS[dragTarget.weekday - 1] }} ·
+          {{ dragTarget.endPeriod > dragTarget.startPeriod ? `第 ${dragTarget.startPeriod}–${dragTarget.endPeriod} 节` : `第 ${dragTarget.startPeriod} 节` }}
+        </span>
+      </div>
+    </Teleport>
+  </div>
+</template>
+
+<style scoped>
+.weekgrid {
+  display: grid;
+  /* 7 列等分容器宽度：不要给列设固定下限（旧值是 120px）——1280 宽时每列只有
+     118.4px，7 列合起来比容器宽 11px，多出来的部分被 overflow:hidden 裁掉，
+     最后一天（周日）卡片的右边线看起来像缺了一条。窄屏由手机单日视图承担。 */
+  grid-template-columns: var(--tc-w) repeat(7, minmax(0, 1fr));
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  position: relative;
+}
+
+/* 拖拽目标格高亮（绝对定位覆盖预览） */
+.drag-target-overlay {
+  position: absolute;
+  border: 2px dashed var(--color-brand);
+  border-radius: var(--radius-sm);
+  background: var(--color-brand-subtle);
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: var(--z-index-sticky);
+}
+
+/* 拖拽幽灵卡（body 顶层，不随滚动位移的问题由 fixed 定位规避） */
+.course-ghost {
+  position: fixed;
+  transform: translate(-50%, -100%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 180px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  opacity: 0.92;
+  pointer-events: none;
+  z-index: var(--z-index-modal);
+}
+
+.ghost-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ghost-slot {
+  font-size: var(--font-size-xs);
+  color: var(--color-brand);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+}
+
+/* 拖动进行中：宿主网格滚动条期间保持滚动可用，卡片 hover 阴影收敛 */
+.weekgrid.is-dragging .course,
+.weekgrid.is-dragging .slot {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.col {
+  /* 桌面端优先使用动态行高（--ph-row-dyn，WeekGrid 按视口计算），
+     未设置时回退设计 token；平板/移动端断点仍覆盖为 52/56px */
+  --ph-row: var(--ph-row-dyn, var(--ph-desktop));
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 44px;
+  grid-auto-rows: var(--ph-row);
+  border-right: 1px solid var(--color-border-default);
+  position: relative;
+}
+
+.col:last-child {
+  border-right: none;
+}
+
+/* 空白槽：占位可点击，hover 提示；课程块渲染在其上（DOM 顺序在后） */
+.slot {
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.slot:hover {
+  background: var(--color-bg-subtle);
+}
+
+.slot:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: -1px;
+}
+
+/* 冲突课程组：flex 分栏容器（1/3 与 2/3 动态分配，hover 展开） */
+.overlap {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+/* 时间列 */
+.time-col {
+  background: var(--color-bg-corner);
+  position: sticky;
+  left: 0;
+  z-index: var(--z-index-grid-corner);
+}
+
+.time-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border-top: 1px solid var(--color-border-default);
+}
+
+.time-cell b {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.time-cell span {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 表头 */
+.day-head {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-index-grid-corner);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 4px;
+  background: var(--color-bg-corner);
+  border-bottom: 1px solid var(--color-border-default);
+  overflow: hidden;
+}
+
+/* 表头的一行（星期 + 今天 + 日期 / 规则角标）；一律不换行，避免窄列把汉字挤成竖排 */
+.hd-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.day-col.today .day-head {
+  background: var(--color-brand-subtle);
+}
+
+.wd {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.day-col.today .wd {
+  color: var(--color-brand-hover);
+  font-weight: var(--font-weight-bold);
+}
+
+.dt {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.day-col.today .dt {
+  color: var(--color-brand-hover);
+}
+
+.pill {
+  font-size: 10px;
+  color: var(--color-text-inverse);
+  background: var(--color-brand);
+  border-radius: var(--radius-full);
+  padding: 1px 6px;
+  font-weight: var(--font-weight-medium);
+}
+
+/* 学期日历角标（假期 / 调休 / 补 X）：与调整角标同族语义色（UI 设计文档 3.6） */
+.pill.rule {
+  color: var(--badge-shift-text);
+  background: var(--badge-shift-bg);
+  border: 1px solid var(--badge-shift-line);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pill.rule.holiday {
+  border-style: dashed;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-subtle);
+  border-color: var(--color-border-strong);
+}
+
+.pill.rule.makeup {
+  color: var(--badge-extra-text);
+  background: var(--badge-extra-bg);
+  border-color: var(--badge-extra-line);
+}
+
+/* 原位置淡显标记：停课 / 已调走的课（虚线 + 低透明度，不参与冲突与统计） */
+.slot-marker {
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  margin: var(--spacing-2xs);
+  padding: var(--spacing-sm);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  min-width: 0;
+  opacity: 0.62;
+  cursor: pointer;
+}
+
+.marker-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-tertiary);
+  text-decoration: line-through;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.marker-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 按类型分色（与角标同族语义色）：停课红、调课蓝、调休紫、中间站靛蓝点线 */
+.marker-cancel {
+  border-color: var(--badge-cancel-line);
+  background: var(--badge-cancel-bg);
+}
+
+.marker-cancel .marker-name,
+.marker-cancel .marker-label {
+  color: var(--badge-cancel-text);
+}
+
+.marker-move {
+  border-color: var(--badge-move-line);
+}
+
+.marker-move .marker-label {
+  color: var(--badge-move-text);
+}
+
+.marker-shift {
+  border-color: var(--badge-shift-line);
+}
+
+.marker-shift .marker-label {
+  color: var(--badge-shift-text);
+}
+
+/* 中间站（经此）：更淡、不划名，只留一个「经此」提示 */
+.marker-via {
+  border-style: dotted;
+  opacity: 0.5;
+  background: var(--badge-multi-bg);
+  border-color: var(--badge-multi-line);
+}
+
+.marker-via .marker-name {
+  text-decoration: none;
+  color: var(--badge-multi-text);
+}
+
+.marker-via .marker-label {
+  color: var(--badge-multi-text);
+}
+
+/* 今天列底色 */
+.day-col.today::before {
+  content: '';
+  position: absolute;
+  inset: 44px 0 0 0;
+  background: var(--color-brand-subtle);
+  pointer-events: none;
+}
+
+/* 网格行分割线 */
+.col::after {
+  content: '';
+  position: absolute;
+  inset: 44px 0 0 0;
+  background-image: linear-gradient(
+    to bottom,
+    transparent calc(var(--ph-row) - 1px),
+    var(--color-border-default) calc(var(--ph-row) - 1px)
+  );
+  background-size: 100% var(--ph-row);
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+@media (max-width: 1279px) {
+  .col {
+    --ph-row: var(--ph-tablet);
+  }
+}
+
+@media (max-width: 767px) {
+  .weekgrid {
+    grid-template-columns: var(--tc-w) repeat(7, 140px);
+    min-width: calc(var(--tc-w) + 7 * 140px);
+    border-radius: var(--radius-lg);
+  }
+
+  .col {
+    --ph-row: var(--ph-mobile);
+  }
+
+  /* 双日视图（移动端）：两列均分剩余宽度，不再横向滚动；
+     touch-action: pan-y 让浏览器只接管纵向滚动，水平滑动留给应用（滑动切日） */
+  .weekgrid.is-days {
+    grid-template-columns: var(--tc-w) repeat(2, minmax(0, 1fr));
+    min-width: 0;
+    touch-action: pan-y;
+  }
+}
+</style>

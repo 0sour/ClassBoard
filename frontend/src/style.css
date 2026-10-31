@@ -1,0 +1,266 @@
+/* 设计 token 由 src/styles/tokens.css 提供，在 main.ts 中显式引入 */
+
+/* ============================================================
+   ClassBoard · 全局基座（清新浅色极简）
+   ============================================================ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+  /* 始终保留滚动条占位：避免页面间滚动条出现/消失导致视口可用宽度变化，
+     进而引起居中定位元素（如顶栏分段控件）左右偏移 */
+  scrollbar-gutter: stable;
+}
+
+body {
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-body);
+  background: var(--color-bg-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+h1, h2, h3, h4 {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+}
+
+a {
+  color: var(--color-brand);
+  text-decoration: none;
+}
+
+/* 入场动画：fadeUp */
+.reveal {
+  animation: fadeUp var(--motion-duration-reveal) var(--motion-easing-standard) both;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 数字等宽对齐 */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 无障碍：减少动态效果 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================
+   共享组件样式（跨页面/组件复用，设计语言文档 §4-§9）
+   ============================================================ */
+
+/* 小按钮（列表行操作、弹窗操作） */
+.btn-mini {
+  padding: 4px 14px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-brand);
+  background: var(--color-bg-surface);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.btn-mini:hover {
+  background: var(--color-bg-hover);
+}
+
+.btn-mini:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-mini--primary {
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+  color: var(--color-text-inverse);
+}
+
+.btn-mini--primary:hover {
+  background: var(--color-brand-hover);
+}
+
+.btn-mini--danger {
+  color: var(--color-feedback-error);
+}
+
+/* 添加按钮（面板头部） */
+.btn-add {
+  padding: 4px 14px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-brand);
+  background: var(--color-bg-surface);
+}
+
+.btn-add:hover {
+  background: var(--color-brand-subtle);
+}
+
+/* 表单输入框 */
+.date-input,
+.text-input {
+  height: 34px;
+  padding: 0 var(--spacing-sm);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-surface);
+  color: var(--color-text-body);
+  font-size: var(--font-size-sm);
+}
+
+.date-input:focus,
+.text-input:focus {
+  outline: none;
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 2px var(--color-brand-subtle);
+}
+
+/* 表单字段容器 */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.field legend.field__label {
+  padding: 0;
+  margin-bottom: 6px;
+}
+
+.field__label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-body);
+}
+
+/* 下拉容器 */
+.select-wrap {
+  min-width: 150px;
+}
+
+/* 操作按钮行（弹窗底部） */
+.edit-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+}
+
+/* 表单错误提示 */
+.edit-error {
+  margin-top: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-feedback-error);
+}
+
+/* 状态徽章 */
+.chip {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-inverse);
+  background: var(--color-brand);
+  border-radius: var(--radius-full);
+  padding: 2px 10px;
+}
+
+/* 弹窗 */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-index-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.42);
+  padding: var(--spacing-lg);
+}
+
+.modal {
+  width: min(400px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  background: var(--color-bg-surface);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-pop);
+  padding: var(--spacing-xl);
+}
+
+.modal-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.modal-desc {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+/* 面板说明文字 */
+.panel-note {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* 空态 */
+.sp-empty {
+  padding: var(--spacing-xl) 0;
+  text-align: center;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+}

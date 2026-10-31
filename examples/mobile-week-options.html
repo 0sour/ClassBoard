@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClassBoard · 手机周课表方案对比</title>
+<style>
+/* ==========================================================================
+   ClassBoard 手机周课表方案对比（模拟 iPhone 视口 393×852）
+   A 横向滚动 7 天 / B 单日全宽 + 周缩略条 / C 双日 + 周缩略条 / D 时间线列表
+   ========================================================================== */
+:root {
+  --color-neutral-50: #f6f7f9;
+  --color-neutral-100: #eef1f5;
+  --color-neutral-200: #e7eaf0;
+  --color-neutral-300: #d8dde6;
+  --color-neutral-500: #6b7280;
+  --color-neutral-600: #4b5563;
+  --color-neutral-800: #1f2933;
+  --color-neutral-900: #111827;
+  --color-white: #ffffff;
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #bfdbfe;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-text-primary: var(--color-neutral-900);
+  --color-text-body: var(--color-neutral-800);
+  --color-text-secondary: var(--color-neutral-600);
+  --color-text-tertiary: var(--color-neutral-500);
+  --color-bg-page: var(--color-neutral-50);
+  --color-bg-surface: var(--color-white);
+  --color-bg-subtle: var(--color-neutral-100);
+  --color-bg-hover: #f1f4f8;
+  --color-border-default: var(--color-neutral-200);
+  --color-border-strong: var(--color-neutral-300);
+  --color-brand: var(--color-primary-500);
+  --color-brand-hover: var(--color-primary-600);
+  --color-brand-subtle: var(--color-primary-50);
+  --color-brand-line: var(--color-primary-100);
+
+  --course-1-bg: #eef4ff; --course-1-line: #c3d8fb; --course-1-text: #1e40af;
+  --course-2-bg: #ecf8f0; --course-2-line: #bce6cd; --course-2-text: #166534;
+  --course-3-bg: #f3efff; --course-3-line: #d4c6fb; --course-3-text: #5b21b6;
+  --course-4-bg: #fdf2e7; --course-4-line: #f6d5b0; --course-4-text: #9a3412;
+  --course-5-bg: #ecf9fb; --course-5-line: #b7e3ec; --course-5-text: #155e75;
+  --course-6-bg: #fdeef1; --course-6-line: #f6c4ce; --course-6-text: #9f1239;
+  --course-7-bg: #eef1fd; --course-7-line: #c7cff9; --course-7-text: #3730a3;
+  --course-8-bg: #fdf8e3; --course-8-line: #f2e2a0; --course-8-text: #713f12;
+
+  --spacing-2xs: 3px;
+  --spacing-xs: 6px;
+  --spacing-sm: 9px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13.5px;
+  --font-size-body: 14px;
+  --font-size-lg: 15px;
+  --font-size-xl: 16px;
+  --font-size-2xl: 18px;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 6px 18px rgba(16, 24, 40, 0.05);
+  --shadow-hover: 0 4px 12px rgba(16, 24, 40, 0.09);
+
+  --motion-duration-fast: 150ms;
+  --motion-duration-normal: 180ms;
+  --motion-duration-slow: 220ms;
+  --motion-easing-standard: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  background: var(--color-bg-page);
+  color: var(--color-text-body);
+  padding: 32px 24px 64px;
+}
+
+.page-head { max-width: 940px; margin: 0 auto 24px; }
+.page-head h1 { font-size: 22px; font-weight: 700; color: var(--color-text-primary); }
+.page-head p { margin-top: 8px; font-size: 14px; color: var(--color-text-secondary); }
+.page-head .note { margin-top: 12px; font-size: 12px; color: var(--color-text-tertiary); background: var(--color-brand-subtle); border: 1px solid var(--color-brand-line); border-radius: 10px; padding: 10px 14px; }
+
+/* 方案网格 */
+.options-grid {
+  max-width: 940px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 860px) { .options-grid { grid-template-columns: 1fr; } }
+
+.option { background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: 12px; box-shadow: var(--shadow-card); overflow: hidden; }
+.option-head { padding: 12px 14px; border-bottom: 1px solid var(--color-border-default); }
+.option-head .name { font-size: 14px; font-weight: 600; color: var(--color-text-primary); }
+.option-head .desc { font-size: 11px; color: var(--color-text-tertiary); margin-top: 2px; }
+.option-body { padding: 14px; background: var(--color-bg-page); }
+
+/* ============ 手机模拟框 ============ */
+.phone {
+  width: 100%;
+  max-width: 393px;
+  margin: 0 auto;
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: var(--shadow-hover);
+}
+
+.phone-status { height: 22px; background: var(--color-bg-surface); border-bottom: 1px solid var(--color-border-default); display: flex; align-items: center; justify-content: space-between; padding: 0 12px; font-size: 10px; color: var(--color-text-tertiary); }
+.phone-body { max-height: 560px; overflow-y: auto; }
+
+/* ============ 方案 A：横向滚动 7 天 ============ */
+.plan-a { min-height: 440px; background: var(--color-bg-surface); border-radius: 12px; overflow: hidden; }
+.plan-a .a-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--color-border-default); }
+.plan-a .a-title { font-size: 15px; font-weight: 600; color: var(--color-text-primary); }
+.plan-a .a-today { height: 28px; padding: 0 12px; border: none; border-radius: var(--radius-full); background: var(--color-brand); color: #fff; font-size: 12px; font-weight: 500; cursor: pointer; }
+.plan-a .a-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.plan-a .a-grid { display: grid; grid-template-columns: 56px repeat(7, 128px); min-width: 952px; }
+.plan-a .a-cell { border-right: 1px solid var(--color-border-default); border-bottom: 1px solid var(--color-border-default); }
+.plan-a .a-head { height: 40px; padding: 6px 8px; background: var(--color-bg-surface); position: sticky; top: 0; }
+.plan-a .a-head b { display: block; font-size: 13px; color: var(--color-text-primary); }
+.plan-a .a-head span { font-size: 11px; color: var(--color-text-tertiary); }
+.plan-a .a-head.today { background: var(--color-brand-subtle); }
+.plan-a .a-head.today b { color: var(--color-brand); }
+.plan-a .a-time { font-size: 10px; color: var(--color-text-tertiary); padding: 6px 4px; text-align: center; border-right: 1px solid var(--color-border-default); }
+.plan-a .a-course { margin: 3px; padding: 4px 6px; border-radius: 6px; font-size: 11px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.plan-a .a-slot { height: 44px; }
+.plan-a .a-slot:nth-child(2n) { background: #fafbfc; }
+
+/* ============ 方案 B 单日全格 + 周缩略条 ============ */
+.plan-b { min-height: 440px; background: var(--color-bg-surface); border-radius: 12px; overflow: hidden; }
+.plan-b .bhead { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 4px; }
+.plan-b .b-date { font-size: 17px; font-weight: 700; color: var(--color-text-primary); }
+.plan-b .b-today { height: 28px; padding: 0 12px; border: none; border-radius: var(--radius-full); background: var(--color-brand); color: #fff; font-size: 12px; cursor: pointer; }
+.plan-b .b-week { display: flex; gap: 6px; padding: 10px 14px; }
+.plan-b .b-day { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px 0; border-radius: 8px; border: none; background: none; cursor: pointer; font-family: inherit; }
+.plan-b .b-day span { font-size: 10px; color: var(--color-text-tertiary); }
+.plan-b .b-day b { font-size: 13px; color: var(--color-text-body); font-weight: 500; }
+.plan-b .b-day .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--color-brand); opacity: 0; }
+.plan-b .b-day.today b { color: var(--color-brand); font-weight: 700; }
+.plan-b .b-day.today .dot { opacity: 1; }
+.plan-b .b-day.active { background: var(--color-brand); }
+.plan-b .b-day.active span, .plan-b .b-day.active b { color: #fff; }
+.plan-b .b-day.active .dot { background: #fff; opacity: 1; }
+.plan-b .blist { padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+.plan-b .bcard { display: flex; align-items: center; gap: 10px; background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: 10px; box-shadow: var(--shadow-card); padding: 10px 12px; }
+.plan-b .bcard .tc { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.plan-b .bcard .t { font-size: 12px; font-weight: 600; color: var(--color-text-primary); min-width: 88px; }
+.plan-b .bcard .n { flex: 1; font-size: 13px; font-weight: 600; color: var(--color-text-primary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.plan-b .bcard .l { font-size: 11px; color: var(--color-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90px; }
+.plan-b .bempty { padding: 40px 0; text-align: center; font-size: 12px; color: var(--color-text-tertiary); border: 1px dashed var(--color-border-strong); border-radius: 10px; }
+
+/* ============ 方案 C：双日 + 周缩略条 ============ */
+.plan-c { min-height: 480px; background: var(--color-bg-surface); border-radius: 12px; overflow: hidden; }
+.plan-c .chead { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 4px; }
+.plan-c .c-date { font-size: 15px; font-weight: 700; color: var(--color-text-primary); }
+.plan-c .c-today { height: 28px; padding: 0 12px; border: none; border-radius: var(--radius-full); background: var(--color-brand); color: #fff; font-size: 12px; cursor: pointer; }
+.plan-c .c-week { display: flex; gap: 6px; padding: 10px 14px; }
+.plan-c .c-grid { display: grid; grid-template-columns: 44px repeat(2, 1fr); padding: 0 14px 14px; }
+.plan-c .c-time { font-size: 9px; color: var(--color-text-tertiary); padding: 4px 2px; text-align: center; }
+.plan-c .c-slot { height: 40px; border-bottom: 1px solid var(--color-border-default); }
+.plan-c .c-course { position: relative; z-index: 1; margin: 2px; padding: 3px 5px; border-radius: 6px; font-size: 10px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* ============ 方案 D：时间线列表 ============ */
+.plan-d .dhead { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 6px; }
+.plan-d .d-date { font-size: 17px; font-weight: 700; color: var(--color-text-primary); }
+.plan-d .d-today { height: 28px; padding: 0 12px; border: none; border-radius: var(--radius-full); background: var(--color-brand); color: #fff; font-size: 12px; cursor: pointer; }
+.plan-d .dl { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+.plan-d .d-item { display: flex; gap: 10px; }
+.plan-d .d-time { width: 62px; text-align: right; padding-top: 12px; }
+.plan-d .d-time b { display: block; font-size: 12px; color: var(--color-text-primary); }
+.plan-d .d-time span { font-size: 10px; color: var(--color-text-tertiary); }
+.plan-d .d-line { width: 14px; display: flex; flex-direction: column; align-items: center; }
+.plan-d .d-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--color-brand); margin-top: 14px; flex: none; }
+.plan-d .d-stick { flex: 1; width: 2px; background: var(--color-border-default); }
+.plan-d .d-card { flex: 1; background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: 10px; box-shadow: var(--shadow-card); padding: 10px 12px; margin-bottom: 4px; }
+.plan-d .d-card .n { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
+.plan-d .d-card .l { font-size: 11px; color: var(--color-text-secondary); margin-top: 3px; }
+.plan-d .d-card .r { font-size: 10px; color: var(--color-text-tertiary); margin-top: 3px; }
+
+/* 通用：方案说明 */
+.option-note { margin-top: 10px; font-size: 11px; color: var(--color-text-tertiary); line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <h1>📱 ClassBoard · 手机周课表方案对比</h1>
+  <p>同一份课程数据、四种移动端周课表形态。方案 B/C 的顶部缩略条可点击任意天跳转；A 可横向拖动。</p>
+  <div class="note">💡 假数据演示：今天 = 周六 8/22，周一~周五有课，周六周日无课（模拟你当前场景）。选中方案后我再实现到真实代码。</div>
+</div>
+
+<div class="options-grid">
+
+  <!-- ============ 方案 A ============ -->
+  <div class="option">
+    <div class="option-head">
+      <div class="name">A · 横向滚动 7 天</div>
+      <div class="desc">经典网格，整周横向拖动，时间列固定</div>
+    </div>
+    <div class="option-body">
+      <div class="phone">
+        <div class="phone-status"><span>9:41</span><span>ClassBoard</span></div>
+        <div class="phone-body">
+          <div class="plan-a">
+            <div class="ahead">
+              <span class="a-title">8月17日–8月23日</span>
+              <button class="a-today">今天</button>
+            </div>
+            <div class="a-scroll">
+              <div class="a-grid" id="planA"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="option-note">✅ 一眼看全一周、实现成本低（复用桌面组件）。❌ 列宽约 128px 偏窄、长课程名截断；周六周日空窗大。</div>
+    </div>
+  </div>
+
+  <!-- ============ 方案 B ============ -->
+  <div class="option">
+    <div class="option-head">
+      <div class="name">B · 单日全宽 + 周缩略条</div>
+      <div class="desc">一次一天（卡片全宽），顶部 7 天圆点跳转</div>
+    </div>
+    <div class="option-body">
+      <div class="phone">
+        <div class="phone-status"><span>9:41</span><span>ClassBoard</span></div>
+        <div class="phone-body">
+          <div class="plan-b">
+            <div class="bhead">
+              <span class="b-date" id="bDate">周六 · 8月22日</span>
+              <button class="b-today">今天</button>
+            </div>
+            <div class="b-week" id="bWeek"></div>
+            <div class="blist" id="bList"></div>
+          </div>
+        </div>
+      </div>
+      <div class="option-note">✅ 课程卡全宽零截断（课名/地点/教师全显示）、iOS 日历式交互、空日不浪费。❌ 一次只能看一天。</div>
+    </div>
+  </div>
+
+  <!-- ============ 方案 C ============ -->
+  <div class="option">
+    <div class="option-head">
+      <div class="name">C · 双日 + 周缩略条</div>
+      <div class="desc">保留双日滑动 + 缩略条快速跳转</div>
+    </div>
+    <div class="option-body">
+      <div class="phone">
+        <div class="phone-status"><span>9:41</span><span>ClassBoard</span></div>
+        <div class="phone-body">
+          <div class="plan-c">
+            <div class="chead">
+              <span class="c-date" id="cDate">周六 8/22 · 周日 8/23</span>
+              <button class="c-today">今天</button>
+            </div>
+            <div class="c-week" id="cWeek"></div>
+            <div class="c-grid" id="cGrid"></div>
+          </div>
+        </div>
+      </div>
+      <div class="option-note">✅ 保留左右滑动切日乐趣 + 缩略条定位任意天。❌ 列宽仍偏窄，长课名截断。</div>
+    </div>
+  </div>
+
+  <!-- ============ 方案 D ============ -->
+  <div class="option">
+    <div class="option-head">
+      <div class="name">D · 时间线列表</div>
+      <div class="desc">按节次竖排时间线，课程卡片式展示</div>
+    </div>
+    <div class="option-body">
+      <div class="phone">
+        <div class="phone-status"><span>9:41</span><span>ClassBoard</span></div>
+        <div class="phone-body">
+          <div class="plan-d">
+            <div class="dhead">
+              <span class="d-date" id="dDate">周六 · 8月22日</span>
+              <button class="d-today">今天</button>
+            </div>
+            <div class="tl" id="dList"></div>
+          </div>
+        </div>
+      </div>
+      <div class="option-note">✅ 信息最全（节次/时间/课名/地点/教师）、无网格复杂度、空日极简。❌ 失去表格感，跨节课程用时间段表达。</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ============ 假数据：本周（8/17-8/23） ============ */
+const WEEK = [
+  { day: '周一', date: '8/17', courses: [
+    { start: 1, end: 2, name: '高等数学 A1', loc: 'A101', color: 'course-1', teacher: '李老师' },
+    { start: 5, end: 6, name: '数字电子技术基础', loc: 'C305', color: 'course-5', teacher: '陈老师' },
+  ]},
+  { day: '周二', date: '8/18', courses: [
+    { start: 3, end: 4, name: '大学英语', loc: 'B202', color: 'course-2', teacher: '李老师' },
+    { start: 5, end: 6, name: '概率论与数理统计', loc: 'B203', color: 'course-3', teacher: '王老师' },
+  ]},
+  { day: '周三', date: '8/19', courses: [
+    { start: 3, end: 4, name: '马克思主义基本原理', loc: 'D101', color: 'course-7', teacher: '赵老师' },
+    { start: 7, end: 8, name: '模拟电子技术基础', loc: 'C305', color: 'course-6', teacher: '陈老师' },
+  ]},
+  { day: '周四', date: '8/20', courses: [
+    { start: 3, end: 4, name: '程序设计基础（上机）', loc: '机房B401', color: 'course-1', teacher: '周老师' },
+    { start: 5, end: 6, name: '大学物理实验', loc: '实验楼A201', color: 'course-6', teacher: '郑老师' },
+    { start: 9, end: 10, name: '形势与政策', loc: 'D201', color: 'course-5', teacher: '钱老师' },
+  ]},
+  { day: '周五', date: '8/21', courses: [
+    { start: 3, end: 6, name: '大学物理（连堂）', loc: 'C307', color: 'course-4', teacher: '郑老师' },
+    { start: 7, end: 8, name: '体育', loc: '东区操场', color: 'course-8', teacher: '孙老师' },
+  ]},
+  { day: '周六', date: '8/22', courses: [] },
+  { day: '周日', date: '8/23', courses: [] },
+];
+
+const PERIODS = [
+  '08:00–08:45','08:55–09:40','10:00–10:45','10:55–11:40','14:00–14:45','14:55–15:40',
+  '16:00–16:45','16:55–17:40','19:00–19:45','19:55–20:40','20:50–21:35','21:45–22:30',
+];
+
+/* ---------- 方案 A：7 天网格 ---------- */
+(function buildA() {
+  const grid = document.getElementById('planA');
+  // 时间列
+  grid.innerHTML += '<div class="a-time" style="grid-column:1;"></div>';
+  PERIODS.forEach((p, i) => {
+    grid.innerHTML += `<div class="a-time" style="grid-row:${i + 2};">${p.split('-')[0]}</div>`;
+  });
+  // 7 天列
+  WEEK.forEach((d, di) => {
+    const cls = di === 5 ? 'today' : '';
+    grid.innerHTML += `<div class="a-head ${cls}" style="grid-column:${di + 2};">` +
+      `<b>${d.day}${di === 5 ? ' · 今' : ''}</b><span>${d.date}</span></div>`;
+    for (let p = 0; p < 12; p++) {
+      grid.innerHTML += `<div class="a-cell a-slot" style="grid-column:${di + 2};grid-row:${p + 2};"></div>`;
+    }
+    d.courses.forEach(c => {
+      grid.innerHTML += `<div class="a-course" style="grid-column:${di + 2};grid-row:${c.start + 1} / ${c.end + 2};` +
+        `background:var(--${c.color}-bg);border:1px solid var(--${c.color}-line);color:var(--${c.color}-text);">${c.name}</div>`;
+    });
+  });
+})();
+
+/* ---------- 方案 B/C：周缩略条 ---------- */
+function buildWeekStrip(containerId, onPick) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = '';
+  WEEK.forEach((d, i) => {
+    const b = document.createElement('button');
+    b.className = 'b-day';
+    b.innerHTML = `<span>${d.day[1]}</span><b>${d.date.split('/')[1]}</b><span class="dot"></span>`;
+    if (i === 5) b.classList.add('today');
+    b.addEventListener('click', () => onPick(i));
+    el.appendChild(b);
+  });
+}
+
+/* 方案 B 状态 */
+let bIdx = 5;
+function renderB() {
+  document.getElementById('bDate').textContent = WEEK[bIdx].day + ' · ' + WEEK[bIdx].date;
+  buildWeekStrip('bWeek', i => { bIdx = i; renderB(); });
+  const strip = document.getElementById('bWeek');
+  [...strip.children].forEach((el, i) => el.classList.toggle('active', i === bIdx));
+  const list = document.getElementById('bList');
+  const d = WEEK[bIdx];
+  if (!d.courses.length) {
+    list.innerHTML = `<div class="bempty">今天没有排课，享受空闲时光</div>`;
+    return;
+  }
+  list.innerHTML = '';
+  d.courses.forEach(c => {
+    const card = document.createElement('div');
+    card.className = 'b-card';
+    card.innerHTML = `<span class="tc" style="background:var(--${c.color}-text);"></span>` +
+      `<span class="t">${PERIODS[c.start - 1].split('-')[0]}–${PERIODS[c.end - 1].split('-')[1]}</span>` +
+      `<span class="n">${c.name}</span><span class="l">${c.loc}</span>`;
+    list.appendChild(card);
+  });
+}
+
+/* 方案 C 状态：显示 bIdx 与 bIdx+1 */
+function renderC() {
+  const a = WEEK[bIdx], b = WEEK[bIdx + 1] || WEEK[bIdx];
+  document.getElementById('cDate').textContent = `${a.day} ${a.date} · ${b.day} ${b.date}`;
+  renderBWeekC();
+  const grid = document.getElementById('cGrid');
+  grid.innerHTML = '';
+  // 时间列
+  PERIODS.forEach((p, i) => { grid.innerHTML += `<div class="c-time" style="grid-row:${i + 1};">${p.split('-')[0]}</div>`; });
+  [a, b].forEach((d, di) => {
+    for (let p = 0; p < 12; p++) grid.innerHTML += `<div class="c-slot" style="grid-column:${di + 2};grid-row:${p + 1};"></div>`;
+    d.courses.forEach(c => {
+      grid.innerHTML += `<div class="c-course" style="grid-column:${di + 2};grid-row:${c.start} / ${c.end + 1};` +
+        `background:${c.color === 'course-1' ? 'var(--course-1-bg)' : 'var(--course-2-bg)'};border:1px solid var(--course-1-line);color:var(--course-1-text);">${c.name}</div>`;
+    });
+  });
+}
+function renderBWeekC() {
+  renderBStrip('cWeek', i => { bIdx = i; renderC(); });
+}
+function renderBStrip(id, onPick) {
+  const el = document.getElementById(id);
+  el.innerHTML = '';
+  WEEK.forEach((d, i) => {
+    const b = document.createElement('button');
+    b.className = 'b-day';
+    b.innerHTML = `<span>${d.day[1]}</span><b>${d.date.split('/')[1]}</b>`;
+    const active = i === bIdx || (bIdx + 1 < 7 && i === bIdx + 1);
+    if (active) b.classList.add('active');
+    b.addEventListener('click', () => onPick(i));
+    el.appendChild(b);
+  });
+}
+
+/* 方案 D：时间线 */
+let dIdx = 5;
+function renderD() {
+  document.getElementById('dDate').textContent = WEEK[dIdx].day + ' · ' + WEEK[dIdx].date;
+  const list = document.getElementById('dList');
+  const d = WEEK[dIdx];
+  if (!d.courses.length) {
+    list.innerHTML = `<div class="bempty" style="margin:8px 0;padding:36px 0;text-align:center;font-size:12px;color:var(--color-text-tertiary);border:1px dashed var(--color-border-strong);border-radius:10px;">今天没有排课</div>`;
+    return;
+  }
+  list.innerHTML = '';
+  d.courses.forEach(c => {
+    const item = document.createElement('div');
+    item.className = 'd-item';
+    item.innerHTML = `<div class="d-time"><b>${PERIODS[c.start - 1].split('-')[0]}</b><span>${PERIODS[c.end - 1].split('-')[1]}</span></div>` +
+      `<div class="d-line"><span class="d-dot"></span><span class="d-stick"></span></div>` +
+      `<div class="d-card"><div class="n">${c.name}</div><div class="l">${c.loc} · ${c.teacher}</div><div class="r">第 ${c.start}–${c.end} 节</div></div>`;
+    list.appendChild(item);
+  });
+}
+
+renderB(); renderC(); renderD();
+</script>
+</body>
+</html>
