@@ -36,13 +36,18 @@ function withDb(fn) {
 /** 记录一次访问（同一浏览器同一天由前端去重）并返回 { today, total } */
 export function recordVisit() {
   const day = todayStr()
-  return withDb((db) => {
-    db.prepare(
-      `INSERT INTO visit_day (day, visits) VALUES (?, 1)
-       ON CONFLICT(day) DO UPDATE SET visits = visits + 1`,
-    ).run(day)
-    return readCounts(db, day)
-  })
+  try {
+    return withDb((db) => {
+      db.prepare(
+        `INSERT INTO visit_day (day, visits) VALUES (?, 1)
+         ON CONFLICT(day) DO UPDATE SET visits = visits + 1`,
+      ).run(day)
+      return readCounts(db, day)
+    })
+  } catch {
+    // 统计库不可写不应影响公开页；页脚会退回不显示统计
+    return { today: 0, total: 0 }
+  }
 }
 
 /** 只读统计；统计库不存在时返回 0，不创建文件 */
